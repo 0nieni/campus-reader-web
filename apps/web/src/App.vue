@@ -166,13 +166,13 @@ function schoolChanged(event: Event) {
             ><span class="paper-stamp">保留原文<br />有据可查</span>
           </div>
         </div>
-        <p class="privacy-note">仅本人访问 · 原有资料保留</p>
+        <p class="privacy-note">{{ isNetlify ? '受邀使用 · 各账号数据独立' : '仅本人访问 · 原有资料保留' }}</p>
       </section>
 
       <section class="login-panel" aria-labelledby="login-title">
         <span class="panel-kicker">开始阅读</span>
         <h2 id="login-title">进入你的工作区</h2>
-        <p class="muted">使用已配置的本人账号登录。</p>
+        <p class="muted">{{ isNetlify ? '使用受邀邮箱登录你的独立工作区。' : '使用已配置的本人账号登录。' }}</p>
         <p v-if="regionNeedsVerification && !issues.length" class="account-help">暂按 SDK 默认上海地域连接，尚未验证。若环境连接失败，请核实地域与访问来源。</p>
         <div v-if="store.auth" class="setup-note" role="status">
           <strong>云账号已登录，工作区仍待验证</strong>
@@ -250,7 +250,7 @@ function schoolChanged(event: Event) {
           勾选公告后进入 AI 阅读。<br />关键词查找不消耗 AI 次数。
         </div>
         <div class="nav-bottom">
-          <span>仅本人访问</span
+          <span>{{ isNetlify ? '当前账号的独立工作区' : '仅本人访问' }}</span
           ><button class="text-button" @click="store.signOut()">
             退出登录
           </button>

@@ -36,7 +36,7 @@ for (const { path, content } of files) {
 await writeFile(join(output, '.gitignore'), 'node_modules/\ndist/\n/apps/cloud/functions/\n.env\n.env.*\n!.env.example\n*.local\n.netlify/\n.netlify-staging/\n.github-staging/\n.github-tools/\ncoverage/\ntest-results/\nplaywright-report/\n*.log\n', { flag: 'wx' })
 await writeFile(join(output, 'README.md'), `# 校园阅览室
 
-个人使用的校园公告、收藏与 AI 阅读网站。Vue 3 + TypeScript + Netlify Functions、Identity 和 Database。代码仓库保持私有，网站按本人邮箱白名单访问。
+面向受邀用户的校园公告、收藏与 AI 阅读网站。Vue 3 + TypeScript + Netlify Functions、Identity 和 Database。代码仓库保持私有，每个 Identity 账号使用独立的工作区。
 
 ## 本地检查
 
@@ -55,9 +55,9 @@ npm run build --workspace=@campus/web
 
 将此私有仓库连接到现有 Netlify 项目，保留根目录 netlify.toml。Base directory 和 Package directory 均留空：这是包含网页、服务端函数和迁移的一个完整站点，不单独选择 apps/web 作为站点项目目录。构建命令为 npm run build --workspace=@campus/web，发布目录为 apps/web/dist，函数目录为 netlify/functions。两份 SQL 迁移位于 netlify/database/migrations，由平台在部署生命周期应用，不在网页或函数请求中执行建表。
 
-服务端环境变量：NETLIFY_OWNER_EMAIL（本人邮箱）、AI_CHAT_API_KEY（DeepSeek Key）；可选 AI_CHAT_BASE_URL、AI_CHAT_MODEL、AI_DAILY_LIMIT、AI_PLATFORM_DAILY_CALLS、AI_PLATFORM_DAILY_TOKENS。全部通过 Netlify 环境变量配置，不能加入 VITE_ 变量或提交到 Git。
+服务端环境变量：NETLIFY_OWNER_EMAIL（保留初始账号数据的邮箱，不是成员白名单）、AI_CHAT_API_KEY（DeepSeek Key）；可选 AI_CHAT_BASE_URL、AI_CHAT_MODEL、AI_DAILY_LIMIT、AI_PLATFORM_DAILY_CALLS、AI_PLATFORM_DAILY_TOKENS。全部通过 Netlify 环境变量配置，不能加入 VITE_ 变量或提交到 Git。
 
-Identity 需要启用并设为 Invite only。先验证预览分支迁移和真实数据，再发布主站；仓库上传成功不等于网站或数据库已上线。当前手工 CLI 预览缺少迁移构建步骤，Git 云端构建是否解决仍需实际验证。
+Identity 需要启用并保持 Invite only，由管理员在控制台邀请成员。正式站点需允许访问登录页，预览可继续私有。每个成员按可信 Identity UID 隔离学校偏好、收藏、私人资料、AI 任务及每天五次额度；原始账号继续使用现有数据。DeepSeek 账单和平台总调用预算由站点共同承担。不要为新增成员修改 NETLIFY_OWNER_EMAIL，否则会改变原工作区归属。
 
 AI 默认每日 5 次、北京时间零点重置。任务正文满 24 小时拒读、访问时清理，每天北京时间 02:17 定时兜底清理，无人访问时不保证第 24 小时准点物理删除。
 
