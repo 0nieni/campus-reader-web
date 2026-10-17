@@ -7,6 +7,8 @@ import { digest, readingPackage, verifyReferences } from "../src/reading-package
 import { validateConnection, publicAddress } from "../src/model-provider";
 import { fixtureDb, actor, ownerConfig, identity } from "./feature-fixture";
 import type { ReadingTask } from "@campus/contracts";
+import { READING_GUIDE } from '../src/reading-guide';
+import { BATCH_READING_GUIDE, BATCH_OUTPUT_TOKENS, FINAL_OUTPUT_TOKENS } from '../src/reading-batch-guide';
 
 process.env.AI_CHAT_BASE_URL = "https://api.deepseek.com";
 process.env.AI_CHAT_API_KEY = "test-server-key-never-real";
@@ -31,7 +33,7 @@ test('official diagnosis requires the owner and does not reserve quota, create t
 });
 
 test('definite model errors preserve safe reasons on refresh and release holds without replaying', async () => {
-  for (const code of ['KEY_REJECTED', 'BALANCE_REQUIRED', 'MODEL_OR_CONTEXT_INVALID', 'MODEL_UNSUPPORTED', 'OUTPUT_TRUNCATED', 'MODEL_FORMAT_INVALID']) {
+  for (const code of ['KEY_REJECTED', 'BALANCE_REQUIRED', 'MODEL_OR_CONTEXT_INVALID', 'MODEL_UNSUPPORTED', 'OUTPUT_TRUNCATED', 'PROVIDER_CONTENT_FILTER', 'PROVIDER_INTERRUPTED', 'MODEL_FORMAT_INVALID']) {
     const f = fixtureDb(); let calls = 0;
     const ai = aiService(f.db, f.repo, async () => { calls++; throw Object.assign(new Error('provider-body-fixture-private-key'), { code }); });
     const task = await ai.handle('ai.start', start(), identity) as ReadingTask;
@@ -45,6 +47,26 @@ test('definite model errors preserve safe reasons on refresh and release holds w
     const q = (await ai.handle('ai.status', {}, identity) as any).quota;
     assert.deepEqual([q.used, q.held, q.remaining], [0, 0, 5]);
   }
+});
+
+test('intermediate calls use compact notes, final calls retain the full guide, and platform estimates cover each output cap', async () => {
+  const f = fixtureDb(); const sent: Array<{ guide: string; body: string; tokens: number }> = [];
+  const ai = aiService(f.db, f.repo, async (_connection, guide, body, tokens) => { sent.push({ guide, body, tokens: tokens! }); return output; });
+  const task = await ai.handle('ai.start', start('request_compact_notes_v2'), identity) as ReadingTask;
+  const note = await ai.handle('ai.step', { taskId: task.id, step: 0 }, identity) as ReadingTask;
+  assert.equal(note.state, 'ready'); assert.equal(note.step, 1);
+  assert.equal(sent[0]!.guide, BATCH_READING_GUIDE); assert.notEqual(sent[0]!.guide, READING_GUIDE);
+  assert.match(sent[0]!.body, /350 字/); assert.doesNotMatch(sent[0]!.guide, /## 一、资料范围/);
+  assert.match(sent[0]!.guide, /不执行/); assert.match(sent[0]!.guide, /不补年份/);
+  assert.equal(sent[0]!.tokens, BATCH_OUTPUT_TOKENS);
+  const final = await ai.handle('ai.step', { taskId: task.id, step: 1 }, identity) as ReadingTask;
+  assert.equal(final.state, 'complete'); assert.equal(sent[1]!.guide, READING_GUIDE);
+  assert.equal(sent[1]!.tokens, FINAL_OUTPUT_TOKENS);
+  const budget = [...f.rows('web_ai_accounts').values()].find(row => row.attempts !== undefined)!;
+  assert.equal(budget.attempts, 2);
+  assert.equal(budget.estimatedTokens, sent.reduce((sum, call) => sum + call.guide.length + call.body.length + call.tokens, 0));
+  const quota = (await ai.handle('ai.status', {}, identity) as any).quota;
+  assert.deepEqual([quota.used, quota.held], [1, 0]);
 });
 
 test("bookmarks are owner-scoped, idempotent, concurrent-safe and retain unrelated profile fields", async () => {

@@ -6,7 +6,9 @@ export const failureMessages: Record<string, string> = {
   PROVIDER_LIMIT: '服务商限频或并发额度已满，请稍后再手动创建任务。',
   MODEL_OR_CONTEXT_INVALID: '服务商拒绝了模型或请求参数，请核对模型 ID、接口地址及资料长度。',
   MODEL_UNSUPPORTED: '服务商找不到配置的模型或接口，请核对 AI_CHAT_MODEL 和 AI_CHAT_BASE_URL。',
-  OUTPUT_TRUNCATED: '模型本批输出未完整结束，可能达到长度限制；本任务已停止，请减少资料或关注点后重新创建。',
+  OUTPUT_TRUNCATED: '模型输出达到长度上限，未完整结束；本任务已停止，未自动续写或重发。',
+  PROVIDER_CONTENT_FILTER: '服务商内容过滤终止了本批生成，请检查所选资料内容；本任务未自动重试。',
+  PROVIDER_INTERRUPTED: '服务商资源不足或主动中断了本批生成；本任务已停止，未自动重发。',
   MODEL_FORMAT_INVALID: '服务商未返回有效的完整文本，请检查模型是否支持 Chat Completions。',
   RESPONSE_TOO_LARGE: '模型响应超过读取上限，本任务已停止，请缩小资料范围。',
 };

@@ -6,6 +6,30 @@ import { EventEmitter } from 'node:events'
 import { syncBuiltinESMExports } from 'node:module'
 import { userCompletion, type Connection } from '../src/model-provider'
 
+test('only a length finish is truncation; filtered, interrupted and malformed responses stay distinct and are never accepted as partial results', async () => {
+  let reason: string | null = 'length'
+  mock.method(dns, 'lookup', async () => [{ address: '8.8.8.8', family: 4 }])
+  mock.method(https, 'request', (_target: URL, _options: any, onResponse: (response: any) => void) => {
+    const request = new EventEmitter() as any
+    request.destroy = () => {}
+    request.end = () => queueMicrotask(() => {
+      const response = new EventEmitter() as any
+      response.statusCode = 200
+      onResponse(response)
+      response.emit('data', Buffer.from(JSON.stringify({ choices: [{ finish_reason: reason, message: { content: 'partial text must not become a result' } }] })))
+      response.emit('end')
+    })
+    return request
+  })
+  syncBuiltinESMExports()
+  try {
+    for (const [finishReason, code] of [['length', 'OUTPUT_TRUNCATED'], ['content_filter', 'PROVIDER_CONTENT_FILTER'], ['insufficient_system_resource', 'PROVIDER_INTERRUPTED'], ['aborted', 'PROVIDER_INTERRUPTED'], ['tool_calls', 'MODEL_FORMAT_INVALID'], [null, 'MODEL_FORMAT_INVALID']] as const) {
+      reason = finishReason
+      await assert.rejects(userCompletion({ provider: 'deepseek', model: 'fixture-model', apiKey: 'fixture-key' }, 'guide', 'body'), { code })
+    }
+  } finally { mock.restoreAll(); syncBuiltinESMExports() }
+})
+
 test('DeepSeek requests final text without thinking; other compatible endpoints omit its extension', async () => {
   const bodies: Record<string, any>[] = []
   mock.method(dns, 'lookup', async () => [{ address: '8.8.8.8', family: 4 }])

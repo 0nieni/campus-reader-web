@@ -8,7 +8,7 @@ type Environment = (name: string) => string | undefined
 type Options = { env: Environment; fetch?: typeof fetch; complete?: typeof userCompletion; now?: () => number }
 type Status = GatewayActions['ai.status']['output']
 type BrokerValue = ReadingTask | RelayBatch | Status
-const providerErrors = new Set(['KEY_REJECTED', 'BALANCE_REQUIRED', 'PROVIDER_LIMIT', 'MODEL_OR_CONTEXT_INVALID', 'MODEL_UNSUPPORTED', 'OUTPUT_TRUNCATED', 'MODEL_FORMAT_INVALID', 'CONTEXT_TOO_LONG', 'RESPONSE_TOO_LARGE'])
+const providerErrors = new Set(['KEY_REJECTED', 'BALANCE_REQUIRED', 'PROVIDER_LIMIT', 'MODEL_OR_CONTEXT_INVALID', 'MODEL_UNSUPPORTED', 'OUTPUT_TRUNCATED', 'PROVIDER_CONTENT_FILTER', 'PROVIDER_INTERRUPTED', 'MODEL_FORMAT_INVALID', 'CONTEXT_TOO_LONG', 'RESPONSE_TOO_LARGE'])
 async function boundedText(body: ReadableStream<Uint8Array> | null, limit: number): Promise<string> {
   if (!body) return ''
   const reader = body.getReader(), chunks: Uint8Array[] = []; let length = 0

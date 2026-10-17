@@ -59,7 +59,10 @@ export async function userCompletion(c: Connection, guide: string, content: stri
         try {
           const value = JSON.parse(Buffer.concat(chunks).toString('utf8'))
           const choice = value.choices?.[0]; const text = choice?.message?.content
-          if (choice?.finish_reason !== 'stop') return finish(error('OUTPUT_TRUNCATED', '模型本批未完整结束；请缩小资料范围或检查模型配置。'))
+          if (choice?.finish_reason === 'length') return finish(error('OUTPUT_TRUNCATED', '模型输出达到长度上限，未完整结束。'))
+          if (choice?.finish_reason === 'content_filter') return finish(error('PROVIDER_CONTENT_FILTER', '服务商内容过滤终止了本批生成。'))
+          if (['insufficient_system_resource', 'aborted'].includes(choice?.finish_reason)) return finish(error('PROVIDER_INTERRUPTED', '服务商中断了本批生成。'))
+          if (choice?.finish_reason !== 'stop') return finish(error('MODEL_FORMAT_INVALID', '模型返回了不支持的结束状态或工具调用，未作为阅读结果接收。'))
           if (typeof text !== 'string' || !text.trim()) return finish(error('MODEL_FORMAT_INVALID', '服务商未返回可阅读的文本，请检查模型是否支持 Chat Completions。'))
           finish(undefined, text.trim())
         } catch { finish(error('MODEL_FORMAT_INVALID', '服务商返回格式无法解析。')) }
