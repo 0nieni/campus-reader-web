@@ -4,7 +4,7 @@ export type Row = Record<string, any>;
 export interface SqlExecutor { query(sql: string, values?: any[]): Promise<{ rows: Row[]; rowCount?: number | null }> }
 export interface SqlClient extends SqlExecutor { release(): void }
 export interface SqlPool extends SqlExecutor { connect(): Promise<SqlClient> }
-const collections = new Set(['schools', 'sources', 'items', 'user_profiles', 'web_ai_tasks', 'web_ai_accounts']);
+const collections = new Set(['schools', 'sources', 'items', 'user_profiles', 'web_ai_tasks', 'web_ai_accounts', 'school_sync', 'school_requests']);
 const operator = Symbol('campus-query');
 type Condition = { [operator]: string; value?: unknown };
 const condition = (op: string, value?: unknown): Condition => ({ [operator]: op, value });

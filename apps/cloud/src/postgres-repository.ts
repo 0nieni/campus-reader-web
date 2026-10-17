@@ -9,13 +9,13 @@ export function postgresRepository(pool: SqlPool): Repository {
     const { rows } = await pool.query('SELECT body FROM campus_documents WHERE collection=$1 AND id=$2', [collection, id]);
     return rows[0] ? { ...rows[0].body, _id: id } : null;
   };
-  const schoolOf = (row: Record<string, any>): School => ({ id: row._id, name: String(row.name || row._id), status: ['ready', 'candidate'].includes(row.status) ? row.status : 'not_connected' });
+  const schoolOf = (row: Record<string, any>): School => ({ id: row._id, name: String(row.name || row._id), status: ['ready', 'candidate'].includes(row.status) ? row.status : 'not_connected', ...(typeof row.announcementUrl === 'string' ? {announcementUrl:row.announcementUrl} : {}), ...(typeof row.homepage === 'string' ? {homepage:row.homepage} : {}), ...(Array.isArray(row.tags) ? {tags:row.tags} : {}) });
   return {
     async selectedSchool(owner) { const row = await one('user_profiles', owner); return typeof row?.selectedSchoolId === 'string' ? row.selectedSchoolId : null; },
     async school(id) { const row = await one('schools', id); return row ? schoolOf(row) : id === bjtu.id ? bjtu : null; },
     async schools(offset, limit) {
       const { rows } = await pool.query("SELECT id,body FROM campus_documents WHERE collection='schools' AND id<>'bjtu' ORDER BY id LIMIT $1 OFFSET $2", [offset === 0 ? limit - 1 : limit, Math.max(0, offset - 1)]);
-      return [...(offset === 0 ? [bjtu] : []), ...rows.map(row => schoolOf({ ...row.body, _id: row.id }))];
+      return [...(offset === 0 ? [await this.school('bjtu') || bjtu] : []), ...rows.map(row => schoolOf({ ...row.body, _id: row.id }))];
     },
     async selectSchool(owner, schoolId) {
       await pool.query("INSERT INTO campus_documents(collection,id,body) VALUES('user_profiles',$1,$2::jsonb) ON CONFLICT(collection,id) DO UPDATE SET body=campus_documents.body || EXCLUDED.body", [owner, JSON.stringify({ _id: owner, selectedSchoolId: schoolId, updatedAt: new Date().toISOString() })]);

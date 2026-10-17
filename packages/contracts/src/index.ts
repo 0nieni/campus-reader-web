@@ -7,12 +7,17 @@ export interface School {
   id: string;
   name: string;
   status: "ready" | "candidate" | "not_connected";
+  announcementUrl?: string;
+  homepage?: string;
+  tags?: string[];
 }
+export interface SchoolSync { state: 'ready' | 'checking' | 'unavailable'; count: number; checkedAt: string | null; message: string }
+export interface SchoolRequest { id: string; state: 'pending' | 'submitted' | 'unknown'; message: string }
 export interface WorkspaceSession {
   identity: AuthSession;
   school: School | null;
   legacyLinked: boolean;
-  capabilities: { reading: true; ai: boolean; operations: false };
+  capabilities: { reading: true; ai: boolean; operations: false; schoolDirectory?: boolean };
 }
 export interface Notice {
   id: string;
@@ -60,6 +65,8 @@ export interface GatewayActions {
     output: { schools: School[]; nextCursor: string | null };
   };
   "school.select": { input: { schoolId: string }; output: WorkspaceSession };
+  "school.refresh": { input: { schoolId: string }; output: SchoolSync };
+  "school.request": { input: { schoolName: string }; output: SchoolRequest };
   "feed.list": {
     input: FeedFilters & { schoolId: string; cursor?: string };
     output: NoticePage;

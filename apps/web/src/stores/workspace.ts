@@ -7,6 +7,7 @@ import type {
   School,
   WorkspaceSession,
   FeedFilters,
+  SchoolSync,
 } from "@campus/contracts";
 import type { Transport } from "../lib/transport";
 import { ClientError, safeError } from "../lib/errors";
@@ -18,6 +19,7 @@ export function workspaceStore(transport: Transport) {
     const workspace = ref<WorkspaceSession | null>(null);
     const schools = ref<School[]>([]);
     const schoolCursor = ref<string | null>(null);
+    const schoolSync = ref<SchoolSync | null>(null);
     const items = ref<Notice[]>([]);
     const detail = ref<NoticeDetail | null>(null);
     const nextCursor = ref<string | null>(null);
@@ -34,6 +36,7 @@ export function workspaceStore(transport: Transport) {
       workspace.value = null;
       schools.value = [];
       schoolCursor.value = null;
+      schoolSync.value = null;
       items.value = [];
       detail.value = null;
       nextCursor.value = null;
@@ -86,6 +89,21 @@ export function workspaceStore(transport: Transport) {
       schools.value = more ? [...schools.value, ...page.schools] : page.schools;
       schoolCursor.value = page.nextCursor;
     }
+    async function refreshSchool() {
+      const schoolId = workspace.value?.school?.id, ticket = epoch;
+      if (!schoolId || loading.value) return;
+      if (workspace.value?.capabilities.schoolDirectory) {
+        loading.value = true;
+        try {
+          const result = await transport.call('school.refresh',{schoolId});
+          if (ticket !== epoch) return;
+          schoolSync.value = result;
+          if (result.state === 'ready' && workspace.value?.school) workspace.value.school.status = 'ready';
+        } catch (caught) { if (ticket === epoch) schoolSync.value = {state:'unavailable',count:0,checkedAt:null,message:safeError(caught)}; }
+        finally { if (ticket === epoch) loading.value = false; }
+      }
+      if (ticket === epoch) await loadFeed();
+    }
     async function applyFilters(value: FeedFilters) {
       epoch++;
       detailEpoch++;
@@ -111,12 +129,15 @@ export function workspaceStore(transport: Transport) {
         if (ticket !== epoch) return;
         workspace.value = session;
         await loadSchools();
+        // The complete supplied directory must be visible before offering a
+        // missing-school application. Bounded pages; no unbounded catalog loop.
+        for (let page = 0; ticket === epoch && schoolCursor.value && page < 9; page++) await loadSchools(true);
       } catch (caught) {
         if (ticket === epoch) failure(caught);
       } finally {
         if (ticket === epoch) loading.value = false;
       }
-      if (ticket === epoch && workspace.value?.school) await loadFeed();
+      if (ticket === epoch && workspace.value?.school) await refreshSchool();
     }
     async function signIn(username: string, password: string) {
       const ticket = ++epoch;
@@ -154,6 +175,7 @@ export function workspaceStore(transport: Transport) {
       items.value = [];
       detail.value = null;
       nextCursor.value = null;
+      schoolSync.value = null;
       try {
         const session = await transport.call("school.select", { schoolId });
         if (ticket !== epoch) return;
@@ -164,7 +186,7 @@ export function workspaceStore(transport: Transport) {
         if (ticket === epoch) loading.value = false;
       }
       if (ticket === epoch && workspace.value?.school?.id === schoolId)
-        await loadFeed();
+        await refreshSchool();
     }
     async function openNotice(itemId: string) {
       const schoolId = workspace.value?.school?.id;
@@ -206,6 +228,7 @@ export function workspaceStore(transport: Transport) {
       workspace,
       schools,
       schoolCursor,
+      schoolSync,
       items,
       detail,
       nextCursor,
@@ -219,6 +242,7 @@ export function workspaceStore(transport: Transport) {
       signOut,
       selectSchool,
       loadFeed,
+      refreshSchool,
       applyFilters,
       loadSchools,
       openNotice,

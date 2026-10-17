@@ -61,6 +61,7 @@ export function createSiteApi(options: { auth: Pick<SiteAuth, 'user'>; ownerEmai
       if (request.method !== 'POST') return response({ ok: false, code: 'ACTION_NOT_ALLOWED', message: '请使用 POST 请求。' }, 405);
       sameOrigin(request);
       const current = await options.auth.user();
+      if (!current) throw new AppError('UNAUTHENTICATED','请先使用受邀账号登录。');
       const user = requireSiteUser(current, options.ownerEmail());
       const body = await boundedJson(request);
       if (body.action === 'ai.relay') throw new AppError('FORBIDDEN', '本站不提供外部 AI 中继操作。');

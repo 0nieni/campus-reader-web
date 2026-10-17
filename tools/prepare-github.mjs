@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 // The workspace also contains unrelated research. Publish only reviewed app sources.
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const output = join(root, '.github-staging', new Date().toISOString().replace(/[^0-9]/g, ''))
-const allowed = ['package.json', 'package-lock.json', 'netlify.toml', 'apps/web', 'apps/cloud', 'packages/contracts', 'netlify/functions', 'netlify/database/migrations', 'tools/build-netlify.mjs', 'tools/prepare-github.mjs']
+const allowed = ['package.json', 'package-lock.json', 'netlify.toml', 'apps/web', 'apps/cloud', 'packages/contracts', 'netlify/functions', 'netlify/database/migrations', 'tools/build-netlify.mjs', 'tools/prepare-github.mjs', 'tools/extract-school-directory.py']
 const excludedDirectories = new Set(['node_modules', 'dist', '.git', '.netlify', 'coverage', 'test-results', 'playwright-report', 'functions'])
 const files = []
 async function collect(path) {
@@ -53,7 +53,7 @@ npm run build --workspace=@campus/web
 
 ## Netlify 构建
 
-将此私有仓库连接到现有 Netlify 项目，保留根目录 netlify.toml。Base directory 和 Package directory 均留空：这是包含网页、服务端函数和迁移的一个完整站点，不单独选择 apps/web 作为站点项目目录。构建命令为 npm run build --workspace=@campus/web，发布目录为 apps/web/dist，函数目录为 netlify/functions。两份 SQL 迁移位于 netlify/database/migrations，由平台在部署生命周期应用，不在网页或函数请求中执行建表。
+将此私有仓库连接到现有 Netlify 项目，保留根目录 netlify.toml。Base directory 和 Package directory 均留空：这是包含网页、服务端函数和迁移的一个完整站点，不单独选择 apps/web 作为站点项目目录。构建命令为 npm run build --workspace=@campus/web，发布目录为 apps/web/dist，函数目录为 netlify/functions。SQL 迁移位于 netlify/database/migrations，由平台在部署生命周期应用，不在网页或函数请求中执行建表。
 
 服务端环境变量：NETLIFY_OWNER_EMAIL（保留初始账号数据的邮箱，不是成员白名单）、AI_CHAT_API_KEY（DeepSeek Key）；可选 AI_CHAT_BASE_URL、AI_CHAT_MODEL、AI_DAILY_LIMIT、AI_PLATFORM_DAILY_CALLS、AI_PLATFORM_DAILY_TOKENS。全部通过 Netlify 环境变量配置，不能加入 VITE_ 变量或提交到 Git。
 
@@ -61,7 +61,9 @@ Identity 需要启用并保持 Invite only，由管理员在控制台邀请成�
 
 AI 默认每日 5 次、北京时间零点重置。任务正文满 24 小时拒读、访问时清理，每天北京时间 02:17 定时兜底清理，无人访问时不保证第 24 小时准点物理删除。
 
-两份迁移包含新站表结构与 5 个公开来源、27 条公告的有限导入，不含私人邮件、旧 AI 任务或账号密码。原 CloudBase 适配代码保留作兼容参考，Netlify 业务入口使用独立 SQL 存储；自动采集、邮件、提醒等后台尚未迁移。
+迁移包含新站表结构、原 5 个公开来源/27 条公告，以及用户提供的 115 所高校目录，不含私人邮件、旧 AI 任务或账号密码。登录后可搜索选校，选校和刷新时按需读取该校公开公告、缓存一小时；正文按需读取，不自动遍历所有学校。校园网、登录入口或页面结构未适配时明确提示，保留原站链接和已有公告，不绕过访问限制。原 CloudBase 适配代码保留作兼容参考，Netlify 业务入口使用独立 SQL 存储。
+
+学校添加申请：在 Netlify Forms 开启 Form detection，部署后应识别 school-add-request。再在 Forms > Submission notifications 添加该表单的 Email notification，接收邮箱 ninie6159@gmail.com。服务端从可信会话取邮箱、校验校名，每账号每天最多 3 所，同日同名防重发，通知状态未知不自动重投。正式站点才转发表单通知；本地/预览不发送。查看 Spam 栏核对误判，不关闭反垃圾。公告抓取和申请功能分别消耗正常函数/数据库/表单资源，不产生模型调用。
 
 DeepSeek API 单独计费；Netlify Free 的计算、流量和部署使用共享额度，不承诺无限免费。
 `, { flag: 'wx' })

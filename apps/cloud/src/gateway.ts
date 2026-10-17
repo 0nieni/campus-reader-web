@@ -19,6 +19,8 @@ const fields: Record<string, string[]> = {
   "session.get": [],
   "school.list": ["cursor"],
   "school.select": ["schoolId"],
+  "school.refresh": ["schoolId"],
+  "school.request": ["schoolName"],
   "feed.list": ["schoolId", "cursor", "keyword", "categories", "period"],
   "feed.detail": ["schoolId", "itemId"],
   "favorites.list": ["schoolId", "cursor"],
@@ -113,13 +115,14 @@ export function isRetained(row: ItemRow, since: string): boolean {
 async function session(
   identity: IdentityContext,
   repo: Repository,
+  directory = false,
 ): Promise<WorkspaceSession> {
   const id = await repo.selectedSchool(identity.dataOwnerId);
   return {
     identity: { uid: identity.uid, username: null },
     school: id ? await repo.school(id) : null,
     legacyLinked: identity.legacyLinked,
-    capabilities: { reading: true, ai: true, operations: false },
+    capabilities: { reading: true, ai: true, operations: false, ...(directory ? { schoolDirectory:true } : {}) },
   };
 }
 
@@ -127,7 +130,7 @@ export function createGateway(
   repo: Repository,
   config: OwnerConfig,
   now: () => number = Date.now,
-  features?: { bookmarks?: { handle(action: string, input: Record<string, unknown>, identity: IdentityContext): Promise<unknown>; has(ownerId: string, schoolId: string, itemId: string): Promise<boolean> }; ai?: { handle(action: string, input: Record<string, unknown>, identity: IdentityContext): Promise<unknown> } },
+  features?: { bookmarks?: { handle(action: string, input: Record<string, unknown>, identity: IdentityContext): Promise<unknown>; has(ownerId: string, schoolId: string, itemId: string): Promise<boolean> }; ai?: { handle(action: string, input: Record<string, unknown>, identity: IdentityContext): Promise<unknown> }; directory?: { refresh(schoolId:string):Promise<unknown>; request(name:unknown,identity:IdentityContext):Promise<unknown> } },
 ) {
   return async (
     event: unknown,
@@ -148,7 +151,11 @@ export function createGateway(
         return { ok: true, data: await features.ai.handle(action, input, identity) };
       }
       if (action === "session.get")
-        return { ok: true, data: await session(identity, repo) };
+        return { ok: true, data: await session(identity, repo,Boolean(features?.directory)) };
+      if (action === 'school.request') {
+        if (!features?.directory) reject('SERVICE_UNAVAILABLE','学校申请服务尚未接通。');
+        return { ok:true,data:await features.directory.request(input.schoolName,identity) };
+      }
       if (action === "school.list") {
         const offset = offsetOf(input.cursor);
         const schools = await repo.schools(offset, 51);
@@ -165,10 +172,14 @@ export function createGateway(
       if (!school) reject("SCHOOL_NOT_FOUND", "学校不在目录中，请重新选择。");
       if (action === "school.select") {
         await repo.selectSchool(identity.dataOwnerId, schoolId);
-        return { ok: true, data: await session(identity, repo) };
+        return { ok: true, data: await session(identity, repo,Boolean(features?.directory)) };
       }
       if ((await repo.selectedSchool(identity.dataOwnerId)) !== schoolId)
         reject("STALE_SCOPE", "当前学校已变化，请刷新后重试。");
+      if (action === 'school.refresh') {
+        if (!features?.directory) reject('SERVICE_UNAVAILABLE','学校公开公告读取服务尚未接通。');
+        return {ok:true,data:await features.directory.refresh(schoolId)};
+      }
       const scope = await repo.scope(schoolId, identity.dataOwnerId);
       const since = filterSince(filters, now());
       if (action === "feed.list") {
@@ -196,7 +207,7 @@ export function createGateway(
           },
         };
       }
-      const row = await repo.item(text(input, "itemId"));
+      let row = await repo.item(text(input, "itemId"));
       if (
         !row ||
         !itemVisible(row, scope) ||
@@ -204,11 +215,19 @@ export function createGateway(
         !isRetained(row, since)
       )
         reject("NOT_FOUND", "公告不存在或不在当前授权范围内。");
+      let materialNote = '';
+      if (repo.material) {
+        try { row = await repo.material(row); }
+        catch (error) {
+          if (!(error instanceof AppError) || !['NO_MATERIAL','SOURCE_UNAVAILABLE'].includes(error.code)) throw error;
+          materialNote = error.message;
+        }
+      }
       const detail: NoticeDetail = {
         ...toNotice(row),
         text: row.contentText || "",
         originalUrl: originalUrl(row),
-        attachmentNote: "本阶段未读取附件正文，请以公告原文和附件为准。",
+        attachmentNote: (materialNote ? materialNote + ' ' : '') + "本阶段未读取附件正文，请以公告原文和附件为准。",
         ...(features?.bookmarks ? { bookmarked: await features.bookmarks.has(identity.dataOwnerId, schoolId, row._id) } : {}),
       };
       return { ok: true, data: detail };

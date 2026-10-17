@@ -11,9 +11,11 @@ export const digest = (value: unknown) => createHash("sha256").update(JSON.strin
 export async function readingPackage(db: Database, repo: Repository, owner: string, schoolId: string, ids: unknown, forModel = true): Promise<ReadingPackage> {
   if (!Array.isArray(ids) || !ids.length || ids.length > 8) reject("VALIDATION_FAILED", "请明确选择 1～8 篇公告。");
   const unique = [...new Set(ids.map(identifier))];
+  const rows = await Promise.all(unique.map(id=>authorizedItem(repo,owner,schoolId,id)));
+  const materials = await Promise.all(rows.map(row=>repo.material ? repo.material(row) : row));
   const docs: ReadingDocument[] = [];
-  for (const itemId of unique) {
-    const row = await authorizedItem(repo, owner, schoolId, itemId);
+  for (let index = 0; index < unique.length; index++) {
+    const itemId = unique[index]!, row = materials[index]!;
     if (!row.contentText?.trim()) reject("NO_MATERIAL", "所选公告缺少正文，请取消选择。");
     if (forModel) {
       const sourceIds = [...new Set([row.sourceId, ...(row.sourceIds || [])].filter((id): id is string => Boolean(id)))];
