@@ -1,4 +1,6 @@
-import { noticeCategories, type FeedFilters } from "@campus/contracts";
+// Netlify v2 preserves package imports at runtime. Bundle this workspace's
+// TypeScript source by path so the function needs no workspace symlink.
+import { noticeCategories, type FeedFilters } from "../../../packages/contracts/src/index";
 import { reject } from "./errors";
 import type { ItemRow } from "./repository";
 
