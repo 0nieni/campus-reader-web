@@ -2,6 +2,7 @@ import https from 'https'
 import { lookup } from 'dns/promises'
 import { isIP } from 'net'
 import { reject as problem } from './errors'
+import { providerHttpCode } from './model-diagnostics'
 
 export const PROVIDERS = {
   deepseek: { endpoint: 'https://api.deepseek.com/chat/completions', name: 'DeepSeek' },
@@ -47,7 +48,7 @@ export async function userCompletion(c: Connection, guide: string, content: stri
       // Never follow a Location header, including redirects to another official host.
       if (status < 200 || status >= 300) {
         response.resume()
-        const code = status === 401 || status === 403 ? 'KEY_REJECTED' : status === 402 ? 'BALANCE_REQUIRED' : status === 429 ? 'PROVIDER_LIMIT' : status === 400 ? 'MODEL_OR_CONTEXT_INVALID' : status === 404 ? 'MODEL_UNSUPPORTED' : 'PROVIDER_ERROR'
+        const code = providerHttpCode(status)
         finish(error(code, `服务商返回 HTTP ${status}。请检查 Key、模型、余额、上下文长度或限频；不会改用官方 AI。`)); return
       }
       const chunks: Buffer[] = []; let size = 0

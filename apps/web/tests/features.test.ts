@@ -18,6 +18,21 @@ function transport() {
   return fake;
 }
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
+it('official diagnosis is explicit, shows a safe reason and never starts or repeats a model task', async () => {
+  const fake = transport();
+  vi.mocked(fake.call).mockImplementation(async action => {
+    if (action === 'ai.status') return { quota: {}, officialConfigured: true } as never;
+    if (action === 'ai.list') return { tasks: [] } as never;
+    if (action === 'ai.diagnose') return { code: 'BALANCE_REQUIRED', message: 'DeepSeek API 余额不足。' } as never;
+    throw new Error('unexpected model call');
+  });
+  const wrapper = mount(ReadingPanel, { props: { transport: fake, schoolId: 'bjtu', selection: [notice] } });
+  await flushPromises(); expect(fake.call).not.toHaveBeenCalledWith('ai.diagnose', {});
+  await wrapper.findAll('button').find(button => button.text() === '检查官方 AI 连接（不调用模型）')!.trigger('click');
+  await flushPromises(); expect(wrapper.text()).toContain('DeepSeek API 余额不足。'); expect(wrapper.text()).toContain('BALANCE_REQUIRED');
+  expect(vi.mocked(fake.call).mock.calls.some(([action]) => ['ai.start', 'ai.test', 'ai.step'].includes(action))).toBe(false);
+  wrapper.unmount();
+});
 it("Markdown renders readable structure without executable HTML, remote images or unsafe links", () => {
   const html = renderMarkdown('# 摘要\n\n<script>alert(1)</script>\n\n![spy](https://evil.example/a)\n\n[危险](javascript:alert(1))\n\n[来源](https://www.bjtu.edu.cn/a)\n\n[凭据](https://u:secret@example.com/a)');
   const host = document.createElement('div'); host.innerHTML = html;
