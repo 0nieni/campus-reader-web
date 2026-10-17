@@ -15,6 +15,10 @@ test("category matching uses any selected category, including multi-category not
   assert.equal(matchesFilters({ _id: "x", categories: ["school", "competition"] }, { categories: ["activity", "competition"] }), true);
   assert.equal(matchesFilters({ _id: "x", category: "activity" }, { categories: ["activity"] }), true);
   assert.equal(matchesFilters({ _id: "x", category: "mail" }, { categories: ["competition"] }), false);
+  assert.equal(matchesFilters({ _id: 'x',categories:['school'] }, {categories:[]}),false);
+  assert.deepEqual(filtersOf({categories:[]}),{categories:[]});
+  assert.equal(matchesFilters({_id:'x',categories:['school'],personalCategories:['competition']},{categories:['school']}),false);
+  assert.equal(matchesFilters({_id:'x',categories:['school'],personalCategories:['competition']},{categories:['competition']}),true);
 });
 test("filter validation rejects malformed and unbounded inputs before querying", () => {
   for (const input of [{ keyword: {} }, { keyword: "a".repeat(101) }, { keyword: "a\nb" }, { categories: "mail" }, { categories: ["private"] }, { period: {} }, { period: ["7d"] }, { period: "1y" }])

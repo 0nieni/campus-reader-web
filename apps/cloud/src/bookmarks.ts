@@ -46,7 +46,7 @@ export function bookmarksService(db: Database, repo: Repository) {
       const scopes = new Map(await Promise.all(schoolIds.filter(id => schools.get(id)).map(async id => [id, await repo.scope(id, owner)] as const)));
       const items: Favorite[] = await Promise.all(page.map(async entry => {
         const row = await repo.item(entry.itemId), scope = scopes.get(entry.schoolId);
-        const notice = row && scope && row.status === "published" && itemVisible(row, scope) && isRetained(row, new Date(Date.now() - 365 * 86400000).toISOString()) ? toNotice(row) : null;
+        const notice = row && scope && row.status === "published" && itemVisible(row, scope) && isRetained(row, new Date(Date.now() - 365 * 86400000).toISOString()) ? toNotice(repo.personalize ? await repo.personalize(row,owner) : row) : null;
         return { ...entry, schoolName: schools.get(entry.schoolId)?.name || "学校已移除", notice };
       }));
       return { items, nextCursor: rows.length > offset + 20 ? String(offset + 20) : null };

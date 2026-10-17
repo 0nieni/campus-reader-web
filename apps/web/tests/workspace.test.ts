@@ -12,6 +12,7 @@ import { workspaceStore } from "../src/stores/workspace";
 import { ClientError } from "../src/lib/errors";
 import { safeOriginal, displayTime } from "../src/lib/presentation";
 import App from "../src/App.vue";
+import { noticeCategories } from '@campus/contracts';
 
 const auth: AuthSession = { uid: "test-owner", username: null };
 const session: WorkspaceSession = {
@@ -81,7 +82,7 @@ describe("session and data race boundaries", () => {
     await store.loadFeed(true);
     expect(fake.call).toHaveBeenLastCalledWith('feed.list', { schoolId: 'bjtu', cursor: '20', keyword: 'C++', categories: ['competition'], period: '30d' });
     store.clear();
-    expect(store.filters).toEqual({});
+    expect(store.filters).toEqual({categories:[...noticeCategories]});
   });
   it('an empty auth event before login does not show an expiration warning', () => {
     const { fake, emit } = fixture(); const store = workspaceStore(fake)(); store.watchSession()
@@ -100,7 +101,7 @@ describe("session and data race boundaries", () => {
     const store = workspaceStore(fake)();
     await store.connect();
     expect(fake.call).toHaveBeenCalledWith("session.get", {});
-    expect(fake.call).toHaveBeenCalledWith("feed.list", { schoolId: "bjtu" });
+    expect(fake.call).toHaveBeenCalledWith("feed.list", { schoolId: "bjtu",categories:[...noticeCategories] });
     expect(store.items[0].id).toBe("one");
   });
   it("never turns cloud failure into mock data or a success-empty response", async () => {

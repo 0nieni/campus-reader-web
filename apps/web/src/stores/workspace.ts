@@ -10,6 +10,7 @@ import type {
   SchoolSync,
 } from "@campus/contracts";
 import type { Transport } from "../lib/transport";
+import { noticeCategories } from '@campus/contracts';
 import { ClientError, safeError } from "../lib/errors";
 
 /** Dependency injection is for regression tests; the application only installs the real transport. */
@@ -23,7 +24,7 @@ export function workspaceStore(transport: Transport) {
     const items = ref<Notice[]>([]);
     const detail = ref<NoticeDetail | null>(null);
     const nextCursor = ref<string | null>(null);
-    const filters = ref<FeedFilters>({});
+    const filters = ref<FeedFilters>({categories:[...noticeCategories]});
     const error = ref("");
     const loading = ref(false);
     const detailLoading = ref(false);
@@ -40,7 +41,7 @@ export function workspaceStore(transport: Transport) {
       items.value = [];
       detail.value = null;
       nextCursor.value = null;
-      filters.value = {};
+      filters.value = {categories:[...noticeCategories]};
       loading.value = false;
       detailLoading.value = false;
     }
@@ -52,7 +53,7 @@ export function workspaceStore(transport: Transport) {
         clear();
       error.value = safeError(caught);
     }
-    async function loadFeed(more = false) {
+    async function loadFeed(more = false, preserveDetail = false) {
       const schoolId = workspace.value?.school?.id;
       if (!schoolId || loading.value) return;
       const ticket = epoch;
@@ -60,9 +61,9 @@ export function workspaceStore(transport: Transport) {
       error.value = "";
       if (!more) {
         items.value = [];
-        detail.value = null;
+        if (!preserveDetail) detail.value = null;
         nextCursor.value = null;
-        detailEpoch++;
+        if (!preserveDetail) detailEpoch++;
       }
       try {
         const page = await transport.call("feed.list", {
@@ -109,8 +110,16 @@ export function workspaceStore(transport: Transport) {
       detailEpoch++;
       loading.value = false;
       detailLoading.value = false;
-      filters.value = { ...value, ...(value.categories ? { categories: [...value.categories] } : {}) };
+      filters.value = { ...value, categories:[...(value.categories ?? noticeCategories)] };
       await loadFeed();
+    }
+    async function noticeLabelsChanged(result: {itemId:string;schoolId:string;categories:string[];customized:boolean}) {
+      if (workspace.value?.school?.id !== result.schoolId) return;
+      if (detail.value?.id === result.itemId) {
+        detail.value.categories = [...result.categories];
+        detail.value.categoriesCustomized = result.customized;
+      }
+      await loadFeed(false,true);
     }
     async function connect() {
       clear();
@@ -244,6 +253,7 @@ export function workspaceStore(transport: Transport) {
       loadFeed,
       refreshSchool,
       applyFilters,
+      noticeLabelsChanged,
       loadSchools,
       openNotice,
       closeNotice,

@@ -28,7 +28,16 @@ export function postgresRepository(pool: SqlPool): Repository {
       return scope;
     },
     async item(id) { return await one('items', id) as ItemRow | null; },
+    async personalize(row, owner) {
+      const {rows} = await pool.query('SELECT categories FROM campus_notice_labels WHERE owner_id=$1 AND item_id=$2',[owner,row._id]);
+      return rows[0] ? {...row,personalCategories:rows[0].categories} : row;
+    },
+    async setLabels(owner, itemId, categories) {
+      if (categories === null) { await pool.query('DELETE FROM campus_notice_labels WHERE owner_id=$1 AND item_id=$2',[owner,itemId]); return; }
+      await pool.query('INSERT INTO campus_notice_labels(owner_id,item_id,categories) VALUES($1,$2,$3::jsonb) ON CONFLICT(owner_id,item_id) DO UPDATE SET categories=EXCLUDED.categories,updated_at=now()',[owner,itemId,JSON.stringify(categories)]);
+    },
     async items(scope, offset, limit, since, filters = {}) {
+      if (filters.categories?.length === 0) return [];
       const values: any[] = [scope.ownerId, scope.schoolId, scope.publicSourceIds, scope.privateSourceIds, since];
       const bind = (value: unknown) => { values.push(value); return `$${values.length}`; };
       // SQL predicates precede pagination. The gateway also rechecks every returned row.
@@ -43,9 +52,10 @@ export function postgresRepository(pool: SqlPool): Repository {
           OR (NOT(body ? 'scope') AND body->>'sourceId'=ANY($3::text[])))))`;
       const where = ["collection='items'", "body->>'status'='published'", visible, "coalesce(nullif(body->>'publishedAt',''),nullif(body->>'discoveredAt',''),body->>'createdAt') >= $5"];
       if (filters.keyword) where.push(`strpos(lower(coalesce(body->>'title','') || E'\\n' || coalesce(body->>'contentText','') || E'\\n' || coalesce(body->'summary'->>'oneLine','')), lower(${bind(filters.keyword)}))>0`);
-      if (filters.categories?.length) { const param = bind(filters.categories); where.push(`(body->>'category'=ANY(${param}::text[]) OR jsonb_exists_any(coalesce(body->'categories','[]'::jsonb),${param}::text[]))`); }
-      const { rows } = await pool.query(`SELECT id,body FROM campus_documents WHERE ${where.join(' AND ')} ORDER BY body->>'publishedAt' DESC NULLS LAST,id DESC LIMIT ${bind(limit)} OFFSET ${bind(offset)}`, values);
-      return rows.map(row => ({ ...row.body, _id: row.id })) as ItemRow[];
+      const effectiveCategories = `coalesce(labels.categories,CASE WHEN jsonb_typeof(body->'categories')='array' THEN CASE WHEN jsonb_array_length(body->'categories')>0 THEN body->'categories' ELSE jsonb_build_array(body->>'category') END ELSE jsonb_build_array(body->>'category') END)`;
+      if (filters.categories?.length) where.push(`jsonb_exists_any(${effectiveCategories},${bind(filters.categories)}::text[])`);
+      const { rows } = await pool.query(`SELECT d.id,d.body,labels.categories AS personal_categories FROM campus_documents AS d LEFT JOIN campus_notice_labels AS labels ON labels.owner_id=$1 AND labels.item_id=d.id WHERE ${where.join(' AND ')} ORDER BY body->>'publishedAt' DESC NULLS LAST,d.id DESC LIMIT ${bind(limit)} OFFSET ${bind(offset)}`, values);
+      return rows.map(row => ({ ...row.body, _id: row.id, ...(Array.isArray(row.personal_categories) ? {personalCategories:row.personal_categories} : {}) })) as ItemRow[];
     },
   };
 }

@@ -14,6 +14,7 @@ import {
 import { itemVisible } from "./scope";
 import type { Repository, ItemRow } from "./repository";
 import { filtersOf, filterSince, matchesFilters } from "./filters";
+import { checkedLabels, displayedCategories, originalCategories } from './notice-labels';
 
 const fields: Record<string, string[]> = {
   "session.get": [],
@@ -23,6 +24,7 @@ const fields: Record<string, string[]> = {
   "school.request": ["schoolName"],
   "feed.list": ["schoolId", "cursor", "keyword", "categories", "period"],
   "feed.detail": ["schoolId", "itemId"],
+  "feed.labels.set": ["schoolId", "itemId", "categories"],
   "favorites.list": ["schoolId", "cursor"],
   "favorites.set": ["schoolId", "itemId", "saved"],
   "ai.status": [],
@@ -82,11 +84,7 @@ export function toNotice(row: ItemRow): Notice {
     title: String(row.title || "未命名公告"),
     sourceName: String(row.sourceName || "来源未标注"),
     publishedAt: row.publishedAt || null,
-    categories: row.categories?.length
-      ? row.categories
-      : row.category
-        ? [row.category]
-        : [],
+    categories: displayedCategories(row),
     summary:
       typeof row.summary?.oneLine === "string" ? row.summary.oneLine : null,
   };
@@ -122,7 +120,7 @@ async function session(
     identity: { uid: identity.uid, username: null },
     school: id ? await repo.school(id) : null,
     legacyLinked: identity.legacyLinked,
-    capabilities: { reading: true, ai: true, operations: false, ...(directory ? { schoolDirectory:true } : {}) },
+    capabilities: { reading: true, ai: true, operations: false, ...(directory ? { schoolDirectory:true } : {}), ...(repo.setLabels ? {noticeLabels:true} : {}) },
   };
 }
 
@@ -183,6 +181,7 @@ export function createGateway(
       const scope = await repo.scope(schoolId, identity.dataOwnerId);
       const since = filterSince(filters, now());
       if (action === "feed.list") {
+        if (filters.categories?.length === 0) return {ok:true,data:{items:[],nextCursor:null}};
         const offset = offsetOf(input.cursor);
         const rows = await repo.items(scope, offset, 21, since, filters);
         // DB predicates operate before pagination; recheck every returned row for defense in depth.
@@ -215,6 +214,12 @@ export function createGateway(
         !isRetained(row, since)
       )
         reject("NOT_FOUND", "公告不存在或不在当前授权范围内。");
+      if (action === 'feed.labels.set') {
+        if (!repo.setLabels) reject('SERVICE_UNAVAILABLE','此环境尚未启用个人公告标签。');
+        const categories = checkedLabels(input.categories);
+        await repo.setLabels(identity.dataOwnerId,row._id,categories);
+        return {ok:true,data:{categories:categories ?? originalCategories(row),customized:categories !== null}};
+      }
       let materialNote = '';
       if (repo.material) {
         try { row = await repo.material(row); }
@@ -223,9 +228,12 @@ export function createGateway(
           materialNote = error.message;
         }
       }
+      if (repo.personalize) row = await repo.personalize(row,identity.dataOwnerId);
       const detail: NoticeDetail = {
         ...toNotice(row),
         text: row.contentText || "",
+        defaultCategories: originalCategories(row),
+        categoriesCustomized: row.personalCategories !== undefined,
         originalUrl: originalUrl(row),
         attachmentNote: (materialNote ? materialNote + ' ' : '') + "本阶段未读取附件正文，请以公告原文和附件为准。",
         ...(features?.bookmarks ? { bookmarked: await features.bookmarks.has(identity.dataOwnerId, schoolId, row._id) } : {}),

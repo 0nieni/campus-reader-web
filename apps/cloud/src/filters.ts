@@ -3,6 +3,7 @@
 import { noticeCategories, type FeedFilters } from "../../../packages/contracts/src/index";
 import { reject } from "./errors";
 import type { ItemRow } from "./repository";
+import { displayedCategories } from './notice-labels';
 
 export function filtersOf(input: Record<string, unknown>): FeedFilters {
   const { keyword, categories, period } = input;
@@ -14,7 +15,7 @@ export function filtersOf(input: Record<string, unknown>): FeedFilters {
     reject("VALIDATION_FAILED", "时间范围无效，请重新选择。");
   return {
     ...(typeof keyword === "string" && keyword.trim() ? { keyword: keyword.trim() } : {}),
-    ...(Array.isArray(categories) && categories.length ? { categories: [...new Set(categories)] } : {}),
+    ...(Array.isArray(categories) ? { categories: [...new Set(categories)] } : {}),
     ...(period ? { period: period as FeedFilters["period"] } : {}),
   };
 }
@@ -26,7 +27,7 @@ export function literalPattern(keyword: string): string {
   return keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 export function matchesFilters(row: ItemRow, filters: FeedFilters): boolean {
-  if (filters.categories?.length && !filters.categories.some(category => row.category === category || row.categories?.includes(category))) return false;
+  if (filters.categories !== undefined && !filters.categories.some(category => displayedCategories(row).includes(category))) return false;
   if (!filters.keyword) return true;
   return [row.title, row.contentText, row.summary?.oneLine].some(value => typeof value === "string" && value.toLowerCase().includes(filters.keyword!.toLowerCase()));
 }

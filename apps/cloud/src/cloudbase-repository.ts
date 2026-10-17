@@ -128,6 +128,7 @@ export function cloudRepository(db: Database): Repository {
       );
     },
     async items(scope, offset, limit, since, filters = {}) {
+      if (filters.categories?.length === 0) return [];
       const unknownDate = command.or([
         { publishedAt: command.exists(false) },
         { publishedAt: null },
