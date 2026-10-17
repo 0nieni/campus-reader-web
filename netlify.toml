@@ -20,6 +20,11 @@
 [functions.cleanup]
   schedule = "17 18 * * *"
 
+# The Netlify monorepo package directory is apps/web. Resolve migrations from
+# the repository base explicitly instead of package-directory auto-detection.
+[database.migrations]
+  path = "netlify/database/migrations"
+
 [[headers]]
   for = "/*"
   [headers.values]
