@@ -29,4 +29,6 @@ export interface Repository {
     filters?: FeedFilters,
   ): Promise<ItemRow[]>;
   item(id: string): Promise<ItemRow | null>;
+  /** Invoked only after scope/ownership checks. Existing imported bodies are retained. */
+  material?(row: ItemRow): Promise<ItemRow>;
 }

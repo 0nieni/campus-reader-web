@@ -13,7 +13,8 @@
     "@cloudbase/node-sdk": "3.18.3",
     "@netlify/database": "2.0.1",
     "@netlify/functions": "6.0.2",
-    "@netlify/identity": "2.0.0"
+    "@netlify/identity": "2.0.0",
+    "cheerio": "1.1.2"
   },
   "devDependencies": {
     "@netlify/database-dev": "1.0.1",

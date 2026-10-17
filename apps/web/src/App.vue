@@ -11,6 +11,7 @@ import { workspaceStore } from "./stores/workspace";
 import { categoryNames, displayTime, safeOriginal } from "./lib/presentation";
 import { safeError, ClientError } from "./lib/errors";
 import InvitationPanel from './components/InvitationPanel.vue';
+import SchoolRequestForm from './components/SchoolRequestForm.vue';
 
 const props = defineProps<{
   transport?: Transport;
@@ -23,6 +24,9 @@ const featureTransport: Transport = { ...transport, call: (async (action, input)
   catch (caught) { if (caught instanceof ClientError && ["UNAUTHENTICATED", "FORBIDDEN"].includes(caught.code)) store.clear(); throw caught; }
 }) as Transport["call"] };
 const view = ref<"feed" | "favorites" | "ai">("feed"), selection = ref<Notice[]>([]), bookmarkBusy = ref(false);
+const requestingSchool = ref(false), schoolQuery = ref('');
+const matchingSchools = computed(() => store.schools.filter(school=>school.name.includes(schoolQuery.value.trim())));
+watch(() => store.auth?.uid,()=>{requestingSchool.value=false;schoolQuery.value='';});
 watch(() => store.auth?.uid, () => { view.value = "feed"; selection.value = []; });
 watch(() => store.workspace?.school?.id, () => { selection.value = []; });
 function chooseNotice(item: Notice) {
@@ -119,7 +123,9 @@ async function moreSchools() {
   }
 }
 function schoolChanged(event: Event) {
-  void store.selectSchool((event.target as HTMLSelectElement).value);
+  const id = (event.target as HTMLSelectElement).value;
+  requestingSchool.value = id === '__request__';
+  if (!requestingSchool.value) void store.selectSchool(id);
 }
 </script>
 
@@ -265,21 +271,22 @@ function schoolChanged(event: Event) {
           <button
             class="text-button"
             :disabled="store.loading || !store.workspace.school"
-            @click="store.loadFeed()"
+            @click="store.refreshSchool()"
           >
             刷新
           </button>
         </div>
         <label class="school-label" for="school">我的学校</label>
+        <input v-if="store.schools.length > 10" v-model="schoolQuery" aria-label="搜索学校" placeholder="输入学校名称筛选" maxlength="80" class="school-search">
         <select
           id="school"
-          :value="store.workspace.school?.id || ''"
+          :value="requestingSchool ? '__request__' : store.workspace.school?.id || ''"
           :disabled="store.loading"
           @change="schoolChanged"
         >
           <option value="" disabled>请选择学校</option>
           <option
-            v-for="school in store.schools"
+            v-for="school in matchingSchools"
             :key="school.id"
             :value="school.id"
           >
@@ -292,7 +299,10 @@ function schoolChanged(event: Event) {
                   : "（未接入）"
             }}
           </option>
+          <option v-if="store.workspace.capabilities.schoolDirectory" value="__request__">没有找到自己的学校？联系客服添加</option>
         </select>
+        <SchoolRequestForm v-if="requestingSchool" :key="store.auth?.uid" :transport="featureTransport" />
+        <p v-if="store.schools.length > 10" class="muted small">目录共 {{store.schools.length}} 所学校{{schoolQuery.trim() ? `，匹配 ${matchingSchools.length} 所` : ''}}。</p>
         <button
           v-if="store.schoolCursor"
           class="text-button more-schools"
@@ -300,14 +310,9 @@ function schoolChanged(event: Event) {
         >
           加载更多学校
         </button>
-        <p
-          v-if="
-            store.workspace.school && store.workspace.school.status !== 'ready'
-          "
-          class="muted small"
-        >
-          该学校尚未完成来源接入，可能暂时没有公告。
-        </p>
+        <p v-if="store.schoolSync" class="muted small" role="status">{{store.schoolSync.message}}</p>
+        <p v-else-if="store.workspace.school && store.workspace.school.status !== 'ready'" class="muted small">该学校公开公告入口待核验，可能暂时没有可读取的公告。</p>
+        <p v-if="safeOriginal(store.workspace.school?.announcementUrl || null)" class="small"><a :href="safeOriginal(store.workspace.school?.announcementUrl || null)!" target="_blank" rel="noopener noreferrer">查看学校公告原站 ↗</a></p>
         <form class="feed-filters" @submit.prevent="search">
           <label for="notice-keyword" class="filter-label">查找公告</label>
           <div class="search-row">
