@@ -1,0 +1,27 @@
+[build]
+  command = "npm run build --workspace=@campus/web"
+  publish = "apps/web/dist"
+  functions = "netlify/functions"
+
+[build.environment]
+  NODE_VERSION = "22"
+  VITE_BACKEND = "netlify"
+  VITE_AI_EXECUTOR = "netlify"
+  VITE_CLOUDBASE_ENV_ID = "cloudbase-d3gw62aemba0c819e"
+  VITE_CLOUDBASE_REGION = "ap-shanghai"
+  VITE_CLOUDBASE_REGION_VERIFIED = "false"
+  VITE_CLOUDBASE_FUNCTION = "webGateway"
+  VITE_CLOUDBASE_AI_FUNCTION = "webAi"
+  VITE_CLOUDBASE_PASSWORD_READY = "true"
+
+[functions]
+  node_bundler = "esbuild"
+
+[functions.cleanup]
+  schedule = "17 18 * * *"
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"

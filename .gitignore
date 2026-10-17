@@ -1,0 +1,15 @@
+node_modules/
+dist/
+/apps/cloud/functions/
+.env
+.env.*
+!.env.example
+*.local
+.netlify/
+.netlify-staging/
+.github-staging/
+.github-tools/
+coverage/
+test-results/
+playwright-report/
+*.log

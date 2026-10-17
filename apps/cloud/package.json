@@ -1,0 +1,25 @@
+{
+  "name": "@campus/web-cloud",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts"
+  },
+  "dependencies": {
+    "@campus/contracts": "0.1.0",
+    "@cloudbase/node-sdk": "3.18.3",
+    "@netlify/database": "2.0.1",
+    "@netlify/functions": "6.0.2",
+    "@netlify/identity": "2.0.0"
+  },
+  "devDependencies": {
+    "@netlify/database-dev": "1.0.1",
+    "@types/node": "22.10.2",
+    "esbuild": "0.25.12",
+    "tsx": "4.20.6",
+    "typescript": "5.9.3"
+  }
+}

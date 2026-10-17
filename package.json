@@ -1,0 +1,26 @@
+{
+  "name": "campus-reader-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/web",
+    "apps/cloud",
+    "packages/contracts"
+  ],
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "npm run dev --workspace=@campus/web",
+    "build": "npm run build --workspace=@campus/web && npm run build --workspace=@campus/web-cloud",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "cloud:build": "npm run build --workspace=@campus/web-cloud",
+    "cloud:preflight": "node tools/cloud-preflight.mjs",
+    "netlify:build": "npm run typecheck && node tools/build-netlify.mjs"
+  },
+  "dependencies": {
+    "@netlify/database": "2.0.1"
+  }
+}
