@@ -24,6 +24,7 @@ const fields: Record<string, string[]> = {
   "favorites.list": ["schoolId", "cursor"],
   "favorites.set": ["schoolId", "itemId", "saved"],
   "ai.status": [],
+  "ai.diagnose": [],
   "ai.preview": ["schoolId", "itemIds"],
   "ai.export": ["schoolId", "itemIds"],
   "ai.start": ["schoolId", "itemIds", "requestId", "service", "provider", "model", "task", "question", "fingerprint"],

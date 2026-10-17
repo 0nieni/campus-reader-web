@@ -46,7 +46,7 @@ export interface ReadingPackage { docs: ReadingDocument[]; guide: string; manife
 export interface ReadingTask {
   id: string; schoolId: string; service: "official" | "byok"; provider: string; model: string;
   task: "summary" | "outline" | "answer"; state: "ready" | "running" | "complete" | "failed" | "uncertain" | "cancelled";
-  step: number; totalSteps: number; title: string; result: string | null; message: string;
+  step: number; totalSteps: number; title: string; result: string | null; message: string; failureCode?: string;
   expireAt: string; createdAt: string; quotaHeld: boolean;
 }
 export interface AiStartInput {
@@ -71,6 +71,7 @@ export interface GatewayActions {
   "favorites.list": { input: { schoolId?: string; cursor?: string }; output: { items: Favorite[]; nextCursor: string | null } };
   "favorites.set": { input: { schoolId: string; itemId: string; saved: boolean }; output: { saved: boolean } };
   "ai.status": { input: Record<string, never>; output: { quota: AiQuota; officialConfigured: boolean; officialModel: string | null; providers: Array<{ id: string; name: string; endpoint: string }> } };
+  "ai.diagnose": { input: Record<string, never>; output: { code: string; message: string } };
   "ai.preview": { input: { schoolId: string; itemIds: string[] }; output: ReadingPackage };
   "ai.export": { input: { schoolId: string; itemIds: string[] }; output: ReadingPackage };
   "ai.start": { input: AiStartInput; output: ReadingTask };

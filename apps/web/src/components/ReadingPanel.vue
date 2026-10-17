@@ -10,6 +10,14 @@ const status = ref<GatewayActions["ai.status"]["output"] | null>(null), tasks = 
 const service = ref<"official" | "byok">("official"), provider = ref<AiConnection["provider"]>("deepseek"), model = ref(""), apiKey = ref("");
 const kind = ref<"summary" | "outline" | "answer">("summary"), question = ref(""), error = ref(""), note = ref(""), busy = ref(false), paused = ref(true), showGuide = ref(false), resolution = ref<"" | "charged" | "not_charged">("");
 const rendered = computed(() => task.value?.result ? renderMarkdown(task.value.result) : "");
+const diagnosis = ref<GatewayActions['ai.diagnose']['output'] | null>(null), diagnosing = ref(false);
+async function diagnose() {
+  if (busy.value || diagnosing.value) return;
+  const ticket = epoch; diagnosing.value = true; diagnosis.value = null;
+  try { const value = await props.transport.call('ai.diagnose', {}); if (active && ticket === epoch) diagnosis.value = value; }
+  catch (caught) { if (active && ticket === epoch) error.value = safeError(caught); }
+  finally { diagnosing.value = false; }
+}
 const stateNames = { ready: "已暂停 / 可继续", running: "正在处理", complete: "已完成", failed: "未完成", uncertain: "状态待核查", cancelled: "已取消" };
 let active = true, epoch = 0, requestId = "", testRequestId = "";
 const validSelection = computed(() => Boolean(props.schoolId && props.selection.length && props.selection.length <= 8));
@@ -126,6 +134,8 @@ onUnmounted(() => { active = false; epoch++; paused.value = true; apiKey.value =
       <div v-if="service === 'official'" class="quota-note">
         <template v-if="status"><strong>今日可用 {{ status.quota.remaining }} / {{ status.quota.limit }} 次</strong><p>已用 {{ status.quota.used }} · 进行中预占 {{ status.quota.held }}；北京时间零点恢复。</p><p v-if="!status.officialConfigured">官方模型尚未配置，请完成云端设置或选择“我的 API”。</p><p v-else>模型：{{ status.officialModel }}；同一阅读任务分批和汇总共计一次。</p></template>
         <p v-else>额度尚未读取，请检查 AI 云函数与集合配置。</p><button class="text-button" @click="refreshStatus">刷新额度</button>
+        <button class="text-button" :disabled="busy || diagnosing" @click="diagnose">{{ diagnosing ? '正在检查…' : '检查官方 AI 连接（不调用模型）' }}</button>
+        <p v-if="diagnosis" role="status">{{ diagnosis.message }}（{{ diagnosis.code }}）</p>
       </div>
       <div v-else class="connection-form">
         <label for="ai-provider">服务商</label><select id="ai-provider" v-model="provider" :disabled="busy"><option value="deepseek">DeepSeek · api.deepseek.com</option><option value="openai">OpenAI · api.openai.com</option></select>
@@ -145,6 +155,7 @@ onUnmounted(() => { active = false; epoch++; paused.value = true; apiKey.value =
       <details class="recent-tasks"><summary @click="recent">最近 24 小时阅读任务</summary><button class="text-button" @click="recent">刷新任务</button><p v-if="!tasks.length" class="small">暂无可读取任务，或尚未连接任务服务。</p><button v-for="item in tasks" :key="item.id" class="recent-task" :disabled="busy" @click="restore(item.id)">{{ stateNames[item.state] }} · {{ item.title }}</button></details>
     </div><div class="ai-output">
       <section v-if="task" class="task-status" aria-live="polite"><h2>{{ stateNames[task.state] }} <small>{{ Math.min(task.step, task.totalSteps) }}/{{ task.totalSteps }}</small></h2><p>{{ task.message }}</p><p class="task-id">任务编号：{{ task.id }}</p><p class="small">{{ task.service === 'official' ? '官方 AI' : `我的 API · ${task.provider}` }} · {{ task.model }} · 到期：{{ new Date(task.expireAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) }}（北京时间）</p>
+        <p v-if="task.failureCode" class="small">失败原因：{{ task.failureCode }}</p>
         <div class="action-row"><button v-if="busy" class="secondary" @click="paused = true">本批后暂停</button><button v-if="task.state === 'ready' && !busy" class="secondary" @click="run">继续阅读</button><button class="text-button" :disabled="busy" @click="restore(task.id)">刷新任务状态</button><button v-if="!['complete','failed','cancelled'].includes(task.state)" class="text-button" @click="cancel">取消任务</button></div>
         <div v-if="['uncertain','cancelled'].includes(task.state) && task.quotaHeld" class="quota-resolution"><p>请先在服务商控制台核查本任务是否处理；此操作只结算预占，不会重发请求。</p><select v-model="resolution" aria-label="核查处理结果"><option value="" disabled>我已核查，选择结果</option><option value="charged">已处理，计入一次官方额度</option><option value="not_charged">确认未处理，释放预占</option></select><button class="secondary" :disabled="!resolution || busy" @click="resolve">确认结算</button></div>
       </section>

@@ -17,6 +17,36 @@ const start = (requestId = "request_abcdefghijkl", service = "official") => ({ s
 const output = "报名材料见资料。[R1](https://www.bjtu.edu.cn/test)";
 const connection = { provider: "deepseek", model: "fixture-model", apiKey: "test-transient-key-never-real" };
 
+test('official diagnosis requires the owner and does not reserve quota, create tasks or call a model', async () => {
+  const f = fixtureDb(); let checks = 0, completions = 0;
+  const ai = aiService(f.db, f.repo, async () => { completions++; return output; }, Date.now, async () => { checks++; return { code: 'READY', message: 'checked' }; });
+  const gateway = createGateway(f.repo, ownerConfig, Date.now, { ai });
+  assert.equal((await gateway({ action: 'ai.diagnose', input: {} }, { uid: 'stranger', isAnonymous: false })).ok, false);
+  assert.equal((await gateway({ action: 'ai.diagnose', input: { endpoint: 'https://attacker.test' } }, actor)).ok, false);
+  assert.equal(checks, 0);
+  const result = await gateway({ action: 'ai.diagnose', input: {} }, actor);
+  assert.deepEqual(result, { ok: true, data: { code: 'READY', message: 'checked' } });
+  assert.equal(checks, 1); assert.equal(completions, 0);
+  assert.equal(f.rows('web_ai_tasks').size, 0); assert.equal(f.rows('web_ai_accounts').size, 0);
+});
+
+test('definite model errors preserve safe reasons on refresh and release holds without replaying', async () => {
+  for (const code of ['KEY_REJECTED', 'BALANCE_REQUIRED', 'MODEL_OR_CONTEXT_INVALID', 'MODEL_UNSUPPORTED', 'OUTPUT_TRUNCATED', 'MODEL_FORMAT_INVALID']) {
+    const f = fixtureDb(); let calls = 0;
+    const ai = aiService(f.db, f.repo, async () => { calls++; throw Object.assign(new Error('provider-body-fixture-private-key'), { code }); });
+    const task = await ai.handle('ai.start', start(), identity) as ReadingTask;
+    const failed = await ai.handle('ai.step', { taskId: task.id, step: 0 }, identity) as ReadingTask;
+    assert.equal(failed.state, 'failed'); assert.equal(failed.failureCode, code); assert.equal(failed.quotaHeld, false);
+    assert.ok(!JSON.stringify(failed).includes('provider-body-fixture-private-key'));
+    assert.ok(!failed.message.includes('模型未完成本批，请检查 Key、余额、模型或资料范围'));
+    const restored = await ai.handle('ai.task', { taskId: task.id }, identity) as ReadingTask;
+    assert.equal(restored.failureCode, code); assert.equal(restored.message, failed.message);
+    await ai.handle('ai.step', { taskId: task.id, step: 0 }, identity); assert.equal(calls, 1);
+    const q = (await ai.handle('ai.status', {}, identity) as any).quota;
+    assert.deepEqual([q.used, q.held, q.remaining], [0, 0, 5]);
+  }
+});
+
 test("bookmarks are owner-scoped, idempotent, concurrent-safe and retain unrelated profile fields", async () => {
   const f = fixtureDb(), service = bookmarksService(f.db, f.repo);
   await Promise.all(Array.from({ length: 5 }, () => service.handle("favorites.set", { schoolId: "bjtu", itemId: "notice", saved: true }, identity)));

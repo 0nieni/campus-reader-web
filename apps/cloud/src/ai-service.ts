@@ -8,6 +8,7 @@ import { READING_GUIDE, GUIDE_VERSION } from "./reading-guide";
 import { PROVIDERS, userCompletion, validateConnection, type Connection } from "./model-provider";
 import { AppError, reject } from "./errors";
 import { verifiedRelay, type RelayBatch } from "./relay-protocol";
+import { diagnoseOfficial, failureMessages } from "./model-diagnostics";
 
 const TASKS = "web_ai_tasks", ACCOUNTS = "web_ai_accounts";
 export const beijingDay = (now = Date.now()) => new Date(now + 8 * 3600000).toISOString().slice(0, 10);
@@ -29,7 +30,7 @@ export function officialConfig(): { connection: Connection; endpoint: string } |
     return { connection, endpoint };
   } catch { return null; }
 }
-export function aiService(db: Database, repo: Repository, complete = userCompletion, now: () => number = Date.now) {
+export function aiService(db: Database, repo: Repository, complete = userCompletion, now: () => number = Date.now, diagnose = diagnoseOfficial) {
   const iso = () => new Date(now()).toISOString();
   const purge = async (id: string) => db.collection(TASKS).doc(id).update({ docs: db.command.remove(), notes: db.command.remove(), batches: db.command.remove(), question: db.command.remove(), result: db.command.remove(), purged: true });
   const taskRef = (tx: Parameters<Parameters<typeof atomic>[1]>[0], id: string) => tx.collection(TASKS).doc(id);
@@ -53,7 +54,7 @@ export function aiService(db: Database, repo: Repository, complete = userComplet
     return { id: row.id, schoolId: row.schoolId, service: row.service, provider: row.provider, model: row.model, task: row.task,
       state: row.state === "new" ? "failed" : row.state, step: row.step, totalSteps: row.batches.length + 1,
       title: row.state === "new" ? "未开始的阅读任务" : row.testOnly ? "API 连接测试" : row.docs.map(doc => doc.title).join("；"), result: row.state === "complete" ? row.result : null,
-      message: row.state === "new" ? "任务尚未取得额度或未完成创建，请检查额度后重新发起。" : row.message, expireAt: row.expireAt, createdAt: row.createdAt, quotaHeld: row.quotaHeld };
+      message: row.state === "new" ? "任务尚未取得额度或未完成创建，请检查额度后重新发起。" : row.message, ...(row.failureCode ? { failureCode: row.failureCode } : {}), expireAt: row.expireAt, createdAt: row.createdAt, quotaHeld: row.quotaHeld };
   }
   async function finish(id: string, patch: Partial<Task>, success: boolean, expectedStep?: number) {
     await atomic(db, async tx => {
@@ -83,6 +84,10 @@ export function aiService(db: Database, repo: Repository, complete = userComplet
   return {
     async handle(action: string, input: Record<string, unknown>, identity: IdentityContext): Promise<unknown> {
       const owner = identity.dataOwnerId;
+      if (action === "ai.diagnose") {
+        const official = officialConfig();
+        return official ? diagnose(official.connection, official.endpoint) : { code: "MODEL_NOT_CONFIGURED", message: "官方模型配置不完整，请检查服务端模型环境变量并重新部署。" };
+      }
       const relay = action === "ai.relay" ? verifiedRelay(input, process.env.AI_RELAY_SECRET, now()) : null;
       if (relay) {
         if (process.env.AI_EXECUTION_MODE !== "netlify") reject("RELAY_NOT_CONFIGURED", "webAi 尚未启用 Netlify 执行方式。");
@@ -231,9 +236,10 @@ export function aiService(db: Database, repo: Repository, complete = userComplet
       } catch (error) {
         const code = (error as { code?: string })?.code || "MODEL_UNCERTAIN";
         const uncertain = submitted && !["KEY_REJECTED", "BALANCE_REQUIRED", "PROVIDER_LIMIT", "MODEL_OR_CONTEXT_INVALID", "MODEL_UNSUPPORTED", "OUTPUT_TRUNCATED", "MODEL_FORMAT_INVALID", "REFERENCE_INVALID", "AI_POLICY_BLOCKED", "MATERIAL_CHANGED", "RESULT_EXPIRED", "NOT_FOUND", "STALE_SCOPE", "CONTEXT_TOO_LONG", "RESPONSE_TOO_LARGE"].includes(code);
-        const message = uncertain ? "本批处理状态不明，已暂停且不会自动重发。请核查服务商用量，官方预占暂保留。" : error instanceof AppError ? error.message : "模型未完成本批，请检查 Key、余额、模型或资料范围。";
+        const message = uncertain ? "本批处理状态不明，已暂停且不会自动重发。请核查服务商用量，官方预占暂保留。" : error instanceof AppError ? error.message : Object.prototype.hasOwnProperty.call(failureMessages, code) ? failureMessages[code]! : "模型未完成本批，请检查 Key、余额、模型或资料范围。";
+        const failureCode = Object.prototype.hasOwnProperty.call(failureMessages, code) ? code : undefined;
         if (uncertain) await atomic(db, async tx => { const ref = taskRef(tx, id), row = transactionRow((await ref.get()).data) as Task; if (row.inFlight === task.step && row.step === task.step && !["complete", "failed", "cancelled"].includes(row.state)) await ref.update({ state: "uncertain", message }); });
-        else await finish(id, { state: "failed", message }, false, task.step);
+        else await finish(id, { state: "failed", message, ...(failureCode ? { failureCode } : {}) }, false, task.step);
         return publicTask(await load(id, owner));
       }
     },
