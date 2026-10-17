@@ -12,6 +12,7 @@ import { categoryNames, displayTime, safeOriginal } from "./lib/presentation";
 import { safeError, ClientError } from "./lib/errors";
 import InvitationPanel from './components/InvitationPanel.vue';
 import SchoolRequestForm from './components/SchoolRequestForm.vue';
+import NoticeLabelsEditor from './components/NoticeLabelsEditor.vue';
 
 const props = defineProps<{
   transport?: Transport;
@@ -59,26 +60,30 @@ const copied = ref("");
 const inviteToken = ref(isNetlify ? new URLSearchParams(location.hash.slice(1)).get('invite_token') || '' : '');
 if (inviteToken.value) history.replaceState(null, '', location.pathname + location.search);
 const keyword = ref("");
-const selectedCategories = ref<string[]>([]);
+const selectedCategories = ref<string[]>([...noticeCategories]);
 const period = ref<NonNullable<FeedFilters["period"]>>("all");
 const filterDetails = ref<HTMLDetailsElement | null>(null);
 const appliedPeriod = computed(() => ({ "7d": "最近 7 天", "30d": "最近 30 天", "90d": "最近 90 天", all: "" })[store.filters.period || "all"]);
-const isFiltered = computed(() => Boolean(store.filters.keyword || store.filters.categories?.length || (store.filters.period && store.filters.period !== "all")));
+const isFiltered = computed(() => Boolean(store.filters.keyword || (store.filters.categories && store.filters.categories.length < noticeCategories.length) || (store.filters.period && store.filters.period !== "all")));
 function categoryLabel(categories?: string[]) {
   return categories?.map(category => categoryNames[category] || category).join(" · ") || "";
 }
 watch(() => store.auth?.uid, () => {
   keyword.value = "";
-  selectedCategories.value = [];
+  selectedCategories.value = [...noticeCategories];
   period.value = "all";
 });
 async function search() {
   if (filterDetails.value) filterDetails.value.open = false;
   await store.applyFilters({ keyword: keyword.value.trim(), categories: selectedCategories.value, period: period.value });
 }
+async function filterCategories(value?:string[]) {
+  if(value)selectedCategories.value=[...value];
+  await store.applyFilters({...store.filters,categories:[...selectedCategories.value]});
+}
 async function resetFilters() {
   keyword.value = "";
-  selectedCategories.value = [];
+  selectedCategories.value = [...noticeCategories];
   period.value = "all";
   await store.applyFilters({});
 }
@@ -322,9 +327,10 @@ function schoolChanged(event: Event) {
           <details ref="filterDetails" class="filter-options">
             <summary>分类与时间<span v-if="isFiltered"> · 已筛选</span></summary>
             <fieldset>
-              <legend>分类（可多选，匹配其中任一类）</legend>
+              <legend>分类（匹配任一已勾选标签；全不选则不显示）</legend>
+              <div><button class="text-button" type="button" @click="filterCategories([...noticeCategories])">全选</button><button class="text-button" type="button" @click="filterCategories([])">全不选</button></div>
               <label v-for="category in noticeCategories" :key="category" class="category-option">
-                <input v-model="selectedCategories" type="checkbox" :value="category" />{{ categoryNames[category] }}
+                <input v-model="selectedCategories" type="checkbox" :value="category" @change="filterCategories()" />{{ categoryNames[category] }}
               </label>
             </fieldset>
             <label class="filter-label" for="notice-period">时间范围</label>
@@ -338,7 +344,7 @@ function schoolChanged(event: Event) {
             <button class="text-button" type="submit" :disabled="!store.workspace.school">应用筛选</button>
           </details>
           <div v-if="isFiltered" class="applied-filters" role="status">
-            <span>{{ store.filters.keyword ? `“${store.filters.keyword}” · ` : "" }}{{ categoryLabel(store.filters.categories) || "全部分类" }}{{ appliedPeriod ? ` · ${appliedPeriod}` : "" }}</span>
+            <span>{{ store.filters.keyword ? `“${store.filters.keyword}” · ` : "" }}{{ categoryLabel(store.filters.categories) || "未选择标签（不显示公告）" }}{{ appliedPeriod ? ` · ${appliedPeriod}` : "" }}</span>
             <button class="text-button" type="button" @click="resetFilters">清除筛选</button>
           </div>
         </form>
@@ -366,7 +372,7 @@ function schoolChanged(event: Event) {
                 store.error
                   ? "请排查上方错误后重试。"
                   : store.workspace.school
-                    ? isFiltered ? "试试其他关键词，或清除分类与时间筛选。" : "可稍后刷新，或检查学校来源是否已接入。"
+                    ? store.filters.categories?.length === 0 ? "请勾选至少一个标签后查看公告。" : isFiltered ? "试试其他关键词，或重置分类与时间筛选。" : "可稍后刷新，或检查学校来源是否已接入。"
                     : "学校偏好会保存到本人账号。"
               }}
             </p>
@@ -436,6 +442,7 @@ function schoolChanged(event: Event) {
             · 北京时间
           </p>
           <div class="action-row detail-actions"><button class="secondary" :disabled="bookmarkBusy" @click="saveBookmark">{{ store.detail.bookmarked ? '取消收藏' : '收藏公告' }}</button><button class="text-button" @click="chooseNotice(store.detail)">{{ selection.some(row => row.id === store.detail!.id) ? '从 AI 选择中移除' : '选入 AI 阅读' }}</button><button v-if="selection.length" class="text-button" @click="navigate('ai')">阅读已选 {{ selection.length }} 篇</button></div>
+          <NoticeLabelsEditor v-if="store.workspace.capabilities.noticeLabels && store.workspace.school" :key="`${store.auth?.uid}:${store.detail.id}`" :transport="featureTransport" :school-id="store.workspace.school.id" :item-id="store.detail.id" :categories="store.detail.categories" :customized="Boolean(store.detail.categoriesCustomized)" @saved="store.noticeLabelsChanged" />
           <div class="original-source" v-if="original">
             <a :href="original" target="_blank" rel="noopener noreferrer"
               >打开原文 ↗</a

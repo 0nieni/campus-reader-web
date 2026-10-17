@@ -14,6 +14,7 @@ export interface ItemRow extends Resource {
   contentText?: string;
   aiProcessing?: string;
   updatedAt?: string;
+  personalCategories?: string[];
 }
 export interface Repository {
   selectedSchool(ownerId: string): Promise<string | null>;
@@ -31,4 +32,6 @@ export interface Repository {
   item(id: string): Promise<ItemRow | null>;
   /** Invoked only after scope/ownership checks. Existing imported bodies are retained. */
   material?(row: ItemRow): Promise<ItemRow>;
+  personalize?(row: ItemRow, ownerId: string): Promise<ItemRow>;
+  setLabels?(ownerId: string, itemId: string, categories: string[] | null): Promise<void>;
 }

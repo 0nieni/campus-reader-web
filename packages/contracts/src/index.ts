@@ -17,7 +17,7 @@ export interface WorkspaceSession {
   identity: AuthSession;
   school: School | null;
   legacyLinked: boolean;
-  capabilities: { reading: true; ai: boolean; operations: false; schoolDirectory?: boolean };
+  capabilities: { reading: true; ai: boolean; operations: false; schoolDirectory?: boolean; noticeLabels?: boolean };
 }
 export interface Notice {
   id: string;
@@ -38,6 +38,8 @@ export interface FeedFilters {
   period?: "7d" | "30d" | "90d" | "all";
 }
 export interface NoticeDetail extends Notice {
+  defaultCategories?: string[];
+  categoriesCustomized?: boolean;
   bookmarked?: boolean;
   originalUrl: string | null;
   text: string;
@@ -75,6 +77,7 @@ export interface GatewayActions {
     input: { schoolId: string; itemId: string };
     output: NoticeDetail;
   };
+  "feed.labels.set": {input:{schoolId:string;itemId:string;categories:string[]|null};output:{categories:string[];customized:boolean}};
   "favorites.list": { input: { schoolId?: string; cursor?: string }; output: { items: Favorite[]; nextCursor: string | null } };
   "favorites.set": { input: { schoolId: string; itemId: string; saved: boolean }; output: { saved: boolean } };
   "ai.status": { input: Record<string, never>; output: { quota: AiQuota; officialConfigured: boolean; officialModel: string | null; providers: Array<{ id: string; name: string; endpoint: string }> } };
