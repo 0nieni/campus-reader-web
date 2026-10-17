@@ -17,7 +17,7 @@ npm run build --workspace=@campus/web
 
 ## Netlify 构建
 
-将此私有仓库连接到现有 Netlify 项目，保留根目录 netlify.toml；构建命令为 npm run build --workspace=@campus/web，发布目录为 apps/web/dist，函数目录为 netlify/functions。两份 SQL 迁移位于 netlify/database/migrations，由平台在部署生命周期应用，不在网页或函数请求中执行建表。
+将此私有仓库连接到现有 Netlify 项目，保留根目录 netlify.toml。Base directory 和 Package directory 均留空：这是包含网页、服务端函数和迁移的一个完整站点，不单独选择 apps/web 作为站点项目目录。构建命令为 npm run build --workspace=@campus/web，发布目录为 apps/web/dist，函数目录为 netlify/functions。两份 SQL 迁移位于 netlify/database/migrations，由平台在部署生命周期应用，不在网页或函数请求中执行建表。
 
 服务端环境变量：NETLIFY_OWNER_EMAIL（本人邮箱）、AI_CHAT_API_KEY（DeepSeek Key）；可选 AI_CHAT_BASE_URL、AI_CHAT_MODEL、AI_DAILY_LIMIT、AI_PLATFORM_DAILY_CALLS、AI_PLATFORM_DAILY_TOKENS。全部通过 Netlify 环境变量配置，不能加入 VITE_ 变量或提交到 Git。
 
