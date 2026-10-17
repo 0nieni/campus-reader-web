@@ -1,6 +1,6 @@
 # 校园阅览室
 
-个人使用的校园公告、收藏与 AI 阅读网站。Vue 3 + TypeScript + Netlify Functions、Identity 和 Database。代码仓库保持私有，网站按本人邮箱白名单访问。
+面向受邀用户的校园公告、收藏与 AI 阅读网站。Vue 3 + TypeScript + Netlify Functions、Identity 和 Database。代码仓库保持私有，各账号的数据独立。
 
 ## 本地检查
 
@@ -19,9 +19,9 @@ npm run build --workspace=@campus/web
 
 将此私有仓库连接到现有 Netlify 项目，保留根目录 netlify.toml。Base directory 和 Package directory 均留空：这是包含网页、服务端函数和迁移的一个完整站点，不单独选择 apps/web 作为站点项目目录。构建命令为 npm run build --workspace=@campus/web，发布目录为 apps/web/dist，函数目录为 netlify/functions。两份 SQL 迁移位于 netlify/database/migrations，由平台在部署生命周期应用，不在网页或函数请求中执行建表。
 
-服务端环境变量：NETLIFY_OWNER_EMAIL（本人邮箱）、AI_CHAT_API_KEY（DeepSeek Key）；可选 AI_CHAT_BASE_URL、AI_CHAT_MODEL、AI_DAILY_LIMIT、AI_PLATFORM_DAILY_CALLS、AI_PLATFORM_DAILY_TOKENS。全部通过 Netlify 环境变量配置，不能加入 VITE_ 变量或提交到 Git。
+服务端环境变量：NETLIFY_OWNER_EMAIL（初始账号邮箱，用于保留原工作区归属，不是成员白名单）、AI_CHAT_API_KEY（DeepSeek Key）；可选 AI_CHAT_BASE_URL、AI_CHAT_MODEL、AI_DAILY_LIMIT、AI_PLATFORM_DAILY_CALLS、AI_PLATFORM_DAILY_TOKENS。全部通过 Netlify 环境变量配置，不能加入 VITE_ 变量或提交到 Git。
 
-Identity 需要启用并设为 Invite only。先验证预览分支迁移和真实数据，再发布主站；仓库上传成功不等于网站或数据库已上线。当前手工 CLI 预览缺少迁移构建步骤，Git 云端构建是否解决仍需实际验证。
+Identity 保持 Invite only，管理员通过控制台邀请其他用户。正式站点允许访问登录页，预览可继续私有。每个可信 Identity UID 独立保存学校偏好、收藏、私人资料、AI 任务和每日五次额度。原始账号继续使用现有数据；不要为新增成员更改 NETLIFY_OWNER_EMAIL。DeepSeek 账单与平台总调用预算仍由站点共同承担。
 
 AI 默认每日 5 次、北京时间零点重置。任务正文满 24 小时拒读、访问时清理，每天北京时间 02:17 定时兜底清理，无人访问时不保证第 24 小时准点物理删除。
 

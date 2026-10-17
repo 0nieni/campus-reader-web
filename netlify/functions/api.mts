@@ -6,6 +6,7 @@ import { createSiteApi } from '../../apps/cloud/src/netlify-http';
 import { createGateway } from '../../apps/cloud/src/gateway';
 import { bookmarksService } from '../../apps/cloud/src/bookmarks';
 import { aiService } from '../../apps/cloud/src/ai-service';
+import { siteWorkspace } from '../../apps/cloud/src/site-access';
 declare const Netlify: { env: { get(name: string): string | undefined } };
 let pool: SqlPool | undefined;
 export default createSiteApi({
@@ -22,7 +23,7 @@ export default createSiteApi({
     process.env.AI_PROVIDER = 'openai_compatible';
     pool ||= getDatabase().pool as unknown as SqlPool;
     const db = postgresStorage(pool), repo = postgresRepository(pool);
-    const gateway = createGateway(repo, { ownerUid: user.id, dataOwnerId: 'netlify_owner' }, Date.now, { bookmarks: bookmarksService(db, repo), ai: aiService(db, repo) });
+    const gateway = createGateway(repo, siteWorkspace(user, Netlify.env.get('NETLIFY_OWNER_EMAIL')), Date.now, { bookmarks: bookmarksService(db, repo), ai: aiService(db, repo) });
     return gateway(event, { uid: user.id, isAnonymous: false });
   },
 });
