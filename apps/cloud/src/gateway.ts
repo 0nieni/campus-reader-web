@@ -15,14 +15,18 @@ import { itemVisible } from "./scope";
 import type { Repository, ItemRow } from "./repository";
 import { filtersOf, filterSince, matchesFilters } from "./filters";
 import { checkedLabels, displayedCategories, originalCategories } from './notice-labels';
-import {noticeSummary} from './notice-summary';
 
 const fields: Record<string, string[]> = {
+  'sources.list':['schoolId'],
+  'sources.save':['schoolId','sourceId','source'],
+  'sources.test':['schoolId','sourceId'],
+  'sources.refresh':['schoolId','sourceId'],
+  'sources.toggle':['schoolId','sourceId','enabled'],
+  'sources.remove':['schoolId','sourceId'],
   "session.get": [],
   "school.list": ["cursor"],
   "school.select": ["schoolId"],
   "school.refresh": ["schoolId"],
-  "school.summarize": ["schoolId"],
   "school.request": ["schoolName"],
   "feed.list": ["schoolId", "cursor", "keyword", "categories", "period"],
   "feed.detail": ["schoolId", "itemId"],
@@ -81,15 +85,13 @@ function offsetOf(value: unknown): number {
   return Number(value);
 }
 export function toNotice(row: ItemRow): Notice {
-  const brief=noticeSummary(row);
   return {
     id: row._id,
     title: String(row.title || "未命名公告"),
     sourceName: String(row.sourceName || "来源未标注"),
     publishedAt: row.publishedAt || null,
     categories: displayedCategories(row),
-    summary: brief?.text || null,
-    ...(brief?{summaryBasis:brief.basis}:{}),
+    summary: null,
   };
 }
 export function originalUrl(row: ItemRow): string | null {
@@ -117,14 +119,14 @@ async function session(
   identity: IdentityContext,
   repo: Repository,
   directory = false,
-  summaries = false,
+  websites = false,
 ): Promise<WorkspaceSession> {
   const id = await repo.selectedSchool(identity.dataOwnerId);
   return {
     identity: { uid: identity.uid, username: null },
     school: id ? await repo.school(id) : null,
     legacyLinked: identity.legacyLinked,
-    capabilities: { reading: true, ai: true, operations: false, ...(directory ? { schoolDirectory:true } : {}), ...(summaries?{autoSummaries:true}:{}), ...(repo.setLabels ? {noticeLabels:true} : {}) },
+    capabilities: { reading: true, ai: true, operations: false, ...(directory ? { schoolDirectory:true } : {}), ...(websites?{websiteSources:true}:{}), ...(repo.setLabels ? {noticeLabels:true} : {}) },
   };
 }
 
@@ -132,7 +134,7 @@ export function createGateway(
   repo: Repository,
   config: OwnerConfig,
   now: () => number = Date.now,
-  features?: { bookmarks?: { handle(action: string, input: Record<string, unknown>, identity: IdentityContext): Promise<unknown>; has(ownerId: string, schoolId: string, itemId: string): Promise<boolean> }; ai?: { handle(action: string, input: Record<string, unknown>, identity: IdentityContext): Promise<unknown> }; directory?: { refresh(schoolId:string):Promise<unknown>; summarize?(schoolId:string):Promise<unknown>; request(name:unknown,identity:IdentityContext):Promise<unknown> } },
+  features?: { websites?:{handle(action:string,input:Record<string,unknown>,identity:IdentityContext):Promise<unknown>}; bookmarks?: { handle(action: string, input: Record<string, unknown>, identity: IdentityContext): Promise<unknown>; has(ownerId: string, schoolId: string, itemId: string): Promise<boolean> }; ai?: { handle(action: string, input: Record<string, unknown>, identity: IdentityContext): Promise<unknown> }; directory?: { refresh(schoolId:string):Promise<unknown>; request(name:unknown,identity:IdentityContext):Promise<unknown> } },
 ) {
   return async (
     event: unknown,
@@ -144,6 +146,10 @@ export function createGateway(
       const { action, input } = inputOf(event);
       operation = action;
       const filters = action === "feed.list" ? filtersOf(input) : {};
+      if(action.startsWith('sources.')){
+        if(!features?.websites)reject('SERVICE_UNAVAILABLE','网站来源管理尚未接通。');
+        return{ok:true,data:await features.websites.handle(action,input,identity)};
+      }
       if (action.startsWith("favorites.")) {
         if (!features?.bookmarks) reject("SERVICE_UNAVAILABLE", "收藏服务尚未接通。");
         return { ok: true, data: await features.bookmarks.handle(action, input, identity) };
@@ -153,7 +159,7 @@ export function createGateway(
         return { ok: true, data: await features.ai.handle(action, input, identity) };
       }
       if (action === "session.get")
-        return { ok: true, data: await session(identity, repo,Boolean(features?.directory),Boolean(features?.directory?.summarize)) };
+        return { ok: true, data: await session(identity, repo,Boolean(features?.directory),Boolean(features?.websites)) };
       if (action === 'school.request') {
         if (!features?.directory) reject('SERVICE_UNAVAILABLE','学校申请服务尚未接通。');
         return { ok:true,data:await features.directory.request(input.schoolName,identity) };
@@ -174,17 +180,13 @@ export function createGateway(
       if (!school) reject("SCHOOL_NOT_FOUND", "学校不在目录中，请重新选择。");
       if (action === "school.select") {
         await repo.selectSchool(identity.dataOwnerId, schoolId);
-        return { ok: true, data: await session(identity, repo,Boolean(features?.directory),Boolean(features?.directory?.summarize)) };
+        return { ok: true, data: await session(identity, repo,Boolean(features?.directory),Boolean(features?.websites)) };
       }
       if ((await repo.selectedSchool(identity.dataOwnerId)) !== schoolId)
         reject("STALE_SCOPE", "当前学校已变化，请刷新后重试。");
       if (action === 'school.refresh') {
         if (!features?.directory) reject('SERVICE_UNAVAILABLE','学校公开公告读取服务尚未接通。');
         return {ok:true,data:await features.directory.refresh(schoolId)};
-      }
-      if(action==='school.summarize') {
-        if(!features?.directory?.summarize)reject('SERVICE_UNAVAILABLE','自动摘要尚未接通。');
-        return {ok:true,data:await features.directory.summarize(schoolId)};
       }
       const scope = await repo.scope(schoolId, identity.dataOwnerId);
       const since = filterSince(filters, now());

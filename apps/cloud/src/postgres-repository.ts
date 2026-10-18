@@ -41,7 +41,7 @@ export function postgresRepository(pool: SqlPool): Repository {
       const values: any[] = [scope.ownerId, scope.schoolId, scope.publicSourceIds, scope.privateSourceIds, since];
       const bind = (value: unknown) => { values.push(value); return `$${values.length}`; };
       // SQL predicates precede pagination. The gateway also rechecks every returned row.
-      const visible = `(body->>'ownerOpenid'=$1 OR (
+      const visible = `((body->>'ownerOpenid'=$1 AND (body->>'importKind' IS DISTINCT FROM 'website' OR body->'schoolIds' ? $2)) OR (
         coalesce(body->>'ownerOpenid','')='' AND coalesce(body->>'scope','')<>'private'
         AND coalesce(body->>'type','')<>'manual' AND coalesce(body->>'category','')<>'mail'
         AND NOT coalesce(body->'categories' ? 'mail',false)

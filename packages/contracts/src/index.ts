@@ -17,7 +17,7 @@ export interface WorkspaceSession {
   identity: AuthSession;
   school: School | null;
   legacyLinked: boolean;
-  capabilities: { reading: true; ai: boolean; operations: false; schoolDirectory?: boolean; noticeLabels?: boolean; autoSummaries?:boolean };
+  capabilities: { reading: true; ai: boolean; operations: false; schoolDirectory?: boolean; noticeLabels?: boolean; websiteSources?:boolean };
 }
 export interface Notice {
   id: string;
@@ -26,7 +26,6 @@ export interface Notice {
   publishedAt: string | null;
   categories: string[];
   summary: string | null;
-  summaryBasis?: 'body'|'title';
 }
 export interface NoticePage {
   items: Notice[];
@@ -47,6 +46,8 @@ export interface NoticeDetail extends Notice {
   attachmentNote: string;
 }
 export interface Favorite { itemId: string; schoolId: string; schoolName: string; savedAt: string; notice: Notice | null }
+export interface WebsiteSourceInput {name:string;entryUrl:string;type:'html_list'|'html_detail'|'rss'|'json_api';categories:string[];intervalMinutes:number;selectors:Record<string,string>;allowAi:boolean;authorized:boolean}
+export interface WebsiteSource extends WebsiteSourceInput {id:string;enabled:boolean;lastSuccessAt:string|null;message:string;count:number}
 export interface AiConnection { provider: "deepseek" | "openai"; model: string; apiKey: string }
 export interface AiQuota { day: string; timezone: "Asia/Shanghai"; limit: number; used: number; held: number; remaining: number; resetsAt: string }
 export interface ReadingDocument { reference: string; itemId: string; schoolId: string | null; title: string; originalUrl: string | null; version: string; markdown: string }
@@ -62,6 +63,12 @@ export interface AiStartInput {
   provider?: "deepseek" | "openai"; model?: string; task: "summary" | "outline" | "answer"; question?: string; fingerprint?: string;
 }
 export interface GatewayActions {
+  "sources.list":{input:{schoolId:string};output:{sources:WebsiteSource[]}};
+  "sources.save":{input:{schoolId:string;sourceId?:string;source:WebsiteSourceInput};output:{id:string}};
+  "sources.test":{input:{schoolId:string;sourceId:string};output:{count:number;titles:string[];message:string}};
+  "sources.refresh":{input:{schoolId:string;sourceId:string};output:{count:number;message:string}};
+  "sources.toggle":{input:{schoolId:string;sourceId:string;enabled:boolean};output:{enabled:boolean}};
+  "sources.remove":{input:{schoolId:string;sourceId:string};output:{removed:boolean}};
   "session.get": { input: Record<string, never>; output: WorkspaceSession };
   "school.list": {
     input: { cursor?: string };
@@ -69,7 +76,6 @@ export interface GatewayActions {
   };
   "school.select": { input: { schoolId: string }; output: WorkspaceSession };
   "school.refresh": { input: { schoolId: string }; output: SchoolSync };
-  "school.summarize": {input:{schoolId:string};output:{items:Array<{id:string;summary:string;summaryBasis:'body'|'title'}>;more:boolean}};
   "school.request": { input: { schoolName: string }; output: SchoolRequest };
   "feed.list": {
     input: FeedFilters & { schoolId: string; cursor?: string };

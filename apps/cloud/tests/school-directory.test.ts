@@ -59,21 +59,6 @@ test('school migrations, cached public feeds and idempotent authenticated school
       const result=await failed.refresh('school_002');assert.equal(result.state,'unavailable');assert.ok(!JSON.stringify(result).includes('raw credentials'));
       assert.equal((await repo.school('school_002'))!.status,'candidate');
     });
-    await t.test('shared free summaries read at most three public bodies per request, cache across users and exclude private rows',async()=>{
-      const before=reads;
-      const records=await sql.query("SELECT id,body FROM campus_documents WHERE collection='items' AND body->>'sourceId'='directory_school_001__teaching'");
-      const sample=records.rows[0]!;
-      await sql.query("INSERT INTO campus_documents(collection,id,body) VALUES('items','private-summary-test',$1::jsonb)",[JSON.stringify({...sample.body,_id:'private-summary-test',ownerOpenid:'someone-else'})]);
-      const result=await directory.summarize(school.id);
-      assert.equal(result.items.length,3);assert.equal(result.more,false);assert.ok(reads-before<=3);
-      assert.ok(result.items.every(row=>row.summaryBasis==='body'&&Array.from(row.summary).length<=50));
-      assert.equal((await repo.item('private-summary-test'))!.autoSummary,undefined);
-      const cached=await directory.summarize(school.id);assert.equal(cached.items.length,0);assert.equal(reads-before,2);
-      const gateway=createGateway(repo,{ownerUid:'uid',dataOwnerId:'member'},Date.now,{directory:{refresh:directory.refresh,summarize:directory.summarize,request:async()=>({})}});
-      const rejected=await gateway({action:'school.summarize',input:{schoolId:'school_002'}},{uid:'uid',isAnonymous:false});assert.equal(rejected.ok,false);
-      const forged=await gateway({action:'school.summarize',input:{schoolId:school.id,url:'https://evil.test'}},{uid:'uid',isAnonymous:false});assert.equal(forged.ok,false);
-      assert.equal(reads-before,2);
-    });
     await t.test('partial public columns, versioned cache and bulk refresh retain existing bodies and personal labels',async()=>{
       await sql.query("UPDATE campus_documents SET body=body || '{\"retryAt\":\"2000-01-01\"}'::jsonb WHERE collection='school_sync' AND id='school_002'");
       let fetches=0;

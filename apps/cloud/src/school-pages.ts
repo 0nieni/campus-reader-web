@@ -6,7 +6,7 @@ import { load } from 'cheerio/slim';
 import { publicAddress } from './model-provider';
 import { AppError } from './errors';
 
-export interface SchoolSource { id: string; name: string; announcementUrl: string; homepage: string; listSelector?: string; articleSelector?: string; dateSelector?:string }
+export interface SchoolSource { id: string; name: string; announcementUrl: string; homepage: string; listSelector?: string; articleSelector?: string; dateSelector?:string; exactHost?:boolean; allowedPath?:(url:string)=>boolean }
 export interface SchoolPage { html: string; url: string }
 export type PageReader = (url: string, school: SchoolSource) => Promise<SchoolPage>;
 const compact = (s: string) => s.replace(/\s+/g, ' ').trim();
@@ -16,8 +16,9 @@ export function approvedSchoolUrl(value: string, school: SchoolSource): URL {
   const url = new URL(value);
   if (/^(?:webvpn|vpn|sso|cas|auth)\./i.test(url.hostname)) throw new AppError('SOURCE_LOGIN_REQUIRED','此链接为学校登录或VPN入口，未采集受限内容。');
   const hosts = [new URL(school.announcementUrl).hostname, new URL(school.homepage).hostname];
-  const allowed = hosts.some(host => url.hostname === host || (host.endsWith('.edu.cn') && (url.hostname === host.split('.').slice(-3).join('.') || url.hostname.endsWith('.' + host.split('.').slice(-3).join('.')))));
+  const allowed = hosts.some(host => url.hostname === host || (!school.exactHost && host.endsWith('.edu.cn') && (url.hostname === host.split('.').slice(-3).join('.') || url.hostname.endsWith('.' + host.split('.').slice(-3).join('.')))));
   if (!allowed || !['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.port || /[{}]|%7b|%7d/i.test(url.href) || url.href.length > 1800) throw fail();
+  if(school.allowedPath&&!school.allowedPath(url.href))throw new AppError('SOURCE_ROBOTS_BLOCKED','该路径不允许自动采集，请使用原站。');
   url.hash = ''; return url;
 }
 /** No cookies, credentials, campus-login bypass or TLS exceptions. Each redirect
@@ -38,7 +39,7 @@ export const readSchoolPage: PageReader = async (value, school) => {
       const req = (url.protocol === 'https:' ? https : http).get(url, {
         agent: false,
         lookup: ((_host: string, options: { all?: boolean }, cb: any) => options?.all ? cb(null, [{ address: addresses[0]!.address, family: 4 }]) : cb(null, addresses[0]!.address, 4)) as any,
-        headers: { 'user-agent': 'CampusReader/1.0 (public university notices)', accept: 'text/html,application/xhtml+xml,application/xml,text/xml', 'accept-encoding': 'identity' },
+        headers: { 'user-agent': 'CampusReader/1.0 (public university notices)', accept: 'text/html,application/xhtml+xml,application/xml,text/xml,application/json,application/rss+xml,application/atom+xml', 'accept-encoding': 'identity' },
       }, res => {
         if ([301,302,303,307,308].includes(res.statusCode || 0) && res.headers.location) {
           res.resume(); read(new URL(res.headers.location, url).href, redirects + 1).then(resolve, reject); return;
@@ -47,7 +48,7 @@ export const readSchoolPage: PageReader = async (value, school) => {
           res.resume();
           reject(new AppError(res.statusCode===404?'SOURCE_NOT_FOUND':[401,403].includes(res.statusCode||0)?'SOURCE_RESTRICTED':'SOURCE_UNAVAILABLE',res.statusCode===404?'学校公告栏目已调整或不存在。':[401,403].includes(res.statusCode||0)?'学校网站拒绝公开访问，请使用原站允许的访问方式。':'学校源站暂时不可用，请稍后重试。'));return;
         }
-        if (!/text\/(?:html|xml)|application\/(?:xhtml\+xml|xml)/i.test(String(res.headers['content-type'] || ''))) { res.resume(); finishError(); return; }
+        if (!/text\/(?:html|xml)|application\/(?:xhtml\+xml|xml|json|rss\+xml|atom\+xml)/i.test(String(res.headers['content-type'] || '')) && !(url.pathname==='/robots.txt' && /text\/plain/i.test(String(res.headers['content-type']||'')))) { res.resume(); finishError(); return; }
         const chunks: Buffer[] = []; let bytes = 0;
         res.on('data', (chunk: Buffer) => { bytes += chunk.length; if (bytes > 1500000) { req.destroy(); finishError(); } else chunks.push(chunk); });
         res.on('error', finishError);

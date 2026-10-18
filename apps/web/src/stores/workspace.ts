@@ -37,7 +37,6 @@ export function workspaceStore(transport: Transport) {
     let feedRequest = 0;
     let activeFeed: Promise<void> | null = null;
     let sourceJob: { ticket:number; promise:Promise<void> } | null = null;
-    let summaryTicket: number | null = null;
     type CachedPage = { schoolId:string; items:Notice[]; nextCursor:string|null; expiresAt:number };
     // Metadata only, in this authenticated browser session. Never Storage/CDN.
     const feedCache = new Map<string,CachedPage>();
@@ -61,7 +60,7 @@ export function workspaceStore(transport: Transport) {
     function clear() {
       epoch++;
       detailEpoch++;
-      sessionEpoch++;schoolEpoch++;feedRequest++;feedCache.clear();activeFeed=null;sourceJob=null;summaryTicket=null;selectingSchool=false;
+      sessionEpoch++;schoolEpoch++;feedRequest++;feedCache.clear();activeFeed=null;sourceJob=null;selectingSchool=false;
       auth.value = null;
       workspace.value = null;
       schools.value = [];
@@ -145,28 +144,6 @@ export function workspaceStore(transport: Transport) {
         else catalogueError.value=safeError(caught);
       }}finally{if(ticket===sessionEpoch)schoolsLoading.value=false;}
     }
-    function fillSummaries() {
-      const schoolId=workspace.value?.school?.id,ticket=schoolEpoch;
-      if(!schoolId||!workspace.value?.capabilities.autoSummaries||summaryTicket===ticket)return;
-      summaryTicket=ticket;
-      const current=()=>schoolEpoch===ticket&&workspace.value?.school?.id===schoolId;
-      void(async()=>{try {
-        // Three public articles per request, at most ninety per school visit.
-        // Results only patch summary metadata: never replace pages or close detail.
-        for(let batch=0;batch<30&&current();batch++) {
-          const result=await transport.call('school.summarize',{schoolId});
-          if(!current())return;
-          for(const brief of result.items) {
-            const patch=(rows:Notice[])=>{const row=rows.find(row=>row.id===brief.id);if(row){row.summary=brief.summary;row.summaryBasis=brief.summaryBasis;}};
-            patch(items.value);
-            if(detail.value?.id===brief.id){detail.value.summary=brief.summary;detail.value.summaryBasis=brief.summaryBasis;}
-            for(const page of feedCache.values())if(page.schoolId===schoolId)patch(page.items);
-          }
-          if(!result.more||!result.items.length)break;
-        }
-      }catch(caught){if(current()&&caught instanceof ClientError&&['UNAUTHENTICATED','FORBIDDEN'].includes(caught.code))failure(caught);}
-      finally{if(summaryTicket===ticket)summaryTicket=null;}})();
-    }
     function checkSchoolSources(initialFeed:Promise<void>) {
       const schoolId=workspace.value?.school?.id,ticket=schoolEpoch;
       if(!schoolId||!workspace.value?.capabilities.schoolDirectory)return;
@@ -193,7 +170,7 @@ export function workspaceStore(transport: Transport) {
       }catch(caught){if(current()){
         if(caught instanceof ClientError&&['UNAUTHENTICATED','FORBIDDEN'].includes(caught.code))failure(caught);
         else schoolSync.value={state:'unavailable',count:0,checkedAt:null,message:safeError(caught)};
-      }}finally{if(current()){refreshingSchool.value=false;sourceJob=null;void initialFeed.then(()=>{if(current())fillSummaries();});}}})();
+      }}finally{if(current()){refreshingSchool.value=false;sourceJob=null;}}})();
       sourceJob={ticket,promise};
     }
     function refreshSchool(background = false) {
@@ -205,6 +182,12 @@ export function workspaceStore(transport: Transport) {
       return first;
     }
     async function applyUpdates() {
+      await loadFeed(false,true,true);
+    }
+    async function sourcesChanged() {
+      const schoolId=workspace.value?.school?.id;
+      for(const[key,page]of feedCache)if(page.schoolId===schoolId)feedCache.delete(key);
+      feedRequest++;loading.value=false;
       await loadFeed(false,true,true);
     }
     async function applyFilters(value: FeedFilters) {
@@ -280,7 +263,7 @@ export function workspaceStore(transport: Transport) {
     }
     async function selectSchool(schoolId: string) {
       const ticket = ++epoch;
-      schoolEpoch++;sourceJob=null;summaryTicket=null;refreshingSchool.value=false;pendingUpdates.value=false;selectingSchool=true;
+      schoolEpoch++;sourceJob=null;refreshingSchool.value=false;pendingUpdates.value=false;selectingSchool=true;
       detailEpoch++;
       loading.value = true;
       error.value = "";
@@ -316,7 +299,7 @@ export function workspaceStore(transport: Transport) {
         if (ticket === epoch && request === detailEpoch) {
           detail.value = result;
           const row=items.value.find(row=>row.id===itemId);
-          if(row){row.summary=result.summary;row.summaryBasis=result.summaryBasis;rememberFeed(schoolId);}
+          if(row){row.summary=result.summary;rememberFeed(schoolId);}
         }
       } catch (caught) {
         if (ticket === epoch && request === detailEpoch) failure(caught);
@@ -361,6 +344,7 @@ export function workspaceStore(transport: Transport) {
       loadFeed,
       refreshSchool,
       applyFilters,
+      sourcesChanged,
       noticeLabelsChanged,
       loadSchools,
       openNotice,
