@@ -5,6 +5,7 @@ import { NetlifyDB } from '@netlify/database-dev';
 import { getDatabase } from '@netlify/database';
 import { postgresRepository } from '../src/postgres-repository';
 import { schoolDirectory } from '../src/school-directory';
+import {schoolSources} from '../src/school-sources';
 import { schoolRequests,schoolName } from '../src/school-requests';
 import { approvedSchoolUrl,extractArticle,extractNotices,fullDate,type SchoolSource } from '../src/school-pages';
 import { createGateway } from '../src/gateway';
@@ -41,7 +42,7 @@ test('school migrations, cached public feeds and idempotent authenticated school
       assert.equal(Number((await sql.query("SELECT count(*) FROM campus_documents WHERE collection='items'")).rows[0].count),27);
     });
     let reads=0;
-    const directory=schoolDirectory(sql,repo,async url=>{reads++;return {url,html:url===school.announcementUrl?html:'<article><p>公开公告测试正文：关于学生竞赛报名的通知，请在规定时间内完成报名，详细安排以原文附件为准。</p></article>'};});
+    const directory=schoolDirectory(sql,repo,async url=>{reads++;return {url,html:url===schoolSources({...school,status:'candidate'}).sources[0]!.announcementUrl?html:'<article><p>公开公告测试正文：关于学生竞赛报名的通知，请在规定时间内完成报名，详细安排以原文附件为准。</p></article>'};});
     repo.material=directory.material;
     await t.test('school refresh caches a scoped feed; article bodies are fetched lazily and cached',async()=>{
       assert.equal((await directory.refresh(school.id)).count,3);await directory.refresh(school.id);assert.equal(reads,1);
@@ -57,6 +58,23 @@ test('school migrations, cached public feeds and idempotent authenticated school
       const failed=schoolDirectory(sql,repo,async()=>{throw new Error('raw credentials must not leak');});
       const result=await failed.refresh('school_002');assert.equal(result.state,'unavailable');assert.ok(!JSON.stringify(result).includes('raw credentials'));
       assert.equal((await repo.school('school_002'))!.status,'candidate');
+    });
+    await t.test('partial public columns, versioned cache and bulk refresh retain existing bodies and personal labels',async()=>{
+      await sql.query("UPDATE campus_documents SET body=body || '{\"retryAt\":\"2000-01-01\"}'::jsonb WHERE collection='school_sync' AND id='school_002'");
+      let fetches=0;
+      const partial=schoolDirectory(sql,repo,async(url,s)=>{fetches++;if(url.includes('pcs.'))throw new Error('private diagnostic');return {url,html:`<ul><li><time>2026-10-17</time><a href='/info/1202/4144.htm'>公开统计竞赛报名通知</a></li></ul>`};});
+      const result=await partial.refresh('school_002');assert.equal(result.state,'ready');assert.equal(result.count,1);assert.equal(result.sources?.length,2);assert.equal(result.sources?.[1]?.state,'unavailable');assert.ok(!JSON.stringify(result).includes('private diagnostic'));assert.match(result.coverage!,/校内公告/);
+      await partial.refresh('school_002');assert.equal(fetches,2);
+      const rows=await sql.query("SELECT id,body FROM campus_documents WHERE collection='items' AND body->>'sourceId'='directory_school_002__statistics'");
+      const row=rows.rows[0]!;const created=row.body.createdAt;
+      await sql.query("UPDATE campus_documents SET body=body || '{\"contentText\":\"保留的公开正文\"}'::jsonb WHERE collection='items' AND id=$1",[row.id]);
+      await repo.setLabels!('member',row.id,['academic']);
+      await sql.query("UPDATE campus_documents SET body=body || '{\"version\":\"old-parser\"}'::jsonb WHERE collection='school_sync' AND id='school_002'");
+      await partial.refresh('school_002');assert.equal(fetches,4);
+      const preserved=(await repo.item(row.id))!;assert.equal(preserved.contentText,'保留的公开正文');assert.equal(preserved.createdAt,created);assert.deepEqual((await repo.personalize!(preserved,'member')).personalCategories,['academic']);
+      // Even a different version must not steal an unexpired active lease.
+      await sql.query("UPDATE campus_documents SET body=body || '{\"version\":\"old-parser\",\"state\":\"checking\"}'::jsonb WHERE collection='school_sync' AND id='school_002'");
+      assert.equal((await partial.refresh('school_002')).state,'checking');assert.equal(fetches,4);
     });
     await t.test('repeated/concurrent applications notify once and daily limits cannot overwrite favorites or change recipient data',async()=>{
       const delivered: URLSearchParams[]=[];

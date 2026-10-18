@@ -317,7 +317,18 @@ function schoolChanged(event: Event) {
         </button>
         <p v-if="store.schoolSync" class="muted small" role="status">{{store.schoolSync.message}}</p>
         <p v-else-if="store.workspace.school && store.workspace.school.status !== 'ready'" class="muted small">该学校公开公告入口待核验，可能暂时没有可读取的公告。</p>
-        <p v-if="safeOriginal(store.workspace.school?.announcementUrl || null)" class="small"><a :href="safeOriginal(store.workspace.school?.announcementUrl || null)!" target="_blank" rel="noopener noreferrer">查看学校公告原站 ↗</a></p>
+        <details v-if="store.schoolSync?.sources?.length" class="school-sources small">
+          <summary>已接入的公告来源与覆盖范围</summary>
+          <p class="muted">{{store.schoolSync.coverage}}</p>
+          <ul>
+            <li v-for="source in store.schoolSync.sources" :key="source.url">
+              <a :href="safeOriginal(source.url) || undefined" target="_blank" rel="noopener noreferrer">{{source.name}}</a>
+              <span> · {{source.state === 'ready' ? `${source.count} 条` : '暂不可用'}}</span>
+              <p class="muted">{{source.message}}</p>
+            </li>
+          </ul>
+        </details>
+        <p v-if="safeOriginal(store.workspace.school?.announcementUrl || null)" class="small"><a :href="safeOriginal(store.workspace.school?.announcementUrl || null)!" target="_blank" rel="noopener noreferrer">查看目录原始入口 ↗</a></p>
         <form class="feed-filters" @submit.prevent="search">
           <label for="notice-keyword" class="filter-label">查找公告</label>
           <div class="search-row">

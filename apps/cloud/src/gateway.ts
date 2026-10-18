@@ -224,7 +224,7 @@ export function createGateway(
       if (repo.material) {
         try { row = await repo.material(row); }
         catch (error) {
-          if (!(error instanceof AppError) || !['NO_MATERIAL','SOURCE_UNAVAILABLE'].includes(error.code)) throw error;
+          if (!(error instanceof AppError) || !['NO_MATERIAL','SOURCE_UNAVAILABLE','SOURCE_LOGIN_REQUIRED','SOURCE_RESTRICTED','SOURCE_NOT_FOUND'].includes(error.code)) throw error;
           materialNote = error.message;
         }
       }
