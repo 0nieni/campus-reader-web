@@ -6,7 +6,7 @@ import { readSchoolPage, extractNotices, extractArticle, PARSER_VERSION, type Pa
 import {schoolSources,publicSourceId} from './school-sources';
 import { AppError } from './errors';
 
-export function schoolDirectory(pool: SqlPool, repo: Repository, reader: PageReader = readSchoolPage, now = Date.now) {
+export function schoolDirectory(pool: SqlPool, repo: Repository, reader: PageReader = readSchoolPage, now = Date.now, options:{trackActivity?:boolean}={}) {
   async function configuration(id:string) {
     const school=await repo.school(id);
     if(!school?.homepage)throw new AppError('SOURCE_UNAVAILABLE','此学校尚未配置公开公告入口。');
@@ -23,11 +23,15 @@ export function schoolDirectory(pool: SqlPool, repo: Repository, reader: PageRea
       ON CONFLICT(collection,id) DO UPDATE SET body=campus_documents.body || EXCLUDED.body
       WHERE coalesce(campus_documents.body->>'retryAt','')<$3
       OR (campus_documents.body->>'version' IS DISTINCT FROM $4 AND campus_documents.body->>'state' IS DISTINCT FROM 'checking') RETURNING body`,
-      [id,JSON.stringify({state:'checking',version,retryAt:new Date(now()+5*60000).toISOString(),checkedAt:at}),at,version]);
+      [id,JSON.stringify({state:'checking',version,retryAt:new Date(now()+5*60000).toISOString(),checkedAt:at,...(options.trackActivity===false?{}:{lastVisitedAt:at})}),at,version]);
     if(!lease.rows.length) {
+      // Aggregate school activity only, no account IDs or visit history. A warm
+      // job must never keep its own school eligible for future warming.
+      if(options.trackActivity!==false)await pool.query(`UPDATE campus_documents SET body=body || $2::jsonb WHERE collection='school_sync' AND id=$1
+        AND coalesce(body->>'lastVisitedAt','')<$3`,[id,JSON.stringify({lastVisitedAt:at}),new Date(now()-30*60000).toISOString()]);
       const cached=await pool.query("SELECT body FROM campus_documents WHERE collection='school_sync' AND id=$1",[id]);
       const body=cached.rows[0]?.body || {};
-      return {state:body.state==='ready'?'ready':body.state==='unavailable'?'unavailable':'checking',count:Number(body.count||0),checkedAt:body.checkedAt||null,message:body.message||'正在读取学校公开页面，请稍后刷新。',coverage:config.note,...(Array.isArray(body.sources)?{sources:body.sources}:{})};
+      return {state:body.state==='ready'?'ready':body.state==='unavailable'?'unavailable':'checking',count:Number(body.count||0),checkedAt:body.checkedAt||null,changed:false,message:body.state==='checking'?'正在更新学校公开来源，已有公告仍可阅读。':body.message||'正在读取学校公开页面，请稍后刷新。',coverage:config.note,...(Array.isArray(body.sources)?{sources:body.sources}:{})};
     }
     // At most three reviewed public columns per selected school; no crawl of all
     // schools at login. A failed column never discards another column's results.
@@ -49,13 +53,15 @@ export function schoolDirectory(pool: SqlPool, repo: Repository, reader: PageRea
     // Preserve cached bodies, original discovery dates and separate personal labels.
     if(sourceBodies.length)await pool.query(`INSERT INTO campus_documents(collection,id,body) SELECT 'sources',entry->>'_id',entry FROM jsonb_array_elements($1::jsonb) entry
       ON CONFLICT(collection,id) DO UPDATE SET body=EXCLUDED.body`,[JSON.stringify(sourceBodies)]);
-    if(items.size)await pool.query(`INSERT INTO campus_documents(collection,id,body) SELECT 'items',entry->>'_id',entry FROM jsonb_array_elements($1::jsonb) entry
-      ON CONFLICT(collection,id) DO UPDATE SET body=campus_documents.body || (EXCLUDED.body - 'discoveredAt' - 'createdAt')`,[JSON.stringify([...items.values()])]);
+    let changed=false;
+    if(items.size){const writes=await pool.query(`INSERT INTO campus_documents(collection,id,body) SELECT 'items',entry->>'_id',entry FROM jsonb_array_elements($1::jsonb) entry
+      ON CONFLICT(collection,id) DO UPDATE SET body=campus_documents.body || (EXCLUDED.body - 'discoveredAt' - 'createdAt')
+      WHERE campus_documents.body IS DISTINCT FROM campus_documents.body || (EXCLUDED.body - 'discoveredAt' - 'createdAt') RETURNING id`,[JSON.stringify([...items.values()])]);changed=writes.rows.length>0;}
     const recent=[...items.values()].filter(row=>typeof row.publishedAt==='string' && Date.parse(row.publishedAt)>=now()-365*86400000).length;
     const undated=[...items.values()].filter(row=>!row.publishedAt).length;
     const ready=sources.filter(s=>s.state==='ready').length;
     if(ready)await pool.query("UPDATE campus_documents SET body=body || '{\"status\":\"ready\"}'::jsonb WHERE collection='schools' AND id=$1",[id]);
-    const result:SchoolSync={state:ready?'ready':'unavailable',count:items.size,checkedAt:at,coverage:config.note,sources,
+    const result:SchoolSync={state:ready?'ready':'unavailable',count:items.size,checkedAt:at,changed,coverage:config.note,sources,
       message:ready?`已读取 ${ready}/${sources.length} 个栏目，共 ${items.size} 条公告（近一年已标注日期 ${recent} 条，日期不完整 ${undated} 条）。${ready<sources.length?'部分栏目暂不可用。':''}列表缓存一小时；正文按需读取，图片和附件不自动识别。`:'本次栏目均未读取成功，保留已有公告。请查看下方来源状态或学校原站。'};
     await pool.query("UPDATE campus_documents SET body=body || $2::jsonb WHERE collection='school_sync' AND id=$1 AND body->>'version'=$3",[id,JSON.stringify({...result,retryAt:new Date(now()+(ready?3600000:5*60000)).toISOString()}),version]);
     return result;

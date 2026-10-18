@@ -11,7 +11,7 @@ export interface School {
   homepage?: string;
   tags?: string[];
 }
-export interface SchoolSync { state: 'ready' | 'checking' | 'unavailable'; count: number; checkedAt: string | null; message: string; coverage?:string; sources?:Array<{name:string;url:string;state:'ready'|'unavailable';count:number;message:string}> }
+export interface SchoolSync { state: 'ready' | 'checking' | 'unavailable'; count: number; checkedAt: string | null; message: string; changed?:boolean; coverage?:string; sources?:Array<{name:string;url:string;state:'ready'|'unavailable';count:number;message:string}> }
 export interface SchoolRequest { id: string; state: 'pending' | 'submitted' | 'unknown'; message: string }
 export interface WorkspaceSession {
   identity: AuthSession;
