@@ -440,10 +440,15 @@ select {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  min-width: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior-y: contain;
   background: #fff;
   border-right: 1px solid var(--line);
   padding: 24px 22px 0;
 }
+.notice-index > * { flex-shrink: 0; }
 .index-heading {
   display: flex;
   align-items: center;
@@ -472,7 +477,6 @@ select {
 .search-row input { width: 100%; min-width: 0; padding: 10px; font-size: 12px; border: 1px solid #d8e2ef; border-radius: 4px; color: #173766; background: #fff; }
 .search-row button { flex-shrink: 0; padding: 8px 14px; font-size: 12px; }
 .filter-options { font-size: 12px; margin-top: 10px; }
-.filter-options[open] { max-height: 240px; overflow: auto; }
 .filter-options summary { color: var(--blue); cursor: pointer; }
 .filter-options fieldset { border: 0; padding: 10px 0; margin: 0; }
 .filter-options legend { font-size: 11px; color: var(--muted); padding-top: 10px; }
@@ -487,10 +491,9 @@ select {
   font-size: 12px;
 }
 .notice-scroll {
-  overflow: auto;
+  overflow: visible;
   margin-top: 18px;
-  flex: 1;
-  min-height: 0;
+  flex: none;
 }
 .notice-row {
   border-top: 1px solid #edf1f6;
