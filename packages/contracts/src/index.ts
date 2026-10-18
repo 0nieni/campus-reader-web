@@ -17,7 +17,7 @@ export interface WorkspaceSession {
   identity: AuthSession;
   school: School | null;
   legacyLinked: boolean;
-  capabilities: { reading: true; ai: boolean; operations: false; schoolDirectory?: boolean; noticeLabels?: boolean };
+  capabilities: { reading: true; ai: boolean; operations: false; schoolDirectory?: boolean; noticeLabels?: boolean; autoSummaries?:boolean };
 }
 export interface Notice {
   id: string;
@@ -26,6 +26,7 @@ export interface Notice {
   publishedAt: string | null;
   categories: string[];
   summary: string | null;
+  summaryBasis?: 'body'|'title';
 }
 export interface NoticePage {
   items: Notice[];
@@ -68,6 +69,7 @@ export interface GatewayActions {
   };
   "school.select": { input: { schoolId: string }; output: WorkspaceSession };
   "school.refresh": { input: { schoolId: string }; output: SchoolSync };
+  "school.summarize": {input:{schoolId:string};output:{items:Array<{id:string;summary:string;summaryBasis:'body'|'title'}>;more:boolean}};
   "school.request": { input: { schoolName: string }; output: SchoolRequest };
   "feed.list": {
     input: FeedFilters & { schoolId: string; cursor?: string };

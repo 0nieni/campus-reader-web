@@ -10,6 +10,7 @@ export interface ItemRow extends Resource {
   discoveredAt?: string;
   createdAt?: string;
   summary?: { oneLine?: string };
+  autoSummary?: {text:string;basis:'body'|'title';version:string;checkedAt?:string};
   originalUrl?: string;
   contentText?: string;
   aiProcessing?: string;

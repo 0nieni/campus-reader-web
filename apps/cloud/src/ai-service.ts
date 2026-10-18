@@ -14,7 +14,8 @@ import { diagnoseOfficial, failureMessages } from "./model-diagnostics";
 const TASKS = "web_ai_tasks", ACCOUNTS = "web_ai_accounts";
 export const beijingDay = (now = Date.now()) => new Date(now + 8 * 3600000).toISOString().slice(0, 10);
 const number = (key: string, fallback: number, max: number) => { const value = Number(process.env[key] ?? fallback); return Number.isFinite(value) ? Math.max(0, Math.min(max, Math.floor(value))) : fallback; };
-export const dailyLimit = () => number("AI_DAILY_LIMIT", 5, 10000);
+// Existing hosted AI_DAILY_LIMIT=5 must not keep granting the former allowance.
+export const dailyLimit = () => number("AI_DAILY_LIMIT", 3, 3);
 interface Task extends Omit<ReadingTask, "state" | "totalSteps" | "title"> {
   state: ReadingTask["state"] | "new"; owner: string; fingerprint: string; accountId: string;
   docs: ReadingDocument[]; versions: string; batches: Batch[]; notes: string[]; question: string; inFlight: number | null; startedAt: string | null; testOnly?: boolean; endpointHash?: string; relayLease?: string;

@@ -371,6 +371,7 @@ function schoolChanged(event: Event) {
           <button class="text-button" :disabled="store.loading" @click="store.applyUpdates()">显示更新</button>
         </div>
         <p v-else-if="store.refreshingSchool && store.items.length" class="muted small" role="status">已显示保存的公告，正在后台检查学校来源…</p>
+        <p class="muted small summary-help">公告摘要免费，不扣 AI 阅读次数；仅标题、图片或附件公告可能无法生成正文摘要。AI 阅读每人每天免费 3 次。</p>
         <div class="notice-scroll" :aria-busy="store.loading">
           <p
             v-if="store.loading && !store.items.length"
@@ -411,12 +412,11 @@ function schoolChanged(event: Event) {
               "
             >
               <div class="notice-meta">
-                <span>{{ categoryLabel(item.categories) || "公告" }}</span
-                ><time>{{ displayTime(item.publishedAt) }}</time>
+                <div class="notice-origin"><span class="notice-category">{{ categoryLabel(item.categories) || "公告" }}</span><span class="notice-source">{{ item.sourceName }}</span></div>
+                <time>{{ displayTime(item.publishedAt) }}</time>
               </div>
               <h2>{{ item.title }}</h2>
-              <p v-if="item.summary">{{ item.summary }}</p>
-              <span class="source-name">{{ item.sourceName }}</span>
+              <p v-if="item.summary" class="notice-summary"><span class="summary-label">{{ item.summaryBasis === 'title' ? '仅标题 · 未取得正文' : '自动摘要' }}</span>{{ item.summary }}</p>
             </button>
             <label class="selection-toggle"><input type="checkbox" :checked="selection.some(row => row.id === item.id)" :disabled="selection.length >= 8 && !selection.some(row => row.id === item.id)" @change="chooseNotice(item)" />用于 AI 阅读</label>
           </article>
