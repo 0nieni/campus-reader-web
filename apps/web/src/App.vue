@@ -275,10 +275,10 @@ function schoolChanged(event: Event) {
           </div>
           <button
             class="text-button"
-            :disabled="store.loading || !store.workspace.school"
+            :disabled="store.loading || store.refreshingSchool || !store.workspace.school"
             @click="store.refreshSchool()"
           >
-            刷新
+            {{store.refreshingSchool ? '检查更新中…' : '刷新'}}
           </button>
         </div>
         <label class="school-label" for="school">我的学校</label>
@@ -290,6 +290,7 @@ function schoolChanged(event: Event) {
           @change="schoolChanged"
         >
           <option value="" disabled>请选择学校</option>
+          <option v-if="store.workspace.school && !store.schools.some(school=>school.id===store.workspace!.school!.id)" :value="store.workspace.school.id">{{store.workspace.school.name}}</option>
           <option
             v-for="school in matchingSchools"
             :key="school.id"
@@ -304,13 +305,16 @@ function schoolChanged(event: Event) {
                   : "（未接入）"
             }}
           </option>
-          <option v-if="store.workspace.capabilities.schoolDirectory" value="__request__">没有找到自己的学校？联系客服添加</option>
+          <option v-if="store.workspace.capabilities.schoolDirectory && store.catalogueReady && !store.schoolsLoading" value="__request__">没有找到自己的学校？联系客服添加</option>
         </select>
         <SchoolRequestForm v-if="requestingSchool" :key="store.auth?.uid" :transport="featureTransport" />
-        <p v-if="store.schools.length > 10" class="muted small">目录共 {{store.schools.length}} 所学校{{schoolQuery.trim() ? `，匹配 ${matchingSchools.length} 所` : ''}}。</p>
+        <p v-if="store.schoolsLoading" class="muted small" role="status">学校目录正在加载，已有公告可先阅读…</p>
+        <p v-else-if="store.schools.length > 10" class="muted small">目录共 {{store.schools.length}} 所学校{{schoolQuery.trim() ? `，匹配 ${matchingSchools.length} 所` : ''}}。</p>
+        <p v-if="store.catalogueError" class="muted small" role="status">学校目录暂未完整加载：{{store.catalogueError}}。可稍后重新连接工作区。</p>
         <button
           v-if="store.schoolCursor"
           class="text-button more-schools"
+          :disabled="store.schoolsLoading"
           @click="moreSchools"
         >
           加载更多学校
@@ -362,6 +366,11 @@ function schoolChanged(event: Event) {
         <p v-if="store.error" class="error-message" role="alert">
           {{ store.error }}
         </p>
+        <div v-if="store.pendingUpdates" class="feed-update" role="status">
+          <span>公告有更新，可刷新列表；当前阅读内容已保留。</span>
+          <button class="text-button" :disabled="store.loading" @click="store.applyUpdates()">显示更新</button>
+        </div>
+        <p v-else-if="store.refreshingSchool && store.items.length" class="muted small" role="status">已显示保存的公告，正在后台检查学校来源…</p>
         <div class="notice-scroll" :aria-busy="store.loading">
           <p
             v-if="store.loading && !store.items.length"
@@ -370,6 +379,7 @@ function schoolChanged(event: Event) {
           >
             正在读取真实公告…
           </p>
+          <p v-else-if="!store.items.length && store.refreshingSchool" class="empty-state" role="status">还没有匹配的已保存公告，正在检查学校公开来源…</p>
           <div v-else-if="!store.items.length" class="empty-state">
             <h3>
               {{
@@ -413,7 +423,7 @@ function schoolChanged(event: Event) {
           <button
             v-if="store.nextCursor"
             class="load-more"
-            :disabled="store.loading"
+            :disabled="store.loading || store.pendingUpdates"
             @click="store.loadFeed(true)"
           >
             {{ store.loading ? "正在读取…" : "加载更多公告" }}

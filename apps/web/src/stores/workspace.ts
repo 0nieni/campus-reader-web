@@ -28,11 +28,39 @@ export function workspaceStore(transport: Transport) {
     const error = ref("");
     const loading = ref(false);
     const detailLoading = ref(false);
+    const schoolsLoading = ref(false), catalogueReady = ref(false), catalogueError = ref('');
+    const refreshingSchool = ref(false), pendingUpdates = ref(false);
     let epoch = 0;
     let detailEpoch = 0;
+    let sessionEpoch = 0, schoolEpoch = 0;
+    let selectingSchool = false;
+    let feedRequest = 0;
+    let activeFeed: Promise<void> | null = null;
+    let sourceJob: { ticket:number; promise:Promise<void> } | null = null;
+    type CachedPage = { schoolId:string; items:Notice[]; nextCursor:string|null; expiresAt:number };
+    // Metadata only, in this authenticated browser session. Never Storage/CDN.
+    const feedCache = new Map<string,CachedPage>();
+    const cloneNotices = (rows:Notice[]) => rows.map(row=>({...row,categories:[...row.categories]}));
+    function cacheKey(schoolId:string) {
+      return JSON.stringify([auth.value?.uid,schoolId,filters.value.keyword||'',filters.value.period||'all',[...(filters.value.categories??noticeCategories)].sort()]);
+    }
+    function restoreFeedCache(schoolId:string) {
+      const key=cacheKey(schoolId),cached=feedCache.get(key);
+      if(!cached)return;
+      if(cached.expiresAt<=Date.now() || cached.items.some(row=>row.publishedAt&&Date.parse(row.publishedAt)<Date.now()-365*86400000)){feedCache.delete(key);return;}
+      feedCache.delete(key);feedCache.set(key,cached);
+      items.value=cloneNotices(cached.items);nextCursor.value=cached.nextCursor;
+    }
+    function rememberFeed(schoolId:string) {
+      if(!auth.value||items.value.length>100)return;
+      const key=cacheKey(schoolId);
+      feedCache.delete(key);feedCache.set(key,{schoolId,items:cloneNotices(items.value),nextCursor:nextCursor.value,expiresAt:Date.now()+5*60000});
+      while(feedCache.size>8)feedCache.delete(feedCache.keys().next().value!);
+    }
     function clear() {
       epoch++;
       detailEpoch++;
+      sessionEpoch++;schoolEpoch++;feedRequest++;feedCache.clear();activeFeed=null;sourceJob=null;selectingSchool=false;
       auth.value = null;
       workspace.value = null;
       schools.value = [];
@@ -44,6 +72,7 @@ export function workspaceStore(transport: Transport) {
       filters.value = {categories:[...noticeCategories]};
       loading.value = false;
       detailLoading.value = false;
+      schoolsLoading.value=false;catalogueReady.value=false;catalogueError.value='';refreshingSchool.value=false;pendingUpdates.value=false;
     }
     function failure(caught: unknown) {
       if (
@@ -53,68 +82,121 @@ export function workspaceStore(transport: Transport) {
         clear();
       error.value = safeError(caught);
     }
-    async function loadFeed(more = false, preserveDetail = false) {
+    function loadFeed(more = false, preserveDetail = false, preserveList = false, keepCached = false):Promise<void> {
       const schoolId = workspace.value?.school?.id;
-      if (!schoolId || loading.value) return;
+      if(more&&pendingUpdates.value)return Promise.resolve();
+      if (!schoolId || loading.value || selectingSchool) return activeFeed || Promise.resolve();
       const ticket = epoch;
+      const request=++feedRequest;
       loading.value = true;
       error.value = "";
       if (!more) {
-        items.value = [];
+        if(!preserveList)items.value = [];
         if (!preserveDetail) detail.value = null;
-        nextCursor.value = null;
+        if(!preserveList)nextCursor.value = null;
         if (!preserveDetail) detailEpoch++;
       }
-      try {
+      const work=(async()=>{try {
         const page = await transport.call("feed.list", {
           schoolId,
           ...filters.value,
           ...(more && nextCursor.value ? { cursor: nextCursor.value } : {}),
         });
-        if (ticket !== epoch) return;
+        if (ticket !== epoch || request!==feedRequest) return;
+        if(keepCached&&items.value.length&&page.items.length>=Math.min(20,items.value.length)) {
+          // Keep the previously read pages and cursor until the visitor accepts
+          // an update. Do not collapse a restored five-page list to page one.
+          if(JSON.stringify(cloneNotices(items.value.slice(0,20)))!==JSON.stringify(cloneNotices(page.items)))pendingUpdates.value=true;
+          return;
+        }
         items.value = more ? [...items.value, ...page.items] : page.items;
         nextCursor.value = page.nextCursor;
+        pendingUpdates.value=false;rememberFeed(schoolId);
       } catch (caught) {
-        if (ticket === epoch) failure(caught);
+        if (ticket === epoch && request===feedRequest) failure(caught);
       } finally {
-        if (ticket === epoch) loading.value = false;
-      }
+        if (ticket === epoch && request===feedRequest) loading.value = false;
+      }})();
+      activeFeed=work;
+      const done=()=>{if(activeFeed===work)activeFeed=null;};void work.then(done,done);
+      return work;
     }
     async function loadSchools(more = false) {
-      const ticket = epoch;
+      const ticket = sessionEpoch;
       const page = await transport.call(
         "school.list",
         more && schoolCursor.value ? { cursor: schoolCursor.value } : {},
       );
-      if (ticket !== epoch) return;
+      if (ticket !== sessionEpoch) return;
       schools.value = more ? [...schools.value, ...page.schools] : page.schools;
       schoolCursor.value = page.nextCursor;
+      catalogueReady.value=!page.nextCursor;
     }
-    async function refreshSchool() {
-      const schoolId = workspace.value?.school?.id, ticket = epoch;
-      if (!schoolId || loading.value) return;
-      if (workspace.value?.capabilities.schoolDirectory) {
-        loading.value = true;
-        try {
-          const result = await transport.call('school.refresh',{schoolId});
-          if (ticket !== epoch) return;
-          schoolSync.value = result;
-          if (result.state === 'ready' && workspace.value?.school) workspace.value.school.status = 'ready';
-        } catch (caught) { if (ticket === epoch) schoolSync.value = {state:'unavailable',count:0,checkedAt:null,message:safeError(caught)}; }
-        finally { if (ticket === epoch) loading.value = false; }
-      }
-      if (ticket === epoch) await loadFeed();
+    async function loadCatalogue() {
+      const ticket=sessionEpoch;schoolsLoading.value=true;catalogueError.value='';
+      try {
+        await loadSchools();
+        // Complete the directory before offering a missing-school request, but
+        // do not put these sequential pages on the announcement critical path.
+        for(let page=0;ticket===sessionEpoch&&schoolCursor.value&&page<9;page++)await loadSchools(true);
+      }catch(caught){if(ticket===sessionEpoch){
+        if(caught instanceof ClientError&&['UNAUTHENTICATED','FORBIDDEN'].includes(caught.code))failure(caught);
+        else catalogueError.value=safeError(caught);
+      }}finally{if(ticket===sessionEpoch)schoolsLoading.value=false;}
+    }
+    function checkSchoolSources(initialFeed:Promise<void>) {
+      const schoolId=workspace.value?.school?.id,ticket=schoolEpoch;
+      if(!schoolId||!workspace.value?.capabilities.schoolDirectory)return;
+      if(sourceJob?.ticket===ticket)return;
+      const current=()=>ticket===schoolEpoch&&workspace.value?.school?.id===schoolId;
+      refreshingSchool.value=true;
+      const promise=(async()=>{try {
+        let result=await transport.call('school.refresh',{schoolId});
+        // A different visitor may already be refreshing the same public cache.
+        // Bounded polling lets a first visit pick up that result without a loop.
+        for(const delay of [1500,3000,6000]) {
+          if(!current())return;schoolSync.value=result;
+          if(result.state!=='checking')break;
+          await new Promise(resolve=>setTimeout(resolve,delay));if(!current())return;
+          result=await transport.call('school.refresh',{schoolId});
+        }
+        if(!current())return;schoolSync.value=result;
+        if(result.state!=='ready')return;
+        if(workspace.value?.school)workspace.value.school.status='ready';
+        await initialFeed;if(activeFeed)await activeFeed;
+        if(!current())return;
+        if(!items.value.length&&!loading.value)await loadFeed(false,true,true);
+        else if(result.changed)pendingUpdates.value=true;
+      }catch(caught){if(current()){
+        if(caught instanceof ClientError&&['UNAUTHENTICATED','FORBIDDEN'].includes(caught.code))failure(caught);
+        else schoolSync.value={state:'unavailable',count:0,checkedAt:null,message:safeError(caught)};
+      }}finally{if(current()){refreshingSchool.value=false;sourceJob=null;}}})();
+      sourceJob={ticket,promise};
+    }
+    function refreshSchool(background = false) {
+      const schoolId=workspace.value?.school?.id;
+      if(!schoolId||selectingSchool)return Promise.resolve();
+      if(!items.value.length)restoreFeedCache(schoolId);
+      const first=loadFeed(false,true,true,background&&items.value.length>0);
+      checkSchoolSources(first);
+      return first;
+    }
+    async function applyUpdates() {
+      await loadFeed(false,true,true);
     }
     async function applyFilters(value: FeedFilters) {
+      filters.value = { ...value, categories:[...(value.categories ?? noticeCategories)] };
+      if(selectingSchool)return;
       epoch++;
       detailEpoch++;
       loading.value = false;
       detailLoading.value = false;
-      filters.value = { ...value, categories:[...(value.categories ?? noticeCategories)] };
       await loadFeed();
     }
     async function noticeLabelsChanged(result: {itemId:string;schoolId:string;categories:string[];customized:boolean}) {
       if (workspace.value?.school?.id !== result.schoolId) return;
+      for(const [key,page]of feedCache)if(page.schoolId===result.schoolId)feedCache.delete(key);
+      feedRequest++;loading.value=false;
       if (detail.value?.id === result.itemId) {
         detail.value.categories = [...result.categories];
         detail.value.categoriesCustomized = result.customized;
@@ -123,30 +205,27 @@ export function workspaceStore(transport: Transport) {
     }
     async function connect() {
       clear();
-      const ticket = epoch;
+      const ticket = sessionEpoch;
       loading.value = true;
       error.value = "";
       try {
         const restored = await transport.restore();
-        if (ticket !== epoch) return;
+        if (ticket !== sessionEpoch) return;
         if (!restored) {
           clear();
           return;
         }
         auth.value = restored;
         const session = await transport.call("session.get", {});
-        if (ticket !== epoch) return;
+        if (ticket !== sessionEpoch) return;
         workspace.value = session;
-        await loadSchools();
-        // The complete supplied directory must be visible before offering a
-        // missing-school application. Bounded pages; no unbounded catalog loop.
-        for (let page = 0; ticket === epoch && schoolCursor.value && page < 9; page++) await loadSchools(true);
+        loading.value=false;
+        await Promise.all([loadCatalogue(),workspace.value.school?refreshSchool(true):Promise.resolve()]);
       } catch (caught) {
-        if (ticket === epoch) failure(caught);
+        if (ticket === sessionEpoch) failure(caught);
       } finally {
-        if (ticket === epoch) loading.value = false;
+        if (ticket === sessionEpoch&&!workspace.value) loading.value = false;
       }
-      if (ticket === epoch && workspace.value?.school) await refreshSchool();
     }
     async function signIn(username: string, password: string) {
       const ticket = ++epoch;
@@ -178,6 +257,7 @@ export function workspaceStore(transport: Transport) {
     }
     async function selectSchool(schoolId: string) {
       const ticket = ++epoch;
+      schoolEpoch++;sourceJob=null;refreshingSchool.value=false;pendingUpdates.value=false;selectingSchool=true;
       detailEpoch++;
       loading.value = true;
       error.value = "";
@@ -192,10 +272,10 @@ export function workspaceStore(transport: Transport) {
       } catch (caught) {
         if (ticket === epoch) failure(caught);
       } finally {
-        if (ticket === epoch) loading.value = false;
+        if (ticket === epoch){loading.value = false;selectingSchool=false;}
       }
       if (ticket === epoch && workspace.value?.school?.id === schoolId)
-        await refreshSchool();
+        await refreshSchool(true);
     }
     async function openNotice(itemId: string) {
       const schoolId = workspace.value?.school?.id;
@@ -245,6 +325,7 @@ export function workspaceStore(transport: Transport) {
       error,
       loading,
       detailLoading,
+      schoolsLoading,catalogueReady,catalogueError,refreshingSchool,pendingUpdates,applyUpdates,
       clear,
       connect,
       signIn,

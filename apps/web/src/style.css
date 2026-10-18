@@ -830,3 +830,5 @@ select {
 .school-sources ul { padding-left: 20px; }
 .school-sources li { margin-top: 10px; overflow-wrap: anywhere; }
 .school-sources li p { margin: 4px 0; }
+.feed-update { padding: 10px 12px; margin: 12px 0; border-left: 3px solid #82a7de; background: #f2f6ff; font-size: 13px; }
+.feed-update button { display: block; padding-left: 0; }
