@@ -13,6 +13,7 @@ export interface Resource {
   canonicalUrl?: string;
   siteUrl?: string;
   entryUrl?: string;
+  importKind?:string;
 }
 export interface Scope {
   schoolId: string;
@@ -55,7 +56,7 @@ export function sourceVisible(
   }
 }
 export function itemVisible(row: Resource, scope: Scope): boolean {
-  if (isPrivate(row)) return row.ownerOpenid === scope.ownerId;
+  if (isPrivate(row)) return row.ownerOpenid === scope.ownerId && (row.importKind!=='website'||Boolean(row.schoolIds?.includes(scope.schoolId)));
   if (row.sourceId && scope.privateSourceIds.includes(row.sourceId))
     return false;
   if (row.scope === "global") return true;

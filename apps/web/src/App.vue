@@ -5,6 +5,7 @@ const featureLoading = defineComponent(() => () => h("section", { class: "featur
 const featureFailed = defineComponent(() => () => h("section", { class: "feature-surface", role: "alert" }, "功能页加载失败，请刷新网页后重试。"));
 const BookmarksPanel = defineAsyncComponent({ loader: () => import("./components/BookmarksPanel.vue"), loadingComponent: featureLoading, errorComponent: featureFailed });
 const ReadingPanel = defineAsyncComponent({ loader: () => import("./components/ReadingPanel.vue"), loadingComponent: featureLoading, errorComponent: featureFailed });
+const WebsiteSourcesPanel = defineAsyncComponent({loader:()=>import('./components/WebsiteSourcesPanel.vue'),loadingComponent:featureLoading,errorComponent:featureFailed});
 import { siteTransport as cloudTransport, setupIssues, regionNeedsVerification, isNetlify } from "./lib/site-transport";
 import type { Transport } from "./lib/transport";
 import { workspaceStore } from "./stores/workspace";
@@ -24,7 +25,7 @@ const featureTransport: Transport = { ...transport, call: (async (action, input)
   try { return await transport.call(action, input); }
   catch (caught) { if (caught instanceof ClientError && ["UNAUTHENTICATED", "FORBIDDEN"].includes(caught.code)) store.clear(); throw caught; }
 }) as Transport["call"] };
-const view = ref<"feed" | "favorites" | "ai">("feed"), selection = ref<Notice[]>([]), bookmarkBusy = ref(false);
+const view = ref<"feed" | "favorites" | "ai" | "sources">("feed"), selection = ref<Notice[]>([]), bookmarkBusy = ref(false);
 const requestingSchool = ref(false), schoolQuery = ref('');
 const matchingSchools = computed(() => store.schools.filter(school=>school.name.includes(schoolQuery.value.trim())));
 watch(() => store.auth?.uid,()=>{requestingSchool.value=false;schoolQuery.value='';});
@@ -35,7 +36,7 @@ function chooseNotice(item: Notice) {
   else if (selection.value.length < 8) selection.value.push(item);
   else store.error = "一次最多选择 8 篇公告。";
 }
-function navigate(target: "feed" | "favorites" | "ai") { store.closeNotice(); view.value = target; }
+function navigate(target: "feed" | "favorites" | "ai" | "sources") { store.closeNotice(); view.value = target; }
 async function saveBookmark() {
   const item = store.detail, schoolId = store.workspace?.school?.id, uid = store.auth?.uid;
   if (!item || !schoolId || bookmarkBusy.value) return;
@@ -256,6 +257,7 @@ function schoolChanged(event: Event) {
           <span aria-hidden="true">▤</span> 公告
         </button>
         <button class="nav-item" :class="{ active: view === 'favorites' }" @click="navigate('favorites')"><span aria-hidden="true">☆</span>收藏</button>
+        <button v-if="store.workspace.capabilities.websiteSources" class="nav-item" :class="{active:view==='sources'}" @click="navigate('sources')"><span aria-hidden="true">↗</span>公告来源</button>
         <button class="nav-item" :class="{ active: view === 'ai' }" @click="navigate('ai')"><span aria-hidden="true">✧</span>AI 阅读{{ selection.length ? `（${selection.length}）` : '' }}</button>
         <div class="navigation-note">
           勾选公告后进入 AI 阅读。<br />关键词查找不消耗 AI 次数。
@@ -371,7 +373,7 @@ function schoolChanged(event: Event) {
           <button class="text-button" :disabled="store.loading" @click="store.applyUpdates()">显示更新</button>
         </div>
         <p v-else-if="store.refreshingSchool && store.items.length" class="muted small" role="status">已显示保存的公告，正在后台检查学校来源…</p>
-        <p class="muted small summary-help">公告摘要免费，不扣 AI 阅读次数；仅标题、图片或附件公告可能无法生成正文摘要。AI 阅读每人每天免费 3 次。</p>
+        <p class="muted small">浏览和采集不扣次数；生成摘要请使用 AI 阅读，每人每天 3 次。</p>
         <div class="notice-scroll" :aria-busy="store.loading">
           <p
             v-if="store.loading && !store.items.length"
@@ -405,7 +407,7 @@ function schoolChanged(event: Event) {
             class="notice-row"
             :class="{ selected: store.detail?.id === item.id }"
           >
-            <button
+            <button class="notice-open"
               @click="
                 copied = '';
                 store.openNotice(item.id);
@@ -416,8 +418,9 @@ function schoolChanged(event: Event) {
                 <time>{{ displayTime(item.publishedAt) }}</time>
               </div>
               <h2>{{ item.title }}</h2>
-              <p v-if="item.summary" class="notice-summary"><span class="summary-label">{{ item.summaryBasis === 'title' ? '仅标题 · 未取得正文' : '自动摘要' }}</span>{{ item.summary }}</p>
+
             </button>
+            <button class="text-button notice-read" @click="selection = [item]; navigate('ai')">用 AI 生成摘要</button>
             <label class="selection-toggle"><input type="checkbox" :checked="selection.some(row => row.id === item.id)" :disabled="selection.length >= 8 && !selection.some(row => row.id === item.id)" @change="chooseNotice(item)" />用于 AI 阅读</label>
           </article>
           <button
@@ -472,10 +475,6 @@ function schoolChanged(event: Event) {
             <p v-if="copied" class="small" role="status">{{ copied }}</p>
           </div>
           <p v-else class="muted small">这份资料未提供可打开的原文网址。</p>
-          <section v-if="store.detail.summary" class="existing-summary">
-            <h2>已有摘要</h2>
-            <p>{{ store.detail.summary }}</p>
-          </section>
           <div class="original-text">
             {{ store.detail.text || "尚未提供正文，请查看公告原文。" }}
           </div>
@@ -493,6 +492,7 @@ function schoolChanged(event: Event) {
         </div>
       </section>
       <BookmarksPanel v-if="view === 'favorites'" :transport="featureTransport" :school-id="store.workspace.school?.id || null" @open="openFavorite" />
+      <WebsiteSourcesPanel v-if="view === 'sources'" :key="`${store.auth?.uid}:${store.workspace.school?.id}`" :transport="featureTransport" :school-id="store.workspace.school?.id || null" :school-name="store.workspace.school?.name || ''" @changed="selection=[];store.sourcesChanged()" @back="navigate('feed')" />
       <ReadingPanel v-if="view === 'ai'" :transport="featureTransport" :school-id="store.workspace.school?.id || null" :selection="selection" @remove="selection = selection.filter(item => item.id !== $event)" @back="navigate('feed')" />
     </main>
     <footer v-if="!store.workspace" class="page-footer">

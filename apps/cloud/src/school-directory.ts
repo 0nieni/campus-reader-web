@@ -5,8 +5,6 @@ import type { ItemRow, Repository } from './repository';
 import { readSchoolPage, extractNotices, extractArticle, PARSER_VERSION, type PageReader } from './school-pages';
 import {schoolSources,publicSourceId} from './school-sources';
 import { AppError } from './errors';
-import {extractSummary,SUMMARY_VERSION} from './notice-summary';
-import {isPrivate} from './scope';
 
 export function schoolDirectory(pool: SqlPool, repo: Repository, reader: PageReader = readSchoolPage, now = Date.now, options:{trackActivity?:boolean}={}) {
   async function configuration(id:string) {
@@ -81,36 +79,5 @@ export function schoolDirectory(pool: SqlPool, repo: Repository, reader: PageRea
     await pool.query("UPDATE campus_documents SET body=body || $2::jsonb WHERE collection='items' AND id=$1",[row._id,JSON.stringify(patch)]);
     return {...row,...patch};
   }
-  async function summarize(id:string) {
-    const config=await configuration(id),at=new Date(now()).toISOString();
-    const sourceIds=config.sources.map(source=>publicSourceId(id,source.key));
-    // Reviewed public imports only. No client URLs, private records or model calls.
-    const eligible=`collection='items' AND body->>'status'='published'
-      AND body->>'scope'='school' AND body->'schoolIds' ? $1
-      AND body->>'sourceId'=ANY($2::text[]) AND coalesce(body->>'ownerOpenid','')=''
-      AND coalesce(body->>'type','')<>'manual' AND coalesce(body->>'category','')<>'mail'
-      AND NOT coalesce(body->'categories' ? 'mail',false)
-      AND coalesce(body->>'canonicalUrl','') !~* '^(mail|manual):'
-      AND coalesce(nullif(body->>'publishedAt',''),nullif(body->>'discoveredAt',''),body->>'createdAt') >= $3
-      AND (body->'autoSummary'->>'version' IS DISTINCT FROM $4 OR body->'autoSummary'->>'basis' IS DISTINCT FROM 'body')
-      AND coalesce(body->>'summaryRetryAt','')<$5`;
-    const params=[id,sourceIds,new Date(now()-365*86400000).toISOString(),SUMMARY_VERSION,at];
-    const claimed=await pool.query(`WITH pending AS (SELECT id FROM campus_documents WHERE ${eligible}
-      ORDER BY body->>'publishedAt' DESC NULLS LAST,id LIMIT 3 FOR UPDATE SKIP LOCKED)
-      UPDATE campus_documents AS d SET body=d.body || $6::jsonb FROM pending
-      WHERE d.collection='items' AND d.id=pending.id RETURNING d.id,d.body`,
-      [...params,JSON.stringify({summaryRetryAt:new Date(now()+5*60000).toISOString()})]);
-    const items=await Promise.all(claimed.rows.map(async entry=>{
-      let row={...entry.body,_id:entry.id} as ItemRow;
-      if(isPrivate(row))return null;
-      try{row=await material(row);}catch{/* No image OCR, attachments or login bypass. */}
-      const brief=extractSummary(row.contentText||'',row.title||'');
-      const patch={autoSummary:{...brief,version:SUMMARY_VERSION,checkedAt:at},summaryRetryAt:new Date(now()+86400000).toISOString()};
-      await pool.query("UPDATE campus_documents SET body=body || $2::jsonb WHERE collection='items' AND id=$1",[entry.id,JSON.stringify(patch)]);
-      return{id:entry.id,summary:brief.text,summaryBasis:brief.basis};
-    }));
-    const pending=await pool.query(`SELECT id FROM campus_documents WHERE ${eligible} LIMIT 1`,params);
-    return{items:items.filter((row):row is NonNullable<typeof row>=>Boolean(row)),more:pending.rows.length>0};
-  }
-  return {refresh,material,summarize};
+  return {refresh,material};
 }

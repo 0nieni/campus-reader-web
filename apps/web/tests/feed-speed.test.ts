@@ -27,20 +27,14 @@ function fixture(){
  return{transport,call,normal:call.getMockImplementation()!};
 }
 beforeEach(()=>setActivePinia(createPinia()));afterEach(()=>vi.restoreAllMocks());
-it('background summaries patch the source-row layout and never block notices or revive a logged-out session',async()=>{
- const{transport,call,normal}=fixture(),pending=deferred<any>();
- call.mockImplementation((action,input)=>action==='session.get'?Promise.resolve({...session,capabilities:{...session.capabilities,autoSummaries:true}}):action==='school.summarize'?pending.promise:normal(action,input));
+it('keeps source beside tags, hides old free summaries and routes summarizing to AI without automatically calling a model',async()=>{
+ const{transport,call,normal}=fixture();
+ call.mockImplementation((action,input)=>action==='feed.list'?Promise.resolve({items:[{...notice(),summary:'旧免费摘要'}],nextCursor:null}):normal(action,input));
  const wrapper=mount(App,{props:{transport,configurationIssues:[]}});await flushPromises();
- expect(wrapper.text()).toContain('a公告');expect(wrapper.find('.notice-origin').text()).toContain('学校公开来源');
- expect(wrapper.find('.notice-origin .notice-category').text()).toBe('学校');
- expect(wrapper.find('.source-name').exists()).toBe(false);
- const store=workspaceStore(transport)();expect(store.loading).toBe(false);
- pending.resolve({items:[{id:'a',summary:'请于10月25日前提交报名材料。',summaryBasis:'body'}],more:false});await flushPromises();
- expect(wrapper.find('.notice-summary').text()).toContain('请于10月25日前提交报名材料。');
- expect(wrapper.find('.notice-summary .summary-label').text()).toBe('自动摘要');
- const late=deferred<any>();call.mockImplementation((action,input)=>action==='school.summarize'?late.promise:action==='session.get'?Promise.resolve({...session,capabilities:{...session.capabilities,autoSummaries:true}}):normal(action,input));
- await store.refreshSchool();await flushPromises();await store.signOut();late.resolve({items:[{id:'a',summary:'过期响应',summaryBasis:'body'}],more:true});await flushPromises();
- expect(store.items).toEqual([]);expect(store.workspace).toBeNull();wrapper.unmount();
+ expect(wrapper.find('.notice-origin').text()).toContain('学校公开来源');
+ expect(wrapper.text()).not.toContain('旧免费摘要');
+ expect(call.mock.calls.some(([action])=>action==='school.summarize'||action==='ai.start'||action==='ai.step')).toBe(false);
+ wrapper.unmount();
 });
 it('renders saved notices while both the directory and source refresh are unresolved',async()=>{
  const{transport,call,normal}=fixture(),catalogue=deferred<any>(),source=deferred<SchoolSync>();

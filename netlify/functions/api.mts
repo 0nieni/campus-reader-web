@@ -11,6 +11,7 @@ import { aiService } from '../../apps/cloud/src/ai-service';
 import { siteWorkspace } from '../../apps/cloud/src/site-access';
 import { schoolDirectory } from '../../apps/cloud/src/school-directory';
 import { schoolRequests } from '../../apps/cloud/src/school-requests';
+import {websiteSources} from '../../apps/cloud/src/website-sources';
 declare const Netlify: { env: { get(name: string): string | undefined } };
 let pool: SqlPool | undefined;
 export default createSiteApi({
@@ -28,14 +29,15 @@ export default createSiteApi({
     pool ||= getDatabase().pool as unknown as SqlPool;
     const db = postgresStorage(pool), repo = postgresRepository(pool);
     const directory = schoolDirectory(pool,repo);
-    repo.material = directory.material;
+    const websites=websiteSources(pool,repo);
+    repo.material = row=>row.importKind==='website'?websites.material(row):directory.material(row);
     const request = schoolRequests(pool,async fields => {
       // Fixed site target: never accept URLs, recipients, email addresses or UID
       // from the browser. Notification recipients are configured in Netlify Forms.
       const response = await fetch('https://campus-reader-ninie6159.netlify.app/__forms.html', {method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:fields.toString(),redirect:'error',signal:AbortSignal.timeout(8000)});
       if (!response.ok) throw new Error('Form submission not confirmed');
     });
-    const gateway = createGateway(repo, siteWorkspace(user, Netlify.env.get('NETLIFY_OWNER_EMAIL')), Date.now, { bookmarks: bookmarksService(db, repo), ai: aiService(db, repo), directory:{refresh:directory.refresh,summarize:directory.summarize,request:(name,identity)=>{
+    const gateway = createGateway(repo, siteWorkspace(user, Netlify.env.get('NETLIFY_OWNER_EMAIL')), Date.now, { websites, bookmarks: bookmarksService(db, repo), ai: aiService(db, repo), directory:{refresh:directory.refresh,request:(name,identity)=>{
       if (getContext().deploy.context !== 'production') throw new AppError('PRODUCTION_REQUIRED','请在正式网站提交学校添加申请；预览环境不发送通知。');
       return request(name,identity.dataOwnerId,user.email);
     }} });
