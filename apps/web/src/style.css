@@ -514,9 +514,14 @@ select {
   font-size: 10px;
   color: #72839d;
 }
-.notice-meta > span {
+.notice-category {
   color: var(--blue);
 }
+.notice-origin { display:flex; align-items:baseline; flex-wrap:wrap; gap:4px 9px; min-width:0; }
+.notice-source { color:#7a879b; overflow-wrap:anywhere; }
+.notice-meta time { flex-shrink:0; }
+.summary-label { color:#72839d; margin-right:7px; font-size:10px; }
+.summary-help { line-height:1.7; }
 .notice-row h2 {
   font-size: 15px;
   font-weight: 600;

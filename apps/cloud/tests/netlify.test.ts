@@ -74,15 +74,15 @@ test('real local Postgres migrations, scope, filters, bookmark transactions and 
       const result = await call('favorites.list'); assert.ok(result.ok); assert.equal((result.data as any).items.length, 1);
       assert.equal(await repo.selectedSchool('netlify_owner'), 'bjtu');
     });
-    await t.test('concurrent reservations cap at five and retries do not reserve twice', async () => {
+    await t.test('concurrent reservations cap at three and retries do not reserve twice', async () => {
       const results = await Promise.all(Array.from({ length: 8 }, (_, i) => call('ai.start', { schoolId: 'bjtu', itemIds: ['notice'], requestId: `postgres_request_${i}`, service: 'official', task: 'summary' })));
-      assert.equal(results.filter(row => row.ok).length, 5, JSON.stringify(results));
-      const status = await call('ai.status'); assert.ok(status.ok); assert.equal((status.data as any).quota.held, 5); assert.equal(providerCalls, 0);
+      assert.equal(results.filter(row => row.ok).length, 3, JSON.stringify(results));
+      const status = await call('ai.status'); assert.ok(status.ok); assert.equal((status.data as any).quota.held, 3); assert.equal(providerCalls, 0);
       const done = results.find(row => row.ok) as { ok: true; data: any }; const id = done.data.id;
       let row = await call('ai.step', { taskId: id, step: 0 }); assert.ok(row.ok); assert.equal(providerCalls, 1);
       await call('ai.step', { taskId: id, step: 0 }); assert.equal(providerCalls, 1);
       row = await call('ai.step', { taskId: id, step: 1 }); assert.ok(row.ok); assert.equal((row.data as any).state, 'complete');
-      const q = await call('ai.status'); assert.ok(q.ok); assert.equal((q.data as any).quota.used, 1); assert.equal((q.data as any).quota.held, 4);
+      const q = await call('ai.status'); assert.ok(q.ok); assert.equal((q.data as any).quota.used, 1); assert.equal((q.data as any).quota.held, 2);
       // Purging operates on the real JSON document, not an in-memory fixture.
       await db.collection('web_ai_tasks').doc(id).update({ expireAt: '2000-01-01T00:00:00.000Z' });
       assert.equal((await call('ai.task', { taskId: id })).ok, false);
@@ -119,7 +119,7 @@ test('real local Postgres migrations, scope, filters, bookmark transactions and 
       assert.equal((await requestAs(owner, 'feed.detail', { schoolId: 'bjtu', itemId: 'owner-private-notice' })).ok, true);
       assert.equal((await requestAs(member, 'feed.detail', { schoolId: 'bjtu', itemId: 'owner-private-notice' })).code, 'NOT_FOUND');
       const ownerQuota = (await requestAs(owner, 'ai.status')).data.quota;
-      assert.equal((await requestAs(member, 'ai.status')).data.quota.remaining, 5);
+      assert.equal((await requestAs(member, 'ai.status')).data.quota.remaining, 3);
       const ownerTask = (await sql.query("SELECT id FROM campus_documents WHERE collection='web_ai_tasks' AND body->>'owner'=$1 AND body->>'state'='ready' LIMIT 1", ['netlify_owner'])).rows[0]!.id;
       for (const [action, input] of [['ai.task', { taskId: ownerTask }], ['ai.cancel', { taskId: ownerTask }], ['ai.step', { taskId: ownerTask, step: 0 }], ['ai.resolve', { taskId: ownerTask, charged: false }]] as const) {
         assert.equal((await requestAs(member, action, input)).code, 'NOT_FOUND');
@@ -134,9 +134,9 @@ test('real local Postgres migrations, scope, filters, bookmark transactions and 
       assert.equal((await requestAs(member, 'ai.step', { taskId: memberTask.id, step: 1 })).data.state, 'complete');
       assert.deepEqual((await requestAs(owner, 'ai.status')).data.quota, ownerQuota);
       assert.equal((await requestAs(member, 'ai.status')).data.quota.used, 1);
-      assert.equal((await requestAs(third, 'ai.status')).data.quota.remaining, 5);
+      assert.equal((await requestAs(third, 'ai.status')).data.quota.remaining, 3);
       const reservations = await Promise.all(Array.from({ length: 8 }, (_, index) => requestAs(member, 'ai.start', { schoolId: 'bjtu', itemIds: ['notice'], requestId: `member_request_${index}`, service: 'official', task: 'summary' })));
-      assert.equal(reservations.filter(result => result.ok).length, 4);
+      assert.equal(reservations.filter(result => result.ok).length, 2);
       assert.equal((await requestAs(member, 'ai.status')).data.quota.remaining, 0);
       assert.deepEqual((await requestAs(owner, 'ai.status')).data.quota, ownerQuota);
     });
