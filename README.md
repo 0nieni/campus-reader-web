@@ -2,6 +2,16 @@
 
 面向受邀用户的校园公告、收藏与 AI 阅读网站。Vue 3 + TypeScript + Netlify Functions、Identity 和 Database。代码仓库保持私有，各账号的数据独立。
 
+## AI 阅读助手（本地实现，尚未部署）
+
+“AI 阅读”现在默认进入对话页面：本校公告卡片、可修改的兴趣与目标、连续追问、原文引用、对话导出和显式联网搜索。官方每天最多三轮成功模型回复，北京时间零点重置；内部资料分批与汇总共计一轮。新对话与高级阅读共用已有日账户，不重复赠送额度；状态不明时暂停并保留预占，可查询、取消及核查结算。高级入口保留旧资料预览、MD/JSON 导出及 v1 报告，不提前删除旧任务。
+
+推荐使用本校最多 200 条已有公告，明确兴趣优先，点击与收藏辅助；行为学习默认关闭，开启后仅使用近 30 天信号，支持清除及“不感兴趣”撤销。保存偏好会更新推荐。打开推荐、搜索和刷新不调用模型、不扣官方次数，搜索服务本身仍可能计费。对话从会话创建起 24 小时到期，不因追问续期；明确兴趣保存至修改或清除。每日清理任务增加对话、临时搜索正文及最多 200 份用户档案的轮转清理，不新增定时器。首次选校引导与离线推送仍由队友负责；本模块读取统一选校记录，提供服务端 `notificationCandidates` 交接能力，不发送通知。
+
+联网搜索使用可选服务端 `TAVILY_API_KEY`，通过 [Tavily Search API](https://docs.tavily.com/documentation/api-reference/endpoint/search) 搜索所选学校的官方域名；每账号每天最多 20 次、至少间隔 15 秒。最多五条候选、最多读取前三条正文；缺少 Key 或失败时明确提示并保留已有公告。搜索摘要不作正文证据，新候选不自动订阅，取得的临时正文按账号和学校隔离、24 小时到期。已知链接复用公告 ID 与全部来源许可，核验达到 200 条且仍未匹配时仅展示只读线索。临时结果用于显式选入对话，不进入后续自动推荐。真实搜索及模型联调需要部署后的有效凭据，当前不声称已完成线上验证。
+
+对话 v2 指令由 [对话式阅读指南](docs/ai-reading-guide.md)生成，修改后运行 `node tools/sync-ai-guide.mjs`；`npm run typecheck` 会校验一致性。产品分工、接口与验收见 [重做方案](docs/ai-reading-redesign.md)，最新进度和验证状态见 [PROGRESS.md](PROGRESS.md)。新增第五份迁移 `20261019000100_ai_conversations.sql`，上线前必须由正常部署应用；本地实现不等于线上发布。
+
 ## 本地检查
 
 需要 Node.js >=22.12。
@@ -17,9 +27,9 @@ npm run build --workspace=@campus/web
 
 ## Netlify 构建
 
-将此私有仓库连接到现有 Netlify 项目，保留根目录 netlify.toml。Base directory 和 Package directory 均留空：这是包含网页、服务端函数和迁移的一个完整站点，不单独选择 apps/web 作为站点项目目录。构建命令为 npm run build --workspace=@campus/web，发布目录为 apps/web/dist，函数目录为 netlify/functions。两份 SQL 迁移位于 netlify/database/migrations，由平台在部署生命周期应用，不在网页或函数请求中执行建表。
+将此私有仓库连接到现有 Netlify 项目，保留根目录 netlify.toml。Base directory 和 Package directory 均留空：这是包含网页、服务端函数和迁移的一个完整站点，不单独选择 apps/web 作为站点项目目录。构建命令为 npm run build --workspace=@campus/web，发布目录为 apps/web/dist，函数目录为 netlify/functions。全部 SQL 迁移位于 netlify/database/migrations，由平台在部署生命周期应用，不在网页或函数请求中执行建表。可先运行 npm run netlify:build 检查完整函数与网页产物，该命令不会发布。
 
-服务端环境变量：NETLIFY_OWNER_EMAIL（初始账号邮箱，用于保留原工作区归属，不是成员白名单）、AI_CHAT_API_KEY（DeepSeek Key）；可选 AI_CHAT_BASE_URL、AI_CHAT_MODEL、AI_DAILY_LIMIT、AI_PLATFORM_DAILY_CALLS、AI_PLATFORM_DAILY_TOKENS。全部通过 Netlify 环境变量配置，不能加入 VITE_ 变量或提交到 Git。
+服务端环境变量：NETLIFY_OWNER_EMAIL（初始账号邮箱，用于保留原工作区归属，不是成员白名单）、AI_CHAT_API_KEY（DeepSeek Key）；可选 AI_CHAT_BASE_URL、AI_CHAT_MODEL、AI_DAILY_LIMIT、AI_PLATFORM_DAILY_CALLS、AI_PLATFORM_DAILY_TOKENS、TAVILY_API_KEY（联网搜索）。全部通过 Netlify 环境变量配置，不能加入 VITE_ 变量或提交到 Git。
 
 Identity 保持 Invite only，管理员通过控制台邀请其他用户。正式站点允许访问登录页，预览可继续私有。每个可信 Identity UID 独立保存学校偏好、收藏、私人资料、AI 任务和每日三次额度。原始账号继续使用现有数据；不要为新增成员更改 NETLIFY_OWNER_EMAIL。DeepSeek 账单与平台总调用预算仍由站点共同承担。
 

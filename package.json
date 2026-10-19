@@ -14,7 +14,8 @@
   "scripts": {
     "dev": "npm run dev --workspace=@campus/web",
     "build": "npm run build --workspace=@campus/web && npm run build --workspace=@campus/web-cloud",
-    "typecheck": "npm run typecheck --workspaces --if-present",
+    "typecheck": "node tools/sync-ai-guide.mjs --check && npm run typecheck --workspaces --if-present",
+    "ai:guide:check": "node tools/sync-ai-guide.mjs --check",
     "test": "npm run test --workspaces --if-present",
     "cloud:build": "npm run build --workspace=@campus/web-cloud",
     "cloud:preflight": "node tools/cloud-preflight.mjs",
