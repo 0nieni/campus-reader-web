@@ -5,7 +5,7 @@ import type {Transport} from '../lib/transport';
 import {safeError} from '../lib/errors';
 const props=defineProps<{transport:Transport;schoolId:string;itemId:string;title:string;reminder?:Reminder}>();
 const emit=defineEmits<{saved:[state:ReminderState];cancel:[]}>();
-const expanded=ref(Boolean(props.reminder)),label=ref(props.reminder?.label||'报名／事项截止'),when=ref(props.reminder?new Date(Date.parse(props.reminder.dueAt)+8*3600000).toISOString().slice(0,16):''),days=ref(props.reminder?[...props.reminder.days]:[7,3,1,0]),busy=ref(false),error=ref(''),message=ref('');
+const expanded=ref(Boolean(props.reminder)),label=ref(props.reminder?.label||'报名／事项截止'),when=ref(props.reminder?.dueAt?new Date(Date.parse(props.reminder.dueAt)+8*3600000).toISOString().slice(0,16):''),days=ref(props.reminder?.days.length?[...props.reminder.days]:[7,3,1,0]),busy=ref(false),error=ref(''),message=ref('');
 let active=true;onUnmounted(()=>{active=false;});
 async function save(){
  if(busy.value)return;busy.value=true;error.value='';message.value='';
@@ -23,7 +23,7 @@ async function save(){
   <button v-if="!expanded" class="secondary" @click="expanded=true;message=''">{{reminder?'编辑提醒':'设置提醒'}}</button>
   <p v-if="message" class="small" role="status">{{message}}</p>
   <form v-if="expanded" class="reminder-form" @submit.prevent="save">
-   <fieldset :disabled="busy"><legend>{{reminder?'编辑提醒':'为这条公告设置提醒'}}</legend>
+   <fieldset :disabled="busy"><legend>{{reminder?.dueAt?'编辑提醒时间':'设置提醒时间'}}</legend>
     <p class="small muted">{{title}}。请核对原文后填写，时间统一按北京时间，不调用 AI。</p>
     <label>事项名称<input v-model="label" required maxlength="80" placeholder="例如：报名截止"></label>
     <label>截止或自定时间（北京时间）<input v-model="when" required type="datetime-local"></label>

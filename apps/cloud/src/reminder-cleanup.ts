@@ -7,7 +7,7 @@ export async function cleanupReminderData(sql:SqlExecutor,now=Date.now()){
  // Application timestamps are canonical UTC ISO strings, including milliseconds.
  await sql.query(`UPDATE campus_reminder_accounts SET body=
    jsonb_set(jsonb_set(body,'{notifications}',coalesce((SELECT jsonb_agg(entry) FROM jsonb_array_elements(body->'notifications') entry WHERE entry->>'createdAt' >= $1),'[]'::jsonb)),
-   '{reminders}',coalesce((SELECT jsonb_agg(entry) FROM jsonb_array_elements(body->'reminders') entry WHERE entry->>'dueAt' >= $1),'[]'::jsonb))
+   '{reminders}',coalesce((SELECT jsonb_agg(entry) FROM jsonb_array_elements(body->'reminders') entry WHERE entry->>'dueAt' IS NULL OR entry->>'dueAt' >= $1),'[]'::jsonb))
    WHERE EXISTS(SELECT 1 FROM jsonb_array_elements(body->'notifications') entry WHERE entry->>'createdAt' < $1)
    OR EXISTS(SELECT 1 FROM jsonb_array_elements(body->'reminders') entry WHERE entry->>'dueAt' < $1)`,[before]);
 }

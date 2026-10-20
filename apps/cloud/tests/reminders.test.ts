@@ -54,6 +54,20 @@ test('reminders and watches use real local SQL, isolated owners and a durable de
    assert.equal((await call('reminder_b','reminders.save',{schoolId:'bjtu',itemId:'reminder_private',label:'截止',dueAt:new Date(clock+86400000).toISOString(),days:[0]})).ok,false);
    assert.equal((await data('reminder_a','session.get')).capabilities.reminders,true);
   });
+  await t.test('checkbox additions are atomic, idempotent, account scoped and have no invented time or notifications',async()=>{
+   for(const itemIds of [[],['reminder_public','reminder_private'],Array(21).fill('reminder_public')])assert.equal((await call('reminder_b','reminders.add',{schoolId:'bjtu',itemIds})).ok,false);
+   assert.deepEqual((await data('reminder_b','reminders.state')).reminders,[]);
+   assert.equal((await call('reminder_a','reminders.add',{schoolId:'school_001',itemIds:['reminder_public']})).ok,false);
+   const results=await Promise.all([data('reminder_a','reminders.add',{schoolId:'bjtu',itemIds:['reminder_public','reminder_public','reminder_private']}),data('reminder_a','reminders.add',{schoolId:'bjtu',itemIds:['reminder_public']})]);
+   const state=results.at(-1);assert.equal(state.reminders.length,2);assert.ok(state.reminders.every((r:any)=>r.dueAt===null&&r.days.length===0));assert.equal(state.notifications.length,0);
+   const exported=await call('reminder_a','reminders.export');assert.equal(exported.ok,false);if(!exported.ok)assert.equal(exported.code,'NO_FUTURE_REMINDERS');
+   assert.deepEqual((await data('reminder_b','reminders.state')).reminders,[]);
+   const pending=state.reminders.find((r:any)=>r.itemId==='reminder_public');
+   const scheduled=await data('reminder_a','reminders.save',{id:pending.id,schoolId:'bjtu',itemId:pending.itemId,label:'逐篇设置',dueAt:new Date(Math.floor((clock+86400000)/60000)*60000).toISOString(),days:[0]});
+   assert.equal(scheduled.reminders.find((r:any)=>r.itemId==='reminder_private').dueAt,null);
+   const file=await data('reminder_a','reminders.export');assert.equal((file.content.match(/BEGIN:VEVENT/g)||[]).length,1);assert.match(file.content,/逐篇设置/);assert.ok(!file.content.includes('私人报名公告'));
+   for(const row of scheduled.reminders)await data('reminder_a','reminders.remove',{id:row.id});
+  });
   let reminderId='';
   await t.test('manual reminders need no favorite or AI; dates and offsets are validated',async()=>{
    const base={schoolId:'bjtu',itemId:'reminder_public',label:'报名截止',days:[7,3,1,0]};
@@ -137,10 +151,10 @@ test('reminders and watches use real local SQL, isolated owners and a durable de
   await t.test('daily cleanup removes only expired reminder data and keeps watch settings and unrelated profile fields',async()=>{
    const expired=new Date(clock-91*86400000).toISOString(),fresh=new Date(clock).toISOString();
    const notification={id:'old',kind:'deadline',title:'旧提醒',message:'旧',schoolId:'bjtu',itemId:'reminder_public',createdAt:expired,read:false,sent:{}};
-   await pool.query('UPDATE campus_reminder_accounts SET body=$2::jsonb WHERE owner_id=$1',['reminder_a',JSON.stringify({reminders:[{id:'old',dueAt:expired}],watches:[{id:'kept',schoolId:'bjtu'}],notifications:[notification,{...notification,id:'fresh',createdAt:fresh}]})]);
+   await pool.query('UPDATE campus_reminder_accounts SET body=$2::jsonb WHERE owner_id=$1',['reminder_a',JSON.stringify({reminders:[{id:'old',dueAt:expired},{id:'pending',dueAt:null}],watches:[{id:'kept',schoolId:'bjtu'}],notifications:[notification,{...notification,id:'fresh',createdAt:fresh}]})]);
    await pool.query('UPDATE campus_push_devices SET updated_at=$1',[new Date(clock-181*86400000).toISOString()]);
    await cleanupReminderData(pool,clock);
-   const {rows}=await pool.query('SELECT body FROM campus_reminder_accounts WHERE owner_id=$1',['reminder_a']);assert.equal(rows[0].body.reminders.length,0);assert.deepEqual(rows[0].body.notifications.map((n:any)=>n.id),['fresh']);assert.equal(rows[0].body.watches[0].id,'kept');
+   const {rows}=await pool.query('SELECT body FROM campus_reminder_accounts WHERE owner_id=$1',['reminder_a']);assert.deepEqual(rows[0].body.reminders,[{id:'pending',dueAt:null}]);assert.deepEqual(rows[0].body.notifications.map((n:any)=>n.id),['fresh']);assert.equal(rows[0].body.watches[0].id,'kept');
    assert.equal((await pool.query('SELECT endpoint_hash FROM campus_push_devices')).rows.length,0);assert.equal(await repo.selectedSchool('reminder_a'),'bjtu');
   });
  }finally{await nativePool.end();await server.stop();}

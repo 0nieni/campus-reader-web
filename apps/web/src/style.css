@@ -856,14 +856,25 @@ select {
 .source-check {line-height:1.8;}
 .source-preview {padding-left:22px;line-height:1.9;}
 .source-form .primary,.website-sources>.primary {padding:10px 20px;}
-.reminders-center {overflow:auto;}
+.workspace.reminder-view {grid-template-rows:minmax(0,1fr);}
+.workspace.reminder-view .navigation {min-height:0;overflow:auto;}
+.reminders-center {display:flex;flex-direction:column;min-height:0;overflow:hidden;padding:22px clamp(18px,2.5vw,36px);}
+.reminders-center .reminder-heading {flex-shrink:0;padding-bottom:12px;margin-bottom:14px;align-items:center;}
+.reminder-heading h1 {font-size:26px;}
+.reminder-heading p {margin-top:4px;}
 .reminders-center h2 {font-size:17px;}
 .reminder-badge {display:inline-flex;align-items:center;justify-content:center;min-width:21px;min-height:21px;margin-left:5px;padding:0 5px;border-radius:50%;background:#235ed7;color:white;font-size:11px!important;}
 .unread-count {display:inline-block;margin-left:10px;font-size:13px;font-weight:400;color:#235ed7;}
-.reminder-delivery {display:flex;justify-content:space-between;gap:25px;margin:24px 0;padding:20px;background:#f2f6fd;border-left:3px solid #8cacde;}
+.reminder-delivery {display:flex;justify-content:space-between;align-items:center;gap:16px;margin:0 0 16px;padding:10px 14px;background:#f2f6fd;border-left:3px solid #8cacde;flex-shrink:0;}
+.delivery-copy {display:flex;align-items:center;gap:8px 14px;flex-wrap:wrap;min-width:0;}
+.delivery-copy strong {font-size:14px;}
+.delivery-copy details {font-size:12px;}
+.delivery-copy details[open] {flex-basis:100%;}
+.delivery-copy summary {cursor:pointer;color:var(--blue);}
+.push-support-note {margin:0 0 12px;}
 .reminder-delivery p {max-width:55ch;margin-top:6px;font-size:13px;}
-.reminder-delivery .action-row {flex-shrink:0;align-content:center;max-width:220px;}
-.reminder-tabs {display:flex;border-bottom:1px solid var(--line);gap:22px;margin-top:22px;flex-wrap:wrap;}
+.reminder-delivery .action-row {flex-shrink:0;align-content:center;max-width:220px;margin:0;}
+.reminder-tabs {display:flex;border-bottom:1px solid var(--line);gap:18px;margin-top:0;flex-wrap:wrap;font-size:14px;}
 .reminder-tabs button {padding:12px 0;background:none;color:var(--muted);border-bottom:2px solid transparent;}
 .reminder-tabs button.active {color:var(--blue);border-bottom-color:var(--blue);}
 .reminder-toolbar {display:flex;justify-content:space-between;align-items:center;gap:15px;padding:12px 0;font-size:13px;flex-wrap:wrap;}
@@ -871,7 +882,7 @@ select {
 .reminder-message.unread {border-left:3px solid #235ed7;background:#f8faff;}
 .reminder-message>button {flex-shrink:0;align-self:center;}
 .reminder-message p {margin-top:5px;font-size:14px;}
-.reminder-schedule {display:grid;grid-template-columns:170px minmax(0,1fr);gap:20px;border-bottom:1px solid var(--line);padding:24px 0;}
+.reminder-schedule {display:grid;grid-template-columns:124px minmax(0,1fr);gap:16px;border-bottom:1px solid var(--line);padding:20px 0;}
 .reminder-date {font-size:16px;color:var(--blue);font-weight:600;}
 .reminder-schedule h2 {margin:5px 0;overflow-wrap:anywhere;}
 .reminder-form,.watch-form {padding:20px;margin:15px 0;background:#f7f9fd;}
@@ -885,4 +896,36 @@ select {
 .reminder-form .primary,.watch-form .primary {padding:10px 20px;}
 .reminder-feedback {padding:10px 12px;border-left:3px solid #8cacde;background:#f2f6fd;}
 .reminder-footnote {padding-top:22px;}
-@media(max-width:800px){.reminder-delivery{display:block;margin:18px 0;padding:15px;}.reminder-delivery .action-row{max-width:none;margin-top:12px;}.reminder-tabs{gap:16px;font-size:13px;}.reminder-schedule{grid-template-columns:minmax(0,1fr);gap:8px;}.reminder-form,.watch-form{padding:15px;}.reminder-form input,.watch-form input{font-size:16px;}.reminder-message{padding:18px 8px;gap:10px;}.reminder-message>button{font-size:12px;}.unread-count{margin-left:0;}}
+.reminder-workspace {display:grid;grid-template-columns:minmax(0,1fr) minmax(280px,340px);gap:22px;min-height:0;flex:1;}
+.reminder-content {min-width:0;overflow:auto;padding-right:8px;}
+.reminder-picker {display:flex;flex-direction:column;min-height:0;min-width:0;border-left:1px solid var(--line);padding-left:18px;}
+.picker-heading {display:flex;justify-content:space-between;align-items:center;padding:10px 0;flex-shrink:0;}
+.picker-heading h2 {font-size:17px;}
+.picker-toggle {display:none;}
+.picker-body {display:flex;flex-direction:column;min-height:0;flex:1;overflow:auto;}
+.picker-search {padding:8px 0 12px;}
+.picker-search>div {display:flex;gap:8px;margin-top:5px;}
+.picker-search input {min-width:0;width:100%;border:1px solid var(--line);border-radius:5px;padding:8px 10px;background:#fff;color:inherit;}
+.picker-search button {padding:8px 12px;flex-shrink:0;}
+.picker-filters {font-size:13px;padding-bottom:12px;border-bottom:1px solid var(--line);}
+.picker-filters summary {cursor:pointer;color:var(--blue);}
+.picker-tags {display:grid;grid-template-columns:1fr 1fr;gap:7px;}
+.picker-tags label {display:flex;gap:5px;align-items:center;}
+.picker-results {flex:1 0 160px;min-height:160px;overflow:auto;}
+.picker-notice {display:flex;gap:10px;padding:14px 2px;border-bottom:1px solid var(--line);cursor:pointer;align-items:start;}
+.picker-notice>input {flex-shrink:0;margin-top:4px;}
+.picker-notice>span {min-width:0;display:grid;gap:5px;}
+.picker-title {font-size:14px;line-height:1.7;overflow-wrap:anywhere;}
+.picker-notice.added .picker-title {color:var(--muted);}
+.picker-footer {border-top:1px solid var(--line);padding-top:12px;flex-shrink:0;}
+.picker-footer>div {display:flex;align-items:center;justify-content:space-between;font-size:13px;}
+.picker-footer>.primary {width:100%;padding:10px;margin:7px 0;}
+.picker-empty {font-size:13px;color:var(--muted);padding:20px 0;}
+.calendar-guidance {padding-bottom:12px;}
+.schedule-status {display:block;margin-top:6px;}
+.pending-time .reminder-date {font-size:14px;}
+.notice-quick-actions {display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:0 10px 8px;}
+.notice-quick-actions .notice-read {margin:0;}
+.notice-quick-actions button {font-size:12px;padding:3px 0;}
+.detail-reminder-action {display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin:15px 0;}
+@media(max-width:800px){.reminders-center{display:block;overflow:auto;padding:18px 20px;}.reminder-heading{display:flex!important;}.reminder-heading h1{font-size:23px;}.reminder-heading>button{margin-top:0!important;flex-shrink:0;font-size:12px;}.reminder-delivery{display:block;margin:0 0 14px;padding:10px 12px;}.reminder-delivery .action-row{max-width:none;margin-top:8px;}.reminder-tabs{gap:16px;font-size:13px;}.reminder-schedule{grid-template-columns:minmax(0,1fr);gap:8px;}.reminder-form,.watch-form{padding:15px;}.reminder-form input,.watch-form input,.picker-search input{font-size:16px;}.reminder-message{padding:18px 8px;gap:10px;}.reminder-message>button{font-size:12px;}.unread-count{margin-left:0;}.reminder-workspace{display:flex;flex-direction:column-reverse;min-height:0;gap:14px;}.reminder-content{overflow:visible;padding-right:0;}.reminder-picker{border-left:0;border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:0;}.picker-toggle{display:block;}.picker-results{max-height:320px;flex:auto;}.picker-body{flex:none;}.picker-footer{padding-bottom:10px;}}

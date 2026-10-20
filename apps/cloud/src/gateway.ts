@@ -18,6 +18,7 @@ import { checkedLabels, displayedCategories, originalCategories } from './notice
 
 const fields: Record<string, string[]> = {
   'reminders.state':[],
+  'reminders.add':['schoolId','itemIds'],
   'reminders.save':['id','schoolId','itemId','label','dueAt','days'],
   'reminders.remove':['id'],
   'reminders.watch.save':['id','schoolId','keyword'],

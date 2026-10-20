@@ -60,11 +60,13 @@ export function reminderService(pool:SqlPool,options:Options={}){
     const allowed=(school:string,item:ItemRow|undefined)=>Boolean(item&&item.status==='published'&&itemVisible(item,scope(school))&&isRetained(item,since));
     // Revalidate on every read, including exports and dispatch; old snapshots
     // cannot reveal a source removed from the caller's workspace.
-    state.reminders=state.reminders.filter(r=>allowed(r.schoolId,items.get(r.itemId))&&Date.parse(r.dueAt)>=time-90*day);
+    state.reminders=state.reminders.filter(r=>allowed(r.schoolId,items.get(r.itemId))&&(r.dueAt===null||Date.parse(r.dueAt)>=time-90*day));
     state.notifications=state.notifications.filter(r=>allowed(r.schoolId,items.get(r.itemId))&&Date.parse(r.createdAt)>=time-90*day);
     for(const reminder of state.reminders){
       reminder.title=String(items.get(reminder.itemId)!.title||'未命名公告').slice(0,300);
-      const due=reminder.days.filter(days=>!reminder.fired.includes(days)&&Date.parse(reminder.dueAt)-days*day<=time);
+      if(reminder.dueAt===null)continue;
+      const dueAt=reminder.dueAt;
+      const due=reminder.days.filter(days=>!reminder.fired.includes(days)&&Date.parse(dueAt)-days*day<=time);
       if(!due.length)continue;
       // After an offline gap combine crossed offsets into the most recent one.
       const days=Math.min(...due);reminder.fired.push(...due);
@@ -133,7 +135,19 @@ export function reminderService(pool:SqlPool,options:Options={}){
     }
     return transaction(owner,async(state,client)=>{
       const repo=repoFor(client),time=now();
-      if(action==='reminders.save'){
+      if(action==='reminders.add'){
+        const schoolId=identifier(input.schoolId);
+        const school=await authorizeSchool(repo,owner,schoolId);
+        if(!Array.isArray(input.itemIds)||!input.itemIds.length||input.itemIds.length>20)reject('VALIDATION_FAILED','一次请选择1至20篇公告。');
+        const itemIds=[...new Set(input.itemIds.map(identifier))];
+        // Validate the entire selection before writing any draft. Added notices
+        // do not acquire a guessed time or create notifications/AI requests.
+        const rows=[];
+        for(const itemId of itemIds)rows.push(await authorizedItem(repo,owner,schoolId,itemId,time));
+        const additions=rows.filter(row=>!state.reminders.some(r=>r.schoolId===schoolId&&r.itemId===row._id));
+        if(state.reminders.length+additions.length>100)reject('REMINDER_LIMIT','每个账号最多保存100条提醒，请先移除已完成事项。');
+        state.reminders.unshift(...additions.map(row=>({id:id(),schoolId,itemId:row._id,label:'报名／事项截止',dueAt:null,days:[],title:String(row.title||'未命名公告').slice(0,300),schoolName:school.name,createdAt:new Date(time).toISOString(),generation:id(),fired:[]})));
+      }else if(action==='reminders.save'){
         const existing=input.id===undefined?undefined:state.reminders.find(r=>r.id===identifier(input.id));
         if(input.id&&!existing)reject('NOT_FOUND','提醒不存在或不属于当前账号。');
         const schoolId=identifier(input.schoolId),itemId=identifier(input.itemId),row=await authorizedItem(repo,owner,schoolId,itemId,time,!existing);
@@ -166,8 +180,8 @@ export function reminderService(pool:SqlPool,options:Options={}){
       await synchronize(state,client,owner);
       if(action==='reminders.read'){const target=input.id===undefined?null:identifier(input.id);for(const event of state.notifications)if(!target||event.id===target)event.read=true;}
       if(action==='reminders.export'){
-        const target=input.id===undefined?null:identifier(input.id),rows=state.reminders.filter(r=>(!target||r.id===target)&&Date.parse(r.dueAt)>time);
-        if(!rows.length)reject('NOT_FOUND','没有可导出的未来提醒。');
+        const target=input.id===undefined?null:identifier(input.id),rows=state.reminders.filter((r):r is StoredReminder&{dueAt:string}=>(!target||r.id===target)&&r.dueAt!==null&&Date.parse(r.dueAt)>time);
+        if(!rows.length)reject('NO_FUTURE_REMINDERS','当前没有已设置未来时间的提醒。请先在提醒中心逐条设置时间，或修改已到时间的事项。');
         return{content:reminderCalendar(rows,new Date(time).toISOString()),filename:'校园阅览室提醒.ics'};
       }
       return dto(state);
