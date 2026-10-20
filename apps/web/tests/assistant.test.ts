@@ -42,6 +42,36 @@ it('welcomes goal-oriented questions without promising ongoing monitoring or rem
   expect(welcome).not.toMatch(/一直盯着|自动提醒|随时通知|已经记住/);
   expect(vi.mocked(fake.call).mock.calls.some(([action]) => ['ai.chat.send', 'ai.chat.step'].includes(action))).toBe(false);
 });
+it('shows server search status with each reply even when a model omits that limitation', async () => {
+  const result = { ...turn, state: 'complete' as const, quotaHeld: false, result: '报名需要简历。', search: { state: 'failed' as const, message: '本次联网搜索未完成，以下使用已有公告。' } };
+  const fake = fakeTransport(action => action === 'ai.chat.latest' ? { conversation: conversation([result]) } : undefined);
+  const w = open(fake); await flushPromises();
+  expect(w.get('.conversation-turn .turn-search-status').text()).toContain('本次联网搜索未完成');
+  expect(w.get('.markdown-content').text()).toContain('报名需要简历');
+  expect(vi.mocked(fake.call).mock.calls.some(([action]) => ['ai.chat.send', 'ai.chat.step', 'ai.recommend'].includes(action) && action !== 'ai.recommend')).toBe(false);
+});
+it('a chat search releases the previous selection so the next followup can use the discovered announcement', async () => {
+  const discovered = { ...turn, state: 'complete' as const, quotaHeld: false, question: '再找找本校比赛', result: '找到一条新比赛公告。', references: [{ reference: 'R1', itemId: 'new', title: '新比赛', originalUrl: 'https://example.edu/new' }], search: { state: 'complete' as const, message: '搜索已完成' } };
+  const fake = fakeTransport(action => action === 'ai.chat.send' ? discovered : undefined);
+  const w = open(fake, [notice]); await flushPromises();
+  await w.get('#assistant-question').setValue('再找找本校比赛'); await w.get('form.assistant-composer').trigger('submit'); await flushPromises();
+  expect(w.emitted('remove')).toEqual([['one']]);
+  await w.setProps({ selection: [] });
+  await w.get('#assistant-question').setValue('它什么时候截止？'); await w.get('form.assistant-composer').trigger('submit'); await flushPromises();
+  const sends = vi.mocked(fake.call).mock.calls.filter(([action]) => action === 'ai.chat.send');
+  expect(sends[1]![1]).not.toHaveProperty('itemIds');
+});
+it('recovering a lost search response also releases the stale selection without resending', async () => {
+  let requestId = '';
+  const fake = fakeTransport((action, input) => {
+    if (action === 'ai.chat.send') { requestId = input.requestId; throw new Error('lost response'); }
+    if (action === 'ai.chat.get') return conversation([{ ...turn, id: requestId, search: { state: 'complete', message: '搜索已完成' } }]);
+  });
+  const w = open(fake, [notice]); await flushPromises();
+  await w.get('#assistant-question').setValue('再找找本校比赛'); await w.get('form.assistant-composer').trigger('submit'); await flushPromises();
+  expect(w.emitted('remove')).toEqual([['one']]);
+  expect(vi.mocked(fake.call).mock.calls.filter(([action]) => action === 'ai.chat.send')).toHaveLength(1);
+});
 it('explicit send includes selected sources and steps into a rendered answer; followups reuse the conversation', async () => {
   const fake = fakeTransport(); const w = open(fake, [notice]); await flushPromises();
   await w.get('#assistant-question').setValue('需要什么材料？'); await w.get('form.assistant-composer').trigger('submit'); await flushPromises();

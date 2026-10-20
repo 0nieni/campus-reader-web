@@ -14,3 +14,4 @@ test-results/
 playwright-report/
 .playwright-cli/
 *.log
+/output/ai-evaluation/

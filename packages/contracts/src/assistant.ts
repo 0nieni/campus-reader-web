@@ -4,7 +4,7 @@ export interface AiPreferences { schoolId: string; interests: string[]; goals: s
 export interface RecommendedNotice extends Notice { originalUrl: string | null; reason: string; readState: 'body' | 'title_only' | 'snippet_only' | 'unavailable'; checkedAt: string | null; allowAi: boolean }
 export interface AiRecommendations { items: RecommendedNotice[]; search: { state: 'idle' | 'unconfigured' | 'complete' | 'failed'; message: string }; coverage: string }
 export interface ChatReference { reference: string; itemId: string; title: string; originalUrl: string | null }
-export interface AiChatTurn { id: string; question: string; taskId: string | null; state: ReadingTask['state']; result: string | null; message: string; references: ChatReference[]; step: number; totalSteps: number; quotaHeld: boolean; service: 'official' | 'byok'; provider: string; model: string }
+export interface AiChatTurn { id: string; question: string; taskId: string | null; state: ReadingTask['state']; result: string | null; message: string; references: ChatReference[]; step: number; totalSteps: number; quotaHeld: boolean; service: 'official' | 'byok'; provider: string; model: string; search?: AiRecommendations['search'] }
 export interface AiConversation { id: string; schoolId: string; createdAt: string; expireAt: string; turns: AiChatTurn[] }
 export interface AssistantActions {
   'ai.profile.get': { input: { schoolId: string }; output: AiPreferences };

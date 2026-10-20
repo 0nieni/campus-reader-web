@@ -35,6 +35,84 @@ test('chat supports followups with conversational guide, shared three-round quot
   assert.ok(!f.prompts.some(p => p.includes('七节结构保持完整')));
 });
 
+test('a followup about the second suggestion receives the prior assistant answer and reuses its materials', async () => {
+  const prompts: string[] = [];
+  const f = setup(async (_connection, _guide, content) => {
+    prompts.push(content);
+    return '公告要求提交报名表。[R1](https://www.bjtu.edu.cn/test) 建议：1. 先填报名表。2. 整理一页项目介绍。';
+  });
+  const c = await f.create();
+  await f.finish(c.id, await f.send(c.id, 'context-first-request-01', '我想积累项目经验，有什么准备建议？'));
+  const next = await f.call('ai.chat.send', { conversationId: c.id, requestId: 'context-next-request-001', question: '你刚才说的第二个建议怎么做？' }) as AiChatTurn;
+  assert.ok(next.taskId, 'a contextual followup must reuse authorized preceding materials');
+  await f.finish(c.id, next);
+  const content = prompts.at(-1)!;
+  assert.ok(content.includes('整理一页项目介绍'), 'the actual model invocation must include the previous answer');
+  assert.ok(content.includes('assistant') && content.includes('user'));
+});
+
+test('historical source revocation or body change blocks a different-material followup before sending', async () => {
+  for (const change of ['policy', 'version']) {
+    const f = setup(), c = await f.create();
+    await f.finish(c.id, await f.send(c.id, 'history-first-request-01'));
+    f.items.set('second', { ...f.items.get('notice')!, _id: 'second', sourceId: 'second-source', originalUrl: 'https://www.bjtu.edu.cn/second' });
+    f.rows('sources').set('second-source', { _id: 'second-source', aiProcessing: 'allow', scope: 'school', schoolIds: ['bjtu'] });
+    const next = await f.call('ai.chat.send', { conversationId: c.id, requestId: 'history-next-request-001', question: '对比之前的建议', itemIds: ['second'] }) as AiChatTurn;
+    const before = f.calls();
+    if (change === 'policy') f.rows('sources').get('source')!.aiProcessing = 'import_only';
+    else f.items.get('notice')!.contentText = '资料正文已更正';
+    await assert.rejects(f.call('ai.chat.step', { conversationId: c.id, turnId: next.id, step: 0 }), (e: any) => ['AI_POLICY_BLOCKED', 'MATERIAL_CHANGED'].includes(e.code));
+    assert.equal(f.calls(), before, 'revoked or changed historic evidence must not be sent with a new turn');
+  }
+});
+
+test('revoked prior answers are omitted when building new context from other readable materials', async () => {
+  const f = setup(), c = await f.create();
+  await f.finish(c.id, await f.send(c.id, 'omit-history-first-0001', '这是上一条私人讨论'));
+  f.rows('sources').get('source')!.enabled = false;
+  f.items.set('second', { ...f.items.get('notice')!, _id: 'second', sourceId: 'second-source' });
+  f.rows('sources').set('second-source', { _id: 'second-source', aiProcessing: 'allow', scope: 'school', schoolIds: ['bjtu'] });
+  const next = await f.call('ai.chat.send', { conversationId: c.id, requestId: 'omit-history-next-00001', question: '只读这篇新资料', itemIds: ['second'] }) as AiChatTurn;
+  await f.finish(c.id, next);
+  assert.ok(!f.prompts.at(-1)!.includes('这是上一条私人讨论'), 'a revoked question/answer pair must not enter new context');
+});
+
+test('historical permission revocation during a different-material call discards the response', async () => {
+  let requests = 0;
+  const f = setup(async () => {
+    requests++;
+    if (requests > 2) {
+      f.rows('sources').get('source')!.enabled = false;
+      return '新公告要求。[R1](https://www.bjtu.edu.cn/second)';
+    }
+    return '报名材料。[R1](https://www.bjtu.edu.cn/test)';
+  });
+  const c = await f.create();
+  await f.finish(c.id, await f.send(c.id, 'during-history-first-01'));
+  f.items.set('second', { ...f.items.get('notice')!, _id: 'second', sourceId: 'second-source', originalUrl: 'https://www.bjtu.edu.cn/second' });
+  f.rows('sources').set('second-source', { _id: 'second-source', aiProcessing: 'allow', scope: 'school', schoolIds: ['bjtu'] });
+  const turn = await f.call('ai.chat.send', { conversationId: c.id, requestId: 'during-history-next-001', question: '继续对比', itemIds: ['second'] }) as AiChatTurn;
+  await assert.rejects(f.call('ai.chat.step', { conversationId: c.id, turnId: turn.id, step: 0 }), (error: any) => error.code === 'AI_POLICY_BLOCKED');
+  const stored = f.rows('web_ai_tasks').get(turn.taskId!)!;
+  assert.equal(stored.result, null); assert.equal(stored.quotaHeld, false);
+  assert.equal((await f.ai.handle('ai.status', {}, identity) as any).quota.used, 1);
+});
+
+test('historical version checks do not apply the current-turn body limit to unrelated old documents', async () => {
+  const f = setup(), c = await f.create();
+  f.items.get('notice')!.contentText = '甲'.repeat(32000);
+  await f.finish(c.id, await f.send(c.id, 'large-history-first-001'));
+  f.items.set('second', { ...f.items.get('notice')!, _id: 'second', contentText: '乙'.repeat(32000) });
+  const second = await f.call('ai.chat.send', { conversationId: c.id, requestId: 'large-history-second-01', question: '读第二篇', itemIds: ['second'] }) as AiChatTurn;
+  await f.finish(c.id, second);
+  f.items.set('third', { ...f.items.get('notice')!, _id: 'third', contentText: '本轮只需解释这段很短的正文。' });
+  const third = await f.call('ai.chat.send', { conversationId: c.id, requestId: 'large-history-third-001', question: '只解释第三篇', itemIds: ['third'] }) as AiChatTurn;
+  assert.equal(third.state, 'ready');
+  const task = f.rows('web_ai_tasks').get(third.taskId!)!;
+  assert.equal(task.docs.length, 1);
+  assert.ok(task.chat.history.length <= 3500);
+});
+
 const sourceRevocations: Array<[string, Record<string, unknown>]> = [
   ['disabled', { enabled: false }], ['deleted', { deleted: true }],
   ['foreign owner', { scope: 'private', ownerOpenid: 'other-owner', aiProcessing: 'allow' }],

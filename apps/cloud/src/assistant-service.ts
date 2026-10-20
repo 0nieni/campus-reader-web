@@ -34,7 +34,14 @@ function publicCandidate(row: ItemRow, scope: Scope, current: number): boolean {
 const actions = new Set(['ai.profile.get','ai.profile.save','ai.profile.clearBehavior','ai.behavior','ai.dismiss','ai.recommend','ai.chat.create','ai.chat.get','ai.chat.send','ai.chat.step','ai.chat.cancel','ai.chat.resolve','ai.chat.clear','ai.chat.latest']);
 export function assistantService(db: Database, repo: Repository, ai: ReturnType<typeof aiService>, now = Date.now, search = searchAnnouncements, reader: PageReader = readSchoolPage) {
   const profile = assistantProfile(db, repo, now);
-  const chat = assistantChat(db, repo, ai, profile.recommend, now);
+  const chat = assistantChat(db, repo, ai, profile.recommend, now, async (schoolId, query, identity) => {
+    try { return await recommendations({ schoolId, query, search: true }, identity); }
+    catch (error) {
+      if (!(error instanceof AppError) || error.code !== 'SEARCH_LIMIT') throw error;
+      const local = await profile.recommend(identity.dataOwnerId, schoolId, query);
+      return { ...local, search: { state: 'failed', message: error.message } };
+    }
+  });
   async function searchBudget(owner: string) {
     await seed(db, 'user_profiles', owner, {});
     await atomic(db, async tx => {

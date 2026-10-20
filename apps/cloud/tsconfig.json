@@ -10,5 +10,5 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["src/**/*.ts", "tests/**/*.ts", "../../netlify/functions/**/*.mts"]
+  "include": ["src/**/*.ts", "tests/**/*.ts", "evals/**/*.ts", "../../tools/evaluate-ai-chat.ts", "../../netlify/functions/**/*.mts"]
 }

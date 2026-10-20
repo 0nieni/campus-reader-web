@@ -11,6 +11,7 @@ import { AppError, reject } from "./errors";
 import { verifiedRelay, type RelayBatch } from "./relay-protocol";
 import { diagnoseOfficial, failureMessages } from "./model-diagnostics";
 import { CHAT_READING_GUIDE, CHAT_GUIDE_VERSION } from './chat-guide';
+import type { ChatContext } from './chat-context';
 
 const TASKS = "web_ai_tasks", ACCOUNTS = "web_ai_accounts";
 export const beijingDay = (now = Date.now()) => new Date(now + 8 * 3600000).toISOString().slice(0, 10);
@@ -20,7 +21,7 @@ export const dailyLimit = () => number("AI_DAILY_LIMIT", 3, 3);
 interface Task extends Omit<ReadingTask, "state" | "totalSteps" | "title"> {
   state: ReadingTask["state"] | "new"; owner: string; fingerprint: string; accountId: string;
   docs: ReadingDocument[]; versions: string; batches: Batch[]; notes: string[]; question: string; inFlight: number | null; startedAt: string | null; testOnly?: boolean; endpointHash?: string; relayLease?: string;
-  chat?: { history: string; expireAt: string };
+  chat?: ChatContext;
 }
 export function officialConfig(): { connection: Connection; endpoint: string } | null {
   const base = process.env.AI_CHAT_BASE_URL, apiKey = process.env.AI_CHAT_API_KEY, model = process.env.AI_CHAT_MODEL;
@@ -52,6 +53,12 @@ export function aiService(db: Database, repo: Repository, complete = userComplet
     if (row.testOnly || row.state === "new") return row;
     const current = await readingPackage(db, repo, owner, row.schoolId, row.docs.map(doc => doc.itemId));
     if (current.fingerprint !== row.versions) reject("MATERIAL_CHANGED", "资料或处理权限已变化，旧任务停止读取，请重新预览。");
+    const historical = row.chat?.evidence || [];
+    for (const saved of historical) {
+      // These bodies are checked, never concatenated into this turn's input.
+      const checked = await readingPackage(db, repo, owner, row.schoolId, [saved.itemId]);
+      if (checked.docs[0]?.version !== saved.version) reject('MATERIAL_CHANGED', '历史回答所依赖的资料已变化，请新建对话或重新选择资料。');
+    }
     return row;
   }
   function publicTask(row: Task): ReadingTask {
