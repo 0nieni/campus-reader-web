@@ -5,6 +5,7 @@ const featureLoading = defineComponent(() => () => h("section", { class: "featur
 const featureFailed = defineComponent(() => () => h("section", { class: "feature-surface", role: "alert" }, "功能页加载失败，请刷新网页后重试。"));
 const BookmarksPanel = defineAsyncComponent({ loader: () => import("./components/BookmarksPanel.vue"), loadingComponent: featureLoading, errorComponent: featureFailed });
 const ReadingPanel = defineAsyncComponent({ loader: () => import("./components/ReadingPanel.vue"), loadingComponent: featureLoading, errorComponent: featureFailed });
+const AssistantPanel = defineAsyncComponent({ loader: () => import('./components/AssistantPanel.vue'), loadingComponent: featureLoading, errorComponent: featureFailed });
 const WebsiteSourcesPanel = defineAsyncComponent({loader:()=>import('./components/WebsiteSourcesPanel.vue'),loadingComponent:featureLoading,errorComponent:featureFailed});
 import { siteTransport as cloudTransport, setupIssues, regionNeedsVerification, isNetlify } from "./lib/site-transport";
 import type { Transport } from "./lib/transport";
@@ -26,17 +27,18 @@ const featureTransport: Transport = { ...transport, call: (async (action, input)
   catch (caught) { if (caught instanceof ClientError && ["UNAUTHENTICATED", "FORBIDDEN"].includes(caught.code)) store.clear(); throw caught; }
 }) as Transport["call"] };
 const view = ref<"feed" | "favorites" | "ai" | "sources">("feed"), selection = ref<Notice[]>([]), bookmarkBusy = ref(false);
+const advancedReading = ref(false);
 const requestingSchool = ref(false), schoolQuery = ref('');
 const matchingSchools = computed(() => store.schools.filter(school=>school.name.includes(schoolQuery.value.trim())));
 watch(() => store.auth?.uid,()=>{requestingSchool.value=false;schoolQuery.value='';});
 watch(() => store.auth?.uid, () => { view.value = "feed"; selection.value = []; });
-watch(() => store.workspace?.school?.id, () => { selection.value = []; });
+watch(() => store.workspace?.school?.id, () => { selection.value = []; advancedReading.value = false; });
 function chooseNotice(item: Notice) {
   if (selection.value.some(row => row.id === item.id)) selection.value = selection.value.filter(row => row.id !== item.id);
   else if (selection.value.length < 8) selection.value.push(item);
   else store.error = "一次最多选择 8 篇公告。";
 }
-function navigate(target: "feed" | "favorites" | "ai" | "sources") { store.closeNotice(); view.value = target; }
+function navigate(target: "feed" | "favorites" | "ai" | "sources") { store.closeNotice(); advancedReading.value = false; view.value = target; }
 async function saveBookmark() {
   const item = store.detail, schoolId = store.workspace?.school?.id, uid = store.auth?.uid;
   if (!item || !schoolId || bookmarkBusy.value) return;
@@ -493,7 +495,8 @@ function schoolChanged(event: Event) {
       </section>
       <BookmarksPanel v-if="view === 'favorites'" :transport="featureTransport" :school-id="store.workspace.school?.id || null" @open="openFavorite" />
       <WebsiteSourcesPanel v-if="view === 'sources'" :key="`${store.auth?.uid}:${store.workspace.school?.id}`" :transport="featureTransport" :school-id="store.workspace.school?.id || null" :school-name="store.workspace.school?.name || ''" @changed="selection=[];store.sourcesChanged()" @back="navigate('feed')" />
-      <ReadingPanel v-if="view === 'ai'" :transport="featureTransport" :school-id="store.workspace.school?.id || null" :selection="selection" @remove="selection = selection.filter(item => item.id !== $event)" @back="navigate('feed')" />
+      <AssistantPanel v-if="view === 'ai' && !advancedReading" :key="`assistant:${store.auth?.uid}:${store.workspace.school?.id}`" :transport="featureTransport" :school-id="store.workspace.school?.id || null" :selection="selection" @remove="selection = selection.filter(item => item.id !== $event)" @back="navigate('feed')" @advanced="advancedReading = true" />
+      <ReadingPanel v-if="view === 'ai' && advancedReading" :key="`reading:${store.auth?.uid}:${store.workspace.school?.id}`" :transport="featureTransport" :school-id="store.workspace.school?.id || null" :selection="selection" @remove="selection = selection.filter(item => item.id !== $event)" @back="advancedReading = false" />
     </main>
     <footer v-if="!store.workspace" class="page-footer">
       <span>校园阅览室</span><span>阅读有来源，重要信息不遗漏。</span>

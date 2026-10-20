@@ -8,6 +8,7 @@ import { createSiteApi } from '../../apps/cloud/src/netlify-http';
 import { createGateway } from '../../apps/cloud/src/gateway';
 import { bookmarksService } from '../../apps/cloud/src/bookmarks';
 import { aiService } from '../../apps/cloud/src/ai-service';
+import { assistantService } from '../../apps/cloud/src/assistant-service';
 import { siteWorkspace } from '../../apps/cloud/src/site-access';
 import { schoolDirectory } from '../../apps/cloud/src/school-directory';
 import { schoolRequests } from '../../apps/cloud/src/school-requests';
@@ -19,7 +20,7 @@ export default createSiteApi({
   ownerEmail: () => Netlify.env.get('NETLIFY_OWNER_EMAIL'),
   async gateway(event, user) {
     // Runtime values only, never VITE_ or static build configuration. No relay to CloudBase.
-    for (const key of ['AI_CHAT_API_KEY', 'AI_DAILY_LIMIT', 'AI_PLATFORM_DAILY_CALLS', 'AI_PLATFORM_DAILY_TOKENS']) {
+    for (const key of ['AI_CHAT_API_KEY', 'AI_DAILY_LIMIT', 'AI_PLATFORM_DAILY_CALLS', 'AI_PLATFORM_DAILY_TOKENS', 'TAVILY_API_KEY']) {
       const value = Netlify.env.get(key); if (value !== undefined) process.env[key] = value;
     }
     process.env.AI_CHAT_BASE_URL = Netlify.env.get('AI_CHAT_BASE_URL') || 'https://api.deepseek.com';
@@ -31,13 +32,14 @@ export default createSiteApi({
     const directory = schoolDirectory(pool,repo);
     const websites=websiteSources(pool,repo);
     repo.material = row=>row.importKind==='website'?websites.material(row):directory.material(row);
+    const ai = aiService(db, repo), assistant = assistantService(db, repo, ai);
     const request = schoolRequests(pool,async fields => {
       // Fixed site target: never accept URLs, recipients, email addresses or UID
       // from the browser. Notification recipients are configured in Netlify Forms.
       const response = await fetch('https://campus-reader-ninie6159.netlify.app/__forms.html', {method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:fields.toString(),redirect:'error',signal:AbortSignal.timeout(8000)});
       if (!response.ok) throw new Error('Form submission not confirmed');
     });
-    const gateway = createGateway(repo, siteWorkspace(user, Netlify.env.get('NETLIFY_OWNER_EMAIL')), Date.now, { websites, bookmarks: bookmarksService(db, repo), ai: aiService(db, repo), directory:{refresh:directory.refresh,request:(name,identity)=>{
+    const gateway = createGateway(repo, siteWorkspace(user, Netlify.env.get('NETLIFY_OWNER_EMAIL')), Date.now, { websites, bookmarks: bookmarksService(db, repo), ai: { handle: (action,input,identity) => assistant.supports(action) ? assistant.handle(action,input,identity) : ai.handle(action,input,identity) }, directory:{refresh:directory.refresh,request:(name,identity)=>{
       if (getContext().deploy.context !== 'production') throw new AppError('PRODUCTION_REQUIRED','请在正式网站提交学校添加申请；预览环境不发送通知。');
       return request(name,identity.dataOwnerId,user.email);
     }} });

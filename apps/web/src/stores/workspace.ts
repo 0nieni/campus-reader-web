@@ -298,6 +298,8 @@ export function workspaceStore(transport: Transport) {
         });
         if (ticket === epoch && request === detailEpoch) {
           detail.value = result;
+          // Learning is enforced by the server's opt-in; never delay article display.
+          void transport.call('ai.behavior', { schoolId, itemId }).catch(() => {});
           const row=items.value.find(row=>row.id===itemId);
           if(row){row.summary=result.summary;rememberFeed(schoolId);}
         }

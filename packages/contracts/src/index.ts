@@ -62,7 +62,9 @@ export interface AiStartInput {
   schoolId: string; itemIds: string[]; requestId: string; service: "official" | "byok";
   provider?: "deepseek" | "openai"; model?: string; task: "summary" | "outline" | "answer"; question?: string; fingerprint?: string;
 }
-export interface GatewayActions {
+export type { AiPreferences, RecommendedNotice, AiRecommendations, ChatReference, AiChatTurn, AiConversation } from './assistant';
+import type { AssistantActions } from './assistant';
+export interface GatewayActions extends AssistantActions {
   "sources.list":{input:{schoolId:string};output:{sources:WebsiteSource[]}};
   "sources.save":{input:{schoolId:string;sourceId?:string;source:WebsiteSourceInput};output:{id:string}};
   "sources.test":{input:{schoolId:string;sourceId:string};output:{count:number;titles:string[];message:string}};
