@@ -46,4 +46,4 @@ Files: tools/evaluate-ai-chat.ts, apps/cloud/evals/, docs/ai-reading-guide.md, g
 - [x] 执行 dry-run，缺配置时 live 模式明确拒绝，记录真实模型评测未运行。
 - [x] 同步指南并执行 `node tools/sync-ai-guide.mjs` 与 `npm run ai:guide:check`。
 - [x] 执行 npm ci、typecheck、全量测试、build、netlify:build；完成独立审查和 neat-freak 收尾判定。
-- [ ] 在已核实的 AI_module 独立检出比较并集成本轮文件，普通提交推送；核对远端，不强推、不部署。
+- [x] 在已核实的 AI_module 独立检出比较并集成本轮文件，普通提交推送；核对远端，不强推、不部署。
