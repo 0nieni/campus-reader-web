@@ -16,19 +16,18 @@ it('requires manual Beijing date confirmation and does not start AI or request n
  expect(call).toHaveBeenCalledWith('reminders.save',expect.objectContaining({schoolId:'bjtu',itemId:'public_fixture',dueAt:'2027-01-20T01:30:00.000Z',days:[7,3,1,0]}));
  expect(wrapper.text()).toContain('已保存');expect(wrapper.emitted('saved')).toHaveLength(1);expect(browser.enablePush).not.toHaveBeenCalled();wrapper.unmount();
 });
-it('keeps reminder center private, lets users follow titles and explicitly enable push',async()=>{
+it('shows only messages and individual time reminders, while push requires explicit authorization',async()=>{
  const state=fresh(),call=vi.fn(async(action:string,input:any)=>{
   if(action==='feed.list')return{items:[],nextCursor:null};
-  if(action==='reminders.watch.save')state.watches.push({id:'watch',schoolId:input.schoolId,schoolName:'测试大学',keyword:input.keyword,createdAt:new Date().toISOString()});
   return structuredClone(state);
  });
  const wrapper=mount(ReminderCenter,{props:{transport:{call} as unknown as Transport,schoolId:'bjtu',schoolName:'测试大学',revision:0,visible:true}});await flushPromises();
  expect(browser.enablePush).not.toHaveBeenCalled();expect(wrapper.text()).toContain('09:00、20:00');
  const button=(text:string)=>wrapper.findAll('button').find(row=>row.text()===text)!;
- await button('学校与关键词（0）').trigger('click');await wrapper.get('input[placeholder^="例如：竞赛"]').setValue('奖学金');await wrapper.get('form.watch-form').trigger('submit.prevent');await flushPromises();
- expect(call).toHaveBeenCalledWith('reminders.watch.save',{schoolId:'bjtu',keyword:'奖学金'});expect(wrapper.text()).toContain('标题包含「奖学金」');
+ expect(wrapper.findAll('.reminder-tabs button').map(b=>b.text())).toEqual(['消息通知','时间提醒（0）']);
+ expect(wrapper.text()).not.toContain('学校与关键词');expect(wrapper.find('.watch-form').exists()).toBe(false);
  await button('开启此浏览器推送').trigger('click');await flushPromises();expect(browser.enablePush).toHaveBeenCalledTimes(1);expect(wrapper.text()).toContain('发送测试通知');
- expect(call.mock.calls.some(([action])=>action.startsWith('ai.'))).toBe(false);wrapper.unmount();
+ expect(call.mock.calls.some(([action])=>action.startsWith('ai.')||action.startsWith('reminders.watch.'))).toBe(false);wrapper.unmount();
 });
 it('renders untrusted titles as text, marks notifications read and discards late results after unmount',async()=>{
  const state=fresh();state.notifications=[{id:'event',kind:'new_notice',schoolId:'bjtu',itemId:'notice',title:'<img src=x onerror=alert(1)>',message:'新公告',createdAt:new Date().toISOString(),read:false}];state.unread=1;

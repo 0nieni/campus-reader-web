@@ -8,7 +8,7 @@ import ReminderForm from './ReminderForm.vue';
 import ReminderNoticePicker from './ReminderNoticePicker.vue';
 const props=defineProps<{transport:Transport;schoolId:string|null;schoolName:string;revision:number;visible:boolean}>();
 const emit=defineEmits<{unread:[count:number];changed:[state:ReminderState];open:[event:ReminderNotification];back:[]}>();
-const state=ref<ReminderState|null>(null),busy=ref(false),error=ref(''),message=ref(''),keyword=ref(''),editing=ref<Reminder|null>(null),pushOn=ref(false),onlyUnread=ref(false),tab=ref<'notifications'|'schedule'|'watches'>('notifications');
+const state=ref<ReminderState|null>(null),busy=ref(false),error=ref(''),message=ref(''),editing=ref<Reminder|null>(null),pushOn=ref(false),onlyUnread=ref(false),tab=ref<'notifications'|'schedule'>('notifications');
 const clock=ref(Date.now()),support=ref('');
 const notices=computed(()=>state.value?.notifications.filter(n=>!onlyUnread.value||!n.read)||[]);
 const schedule=computed(()=>[...(state.value?.reminders||[])].sort((a,b)=>a.dueAt===null?b.dueAt===null?b.createdAt.localeCompare(a.createdAt):-1:b.dueAt===null?1:a.dueAt.localeCompare(b.dueAt)));
@@ -33,8 +33,6 @@ async function load(){
 async function run(work:()=>Promise<void>){if(busy.value)return;busy.value=true;ticket++;error.value='';message.value='';try{await work();}catch(caught){if(active)error.value=(caught as any)?.code?safeError(caught):caught instanceof Error?caught.message:'操作未完成，请重试。';}finally{if(active){busy.value=false;planNext();}}}
 async function read(id?:string){await run(async()=>apply(await props.transport.call('reminders.read',id?{id}:{})));}
 async function remove(id:string){await run(async()=>{apply(await props.transport.call('reminders.remove',{id}));if(active&&editing.value?.id===id)editing.value=null;});}
-async function removeWatch(id:string){await run(async()=>apply(await props.transport.call('reminders.watch.remove',{id})));}
-async function follow(){await run(async()=>{if(!props.schoolId)return;apply(await props.transport.call('reminders.watch.save',{schoolId:props.schoolId,keyword:keyword.value}));if(active){keyword.value='';message.value='关注已保存，从现在开始提醒新入库的公告。';}});}
 function added(result:ReminderState){apply(result);if(active){tab.value='schedule';message.value='已加入提醒中心，请逐篇设置时间。';}}
 function isFuture(reminder:Reminder){return reminder.dueAt!==null&&Date.parse(reminder.dueAt)>clock.value;}
 async function download(id?:string){await run(async()=>{
@@ -68,13 +66,13 @@ onUnmounted(()=>{active=false;ticket++;clearTimeout(timer);document.removeEventL
   <p v-if="error" class="error-message" role="alert">{{error}}</p><p v-if="message" class="reminder-feedback" role="status">{{message}}</p>
   <div class="reminder-workspace">
    <div class="reminder-content">
-    <nav class="reminder-tabs" aria-label="提醒分类"><button :class="{active:tab==='notifications'}" @click="tab='notifications'">消息通知</button><button :class="{active:tab==='schedule'}" @click="tab='schedule'">时间提醒（{{state?.reminders.length||0}}）</button><button :class="{active:tab==='watches'}" @click="tab='watches'">学校与关键词（{{state?.watches.length||0}}）</button></nav>
+    <nav class="reminder-tabs" aria-label="提醒分类"><button :class="{active:tab==='notifications'}" @click="tab='notifications'">消息通知</button><button :class="{active:tab==='schedule'}" @click="tab='schedule'">时间提醒（{{state?.reminders.length||0}}）</button></nav>
     <div v-if="!state&&!error" class="empty-state" role="status">正在检查提醒…</div>
     <template v-if="tab==='notifications'&&state">
      <div class="reminder-toolbar"><label><input v-model="onlyUnread" type="checkbox">只看未读</label><div class="action-row"><button class="text-button" :disabled="busy" @click="load">{{state.more?'继续检查新公告':'检查提醒'}}</button><button class="text-button" :disabled="busy||!state.unread" @click="read()">全部标为已读</button></div></div>
-     <div v-if="!notices.length" class="empty-state"><h2>{{onlyUnread?'没有未读提醒':'还没有提醒消息'}}</h2><p>在“选择公告”中勾选加入，再逐篇设置时间；也可以添加学校与关键词关注。</p></div>
+     <div v-if="!notices.length" class="empty-state"><h2>{{onlyUnread?'没有未读提醒':'还没有提醒消息'}}</h2><p>在“选择公告”中勾选加入，再到“时间提醒”逐篇设置时间。</p></div>
      <article v-for="notice in notices" :key="notice.id" class="reminder-message" :class="{unread:!notice.read}"><div><span class="small muted">{{notice.kind==='deadline'?'时间提醒':'新公告'}} · {{time(notice.createdAt)}}</span><h2><button class="favorite-open" @click="emit('open',notice);read(notice.id)">{{notice.title}}</button></h2><p>{{notice.message}}</p></div><button v-if="!notice.read" class="text-button" :disabled="busy" @click="read(notice.id)">标为已读</button></article>
-     <p class="small muted reminder-footnote">保留最近90天、最多200条通知。新公告提醒以实际入库为准，无法覆盖尚未采集的官网内容。</p>
+     <p class="small muted reminder-footnote">保留最近90天、最多200条通知。加入公告后请逐篇设置时间；未设置时间不会开始提醒。</p>
     </template>
     <template v-if="tab==='schedule'&&state">
      <div class="reminder-toolbar"><p class="muted">待设置 {{pendingCount}} 条 · 可导出 {{futureCount}} 条</p><button class="text-button" :disabled="busy||!futureCount" :title="exportHelp" @click="download()">导出全部日历</button></div>
@@ -88,7 +86,6 @@ onUnmounted(()=>{active=false;ticket++;clearTimeout(timer);document.removeEventL
       </div>
      </article>
     </template>
-    <template v-if="tab==='watches'&&state"><form class="watch-form" @submit.prevent="follow"><h2>关注学校的新公告</h2><p>当前学校：{{schoolName||'尚未选择学校'}}。切换学校请返回公告页。</p><label>标题关键词（可选）<input v-model="keyword" maxlength="60" placeholder="例如：竞赛、奖学金；留空关注该校列表全部新公告"></label><button class="primary" :disabled="busy||!schoolId">添加关注</button><p class="small muted">从添加关注后开始，按公告标题匹配，最多10条规则。学校列表可能包含通用竞赛来源；不会自动遍历官网或额外调用AI。</p></form><article v-for="watch in state.watches" :key="watch.id" class="reminder-message"><div><h2>{{watch.schoolName}}</h2><p>{{watch.keyword?`标题包含「${watch.keyword}」`:'该校列表全部新公告'}}</p><p class="small muted">{{time(watch.createdAt)}} 开始关注</p></div><button class="text-button" :disabled="busy" @click="removeWatch(watch.id)">取消关注</button></article></template>
    </div>
    <ReminderNoticePicker v-if="visible" :key="schoolId||'none'" :transport="transport" :school-id="schoolId" :school-name="schoolName" :reminders="state?.reminders||[]" @added="added" />
   </div>
