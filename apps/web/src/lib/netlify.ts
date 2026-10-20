@@ -1,5 +1,6 @@
 import type { AuthSession, GatewayResult } from '@campus/contracts';
 import type { Transport } from './transport';
+import {disablePush} from './browser-push';
 import { ClientError } from './errors';
 import { hydrateSession, onAuthChange } from '@netlify/identity';
 const listeners = new Set<(session: AuthSession | null) => void>();
@@ -24,7 +25,7 @@ async function request<T>(url: string, body?: unknown): Promise<T> {
 export const netlifyTransport: Transport = {
   async restore() { await hydrateSession(); return request<AuthSession | null>('/.netlify/functions/auth'); },
   async signIn(email, password) { const value = await request<AuthSession>('/.netlify/functions/auth?op=login', { email: email.trim(), password }); await hydrateSession(); notify(value); return value; },
-  async signOut() { await request('/.netlify/functions/auth?op=logout', {}); notify(null); },
+  async signOut() { await Promise.race([disablePush(netlifyTransport).catch(()=>{}),new Promise(resolve=>setTimeout(resolve,2500))]); await request('/.netlify/functions/auth?op=logout', {}); notify(null); },
   onSessionChange(listener) {
     listeners.add(listener);
     const stop = onAuthChange((_event, user) => { if (!user) listener(null); else listener({ uid: user.id, username: user.email || null }); });

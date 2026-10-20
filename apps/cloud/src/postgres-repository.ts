@@ -4,6 +4,17 @@ import type { SqlPool } from './postgres-storage';
 import { isPrivate, sourceVisible, type Resource } from './scope';
 import { reject } from './errors';
 const bjtu: School = { id: 'bjtu', name: '北京交通大学', status: 'ready' };
+// Shared by feed queries and new-announcement watches. Parameters 1..4 are
+// owner, school, public sources and private sources, respectively.
+export const visibleItemsSql = `((body->>'ownerOpenid'=$1 AND (body->>'importKind' IS DISTINCT FROM 'website' OR body->'schoolIds' ? $2)) OR (
+  coalesce(body->>'ownerOpenid','')='' AND coalesce(body->>'scope','')<>'private'
+  AND coalesce(body->>'type','')<>'manual' AND coalesce(body->>'category','')<>'mail'
+  AND NOT coalesce(body->'categories' ? 'mail',false)
+  AND coalesce(body->>'key','') NOT IN ('mail-inbox','manual-inbox')
+  AND coalesce(body->>'canonicalUrl','') !~* '^(mail|manual):'
+  AND NOT (coalesce(body->>'sourceId','')=ANY($4::text[]))
+  AND (body->>'scope'='global' OR (body->>'scope'='school' AND body->'schoolIds' ? $2)
+    OR (NOT(body ? 'scope') AND body->>'sourceId'=ANY($3::text[])))))`;
 export function postgresRepository(pool: SqlPool): Repository {
   const one = async (collection: string, id: string) => {
     const { rows } = await pool.query('SELECT body FROM campus_documents WHERE collection=$1 AND id=$2', [collection, id]);
@@ -41,15 +52,7 @@ export function postgresRepository(pool: SqlPool): Repository {
       const values: any[] = [scope.ownerId, scope.schoolId, scope.publicSourceIds, scope.privateSourceIds, since];
       const bind = (value: unknown) => { values.push(value); return `$${values.length}`; };
       // SQL predicates precede pagination. The gateway also rechecks every returned row.
-      const visible = `((body->>'ownerOpenid'=$1 AND (body->>'importKind' IS DISTINCT FROM 'website' OR body->'schoolIds' ? $2)) OR (
-        coalesce(body->>'ownerOpenid','')='' AND coalesce(body->>'scope','')<>'private'
-        AND coalesce(body->>'type','')<>'manual' AND coalesce(body->>'category','')<>'mail'
-        AND NOT coalesce(body->'categories' ? 'mail',false)
-        AND coalesce(body->>'key','') NOT IN ('mail-inbox','manual-inbox')
-        AND coalesce(body->>'canonicalUrl','') !~* '^(mail|manual):'
-        AND NOT (coalesce(body->>'sourceId','')=ANY($4::text[]))
-        AND (body->>'scope'='global' OR (body->>'scope'='school' AND body->'schoolIds' ? $2)
-          OR (NOT(body ? 'scope') AND body->>'sourceId'=ANY($3::text[])))))`;
+      const visible = visibleItemsSql;
       const where = ["collection='items'", "body->>'status'='published'", visible, "coalesce(nullif(body->>'publishedAt',''),nullif(body->>'discoveredAt',''),body->>'createdAt') >= $5"];
       if (filters.keyword) where.push(`strpos(lower(coalesce(body->>'title','') || E'\\n' || coalesce(body->>'contentText','') || E'\\n' || coalesce(body->'summary'->>'oneLine','')), lower(${bind(filters.keyword)}))>0`);
       const effectiveCategories = `coalesce(labels.categories,CASE WHEN jsonb_typeof(body->'categories')='array' THEN CASE WHEN jsonb_array_length(body->'categories')>0 THEN body->'categories' ELSE jsonb_build_array(body->>'category') END ELSE jsonb_build_array(body->>'category') END)`;

@@ -17,7 +17,7 @@ export interface WorkspaceSession {
   identity: AuthSession;
   school: School | null;
   legacyLinked: boolean;
-  capabilities: { reading: true; ai: boolean; operations: false; schoolDirectory?: boolean; noticeLabels?: boolean; websiteSources?:boolean };
+  capabilities: { reading: true; ai: boolean; operations: false; schoolDirectory?: boolean; noticeLabels?: boolean; websiteSources?:boolean; reminders?:boolean };
 }
 export interface Notice {
   id: string;
@@ -62,7 +62,24 @@ export interface AiStartInput {
   schoolId: string; itemIds: string[]; requestId: string; service: "official" | "byok";
   provider?: "deepseek" | "openai"; model?: string; task: "summary" | "outline" | "answer"; question?: string; fingerprint?: string;
 }
+export interface ReminderInput { id?:string; schoolId:string; itemId:string; label:string; dueAt:string; days:number[] }
+export interface Reminder extends ReminderInput { id:string; title:string; schoolName:string; createdAt:string; days:number[] }
+export interface NoticeWatch { id:string; schoolId:string; schoolName:string; keyword:string; createdAt:string }
+export interface ReminderNotification { id:string; kind:'deadline'|'new_notice'; title:string; message:string; schoolId:string; itemId:string; createdAt:string; read:boolean }
+export interface ReminderState { reminders:Reminder[]; watches:NoticeWatch[]; notifications:ReminderNotification[]; unread:number; checkedAt:string; more:boolean; pushConfigured:boolean; publicKey:string|null }
+export interface BrowserPushSubscription { endpoint:string; keys:{p256dh:string;auth:string} }
 export interface GatewayActions {
+  'reminders.state':{input:Record<string,never>;output:ReminderState};
+  'reminders.save':{input:ReminderInput;output:ReminderState};
+  'reminders.remove':{input:{id:string};output:ReminderState};
+  'reminders.watch.save':{input:{id?:string;schoolId:string;keyword:string};output:ReminderState};
+  'reminders.watch.remove':{input:{id:string};output:ReminderState};
+  'reminders.read':{input:{id?:string};output:ReminderState};
+  'reminders.export':{input:{id?:string};output:{content:string;filename:string}};
+  'reminders.push.subscribe':{input:{subscription:BrowserPushSubscription};output:{id:string}};
+  'reminders.push.status':{input:{endpoint:string};output:{active:boolean}};
+  'reminders.push.unsubscribe':{input:{endpoint:string};output:{removed:boolean}};
+  'reminders.push.test':{input:{endpoint:string};output:{accepted:boolean}};
   "sources.list":{input:{schoolId:string};output:{sources:WebsiteSource[]}};
   "sources.save":{input:{schoolId:string;sourceId?:string;source:WebsiteSourceInput};output:{id:string}};
   "sources.test":{input:{schoolId:string;sourceId:string};output:{count:number;titles:string[];message:string}};
