@@ -873,6 +873,8 @@ select {
 .delivery-copy summary {cursor:pointer;color:var(--blue);}
 .push-support-note {margin:0 0 12px;}
 .reminder-delivery p {max-width:55ch;margin-top:6px;font-size:13px;}
+.reminder-delivery ul {max-width:62ch;padding-left:20px;margin:8px 0;font-size:13px;}
+@media(min-width:801px){.reminders-center:has(.delivery-copy details[open]){overflow:auto;}.reminders-center:has(.delivery-copy details[open]) .reminder-workspace{flex:none;min-height:420px;}}
 .reminder-delivery .action-row {flex-shrink:0;align-content:center;max-width:220px;margin:0;}
 .reminder-tabs {display:flex;border-bottom:1px solid var(--line);gap:18px;margin-top:0;flex-wrap:wrap;font-size:14px;}
 .reminder-tabs button {padding:12px 0;background:none;color:var(--muted);border-bottom:2px solid transparent;}

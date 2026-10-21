@@ -27,7 +27,7 @@ async function copyDirectory(from, to) {
 }
 await copyDirectory(join(root, 'apps/web/dist'), join(output, 'public'))
 await mkdir(join(output, 'functions'))
-for (const name of ['api', 'auth', 'cleanup', 'identity', 'reminders']) {
+for (const name of ['api', 'auth', 'cleanup', 'identity', 'reminders','reminder-delivery']) {
   const compiled = await bundle({ entryPoints: [join(root, `netlify/functions/${name}.mts`)], outfile: join(output, `functions/${name}.mjs`), bundle: true, platform: 'node', format: 'esm', target: 'node22', sourcemap: false, logLevel: 'info', metafile: true, banner: { js: "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);" } })
   if (Object.keys(compiled.metafile.inputs).some(path => /(?:@cloudbase\/(?:node-sdk|database)|node_modules\/(?:axios|lodash\.set|lodash\.unset))\//.test(path.replaceAll('\\', '/')))) throw new Error('全 Netlify 函数不得包含旧 CloudBase SDK 依赖')
 }
@@ -40,4 +40,4 @@ const { default: handler } = await import(pathToFileURL(join(output, 'functions/
 const denied = await handler(new Request('https://localhost/.netlify/functions/api', { method: 'POST', headers: { origin: 'https://localhost' } }))
 if (denied.status !== 401 || denied.headers.get('cache-control') !== 'no-store') throw new Error('部署函数的未登录拒绝检查失败')
 console.log(`Netlify 部署产物：${output}`)
-console.log(`仅包含网页、5 个 Netlify 函数与 SQL 迁移；不含本地环境文件，未上传、未调用模型。`)
+console.log(`仅包含网页、6 个 Netlify 函数与 SQL 迁移；不含本地环境文件，未上传、未调用模型。`)

@@ -13,6 +13,7 @@ import { schoolDirectory } from '../../apps/cloud/src/school-directory';
 import { schoolRequests } from '../../apps/cloud/src/school-requests';
 import {websiteSources} from '../../apps/cloud/src/website-sources';
 import {reminderService} from '../../apps/cloud/src/reminders';
+import {qstashConfig,qstashPublisher} from '../../apps/cloud/src/qstash';
 declare const Netlify: { env: { get(name: string): string | undefined } };
 let pool: SqlPool | undefined;
 export default createSiteApi({
@@ -40,7 +41,8 @@ export default createSiteApi({
     });
     const pushPublic=Netlify.env.get('WEB_PUSH_PUBLIC_KEY'),pushPrivate=Netlify.env.get('WEB_PUSH_PRIVATE_KEY');
     const push=getContext().deploy.context==='production'&&pushPublic&&pushPrivate?{publicKey:pushPublic,privateKey:pushPrivate,subject:'https://campus-reader-ninie6159.netlify.app'}:undefined;
-    const gateway = createGateway(repo, siteWorkspace(user, Netlify.env.get('NETLIFY_OWNER_EMAIL')), Date.now, { reminders:reminderService(pool,{push}), websites, bookmarks: bookmarksService(db, repo), ai: aiService(db, repo), directory:{refresh:directory.refresh,request:(name,identity)=>{
+    const queueConfig=getContext().deploy.context==='production'?qstashConfig(name=>Netlify.env.get(name)):undefined;
+    const gateway = createGateway(repo, siteWorkspace(user, Netlify.env.get('NETLIFY_OWNER_EMAIL')), Date.now, { reminders:reminderService(pool,{push,minuteMode:true,queue:queueConfig&&push?qstashPublisher(queueConfig):undefined}), websites, bookmarks: bookmarksService(db, repo), ai: aiService(db, repo), directory:{refresh:directory.refresh,request:(name,identity)=>{
       if (getContext().deploy.context !== 'production') throw new AppError('PRODUCTION_REQUIRED','请在正式网站提交学校添加申请；预览环境不发送通知。');
       return request(name,identity.dataOwnerId,user.email);
     }} });

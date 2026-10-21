@@ -15,6 +15,11 @@ const schedule=computed(()=>[...(state.value?.reminders||[])].sort((a,b)=>a.dueA
 const futureCount=computed(()=>schedule.value.filter(r=>r.dueAt!==null&&Date.parse(r.dueAt)>clock.value).length);
 const pendingCount=computed(()=>schedule.value.filter(r=>r.dueAt===null).length);
 const exportHelp=computed(()=>futureCount.value?`仅导出${futureCount.value}条已设置未来时间的事项。`:pendingCount.value?'请先为待设置的公告填写未来时间，再导出日历。':'当前没有未来事项可导出；已到时间的提醒可重新设置时间。');
+const deliverySummary=computed(()=>!state.value?'正在检查推送服务':state.value.deliveryMode==='minute'?state.value.queueConfigured?'按设定时间登记后台提醒':'分钟提醒服务待配置':'后台每天09:00、20:00检查');
+function deliveryText(reminder:Reminder){
+ const labels={unconfigured:'分钟提醒服务待配置，站内提醒与日历仍可使用。',no_device:'尚未开启设备推送，请先点击上方“开启此浏览器推送”。',pending:'提醒已保存，正在等待后台登记。',scheduled:'已登记后台提醒，关闭页面后也可接收系统推送。',later:'远期提醒已保存，将在临近时自动登记。',registration_failed:'后台登记尚未成功，稍后点击“检查提醒”重试。',sent:'推送服务已接收；是否弹出请以设备通知为准。',failed:'最近一次发送失败，请检查设备订阅并发送测试通知。',unknown:'发送结果暂未确认，为避免重复打扰未自动重发。',finished:'本次后台提醒已结束。'};
+ return reminder.delivery?labels[reminder.delivery.status]:'';
+}
 let active=true,ticket=0,timer:ReturnType<typeof setTimeout>|undefined,lastCheck=0;
 const time=(value:string)=>new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(value));
 function apply(result:ReminderState){if(!active)return;ticket++;state.value=result;clock.value=Date.now();lastCheck=Date.now();emit('unread',result.unread);emit('changed',result);planNext();}
@@ -50,6 +55,7 @@ async function download(id?:string){await run(async()=>{
 async function togglePush(){await run(async()=>{
  if(pushOn.value){try{await disablePush(props.transport);if(active)message.value='此浏览器推送已关闭，站内提醒保留。';}finally{if(active)pushOn.value=Boolean(await currentPush());}}
  else if(state.value?.publicKey){await enablePush(props.transport,state.value.publicKey);if(active){pushOn.value=true;message.value='此浏览器已订阅，请发送测试通知并确认系统是否显示。';}}
+ try{apply(await props.transport.call('reminders.state',{}));}catch{if(active)message.value+=' 请点击“检查提醒”刷新设备与登记状态。';}
 });}
 async function testPush(){await run(async()=>{const subscription=await currentPush();if(!subscription)throw new Error('当前浏览器订阅已失效，请重新开启推送。');await props.transport.call('reminders.push.test',{endpoint:subscription.endpoint});if(active)message.value='推送服务已接收测试请求，请检查系统通知；接收请求不代表设备已显示。';});}
 function wake(){clock.value=Date.now();if(document.visibilityState==='visible'&&Date.now()-lastCheck>=60000)void load();}
@@ -61,7 +67,7 @@ onUnmounted(()=>{active=false;ticket++;clearTimeout(timer);document.removeEventL
 <template>
  <section class="feature-surface reminders-center" aria-labelledby="reminders-title">
   <header class="feature-heading reminder-heading"><div><h1 id="reminders-title">提醒中心 <span v-if="state?.unread" class="unread-count">{{state.unread}}条未读</span></h1><p class="muted">勾选公告后逐篇设置时间 · 当前账号独立保存 · 北京时间</p></div><button class="text-button" @click="emit('back')">返回公告</button></header>
-  <aside class="reminder-delivery compact-delivery"><div class="delivery-copy"><strong>浏览器推送</strong><span class="small muted">后台每天09:00、20:00检查</span><details><summary>说明</summary><p>网页打开时检查到期提醒；关闭后每天09:00、20:00后台检查。推送只显示通用提示，登录后查看内容。</p><p v-if="support">{{support}}</p><p v-else-if="state&&!state.pushConfigured">此环境暂未开启浏览器推送。预览环境仅验证站内提醒与日历。</p></details></div><div class="action-row"><button class="secondary" :disabled="busy||(!pushOn&&Boolean(support||!state?.pushConfigured))" @click="togglePush">{{pushOn?'关闭此浏览器推送':'开启此浏览器推送'}}</button><button v-if="pushOn&&state?.pushConfigured" class="text-button" :disabled="busy" @click="testPush">发送测试通知</button></div></aside>
+  <aside class="reminder-delivery compact-delivery"><div class="delivery-copy"><strong>系统推送</strong><span class="small muted">{{deliverySummary}}</span><details><summary>说明与设备设置</summary><p v-if="state?.deliveryMode==='minute'">设定时间后请确认事项显示“已登记”。后台按设定时间发起推送；网络、系统权限或省电设置可能延迟显示。推送仅显示通用提示，登录后查看内容。</p><p v-else>网页打开时检查到期提醒；关闭后每天09:00、20:00后台检查。推送只显示通用提示，登录后查看内容。</p><ul><li>Windows：使用 Chrome 或 Edge，允许网站和系统通知；建议安装为应用，保留浏览器后台运行。</li><li>iPhone／iPad：在 Safari 中“添加到主屏幕”，从图标进入后开启推送。</li><li>安卓：使用支持网页推送的浏览器，允许通知及后台活动，以测试通知实测为准。</li></ul><p>每台设备都需登录后单独开启。退出账号会解绑当前浏览器；每账号最多5个浏览器。</p><p v-if="state?.deviceCount!==undefined">当前账号已开启 {{state.deviceCount}} 个浏览器。</p><p v-if="support">{{support}}</p><p v-else-if="state&&!state.pushConfigured">此环境暂未开启浏览器推送。预览环境仅验证站内提醒与日历。</p></details></div><div class="action-row"><button class="secondary" :disabled="busy||(!pushOn&&Boolean(support||!state?.pushConfigured))" @click="togglePush">{{pushOn?'关闭此浏览器推送':'开启此浏览器推送'}}</button><button v-if="pushOn&&state?.pushConfigured" class="text-button" :disabled="busy" @click="testPush">发送测试通知</button></div></aside>
   <p v-if="support" class="small muted push-support-note">{{support}}</p>
   <p v-if="error" class="error-message" role="alert">{{error}}</p><p v-if="message" class="reminder-feedback" role="status">{{message}}</p>
   <div class="reminder-workspace">
@@ -75,12 +81,13 @@ onUnmounted(()=>{active=false;ticket++;clearTimeout(timer);document.removeEventL
      <p class="small muted reminder-footnote">保留最近90天、最多200条通知。加入公告后请逐篇设置时间；未设置时间不会开始提醒。</p>
     </template>
     <template v-if="tab==='schedule'&&state">
-     <div class="reminder-toolbar"><p class="muted">待设置 {{pendingCount}} 条 · 可导出 {{futureCount}} 条</p><button class="text-button" :disabled="busy||!futureCount" :title="exportHelp" @click="download()">导出全部日历</button></div>
+     <div class="reminder-toolbar"><p class="muted">待设置 {{pendingCount}} 条 · 可导出 {{futureCount}} 条</p><div class="action-row"><button class="text-button" :disabled="busy" @click="load">检查提醒</button><button class="text-button" :disabled="busy||!futureCount" :title="exportHelp" @click="download()">导出全部日历</button></div></div>
      <p class="small muted calendar-guidance">{{exportHelp}}</p>
      <div v-if="!schedule.length" class="empty-state"><h2>还没有加入公告</h2><p>从“选择公告”中勾选加入，或在公告列表点击“加入提醒”。</p></div>
      <article v-for="reminder in schedule" :key="reminder.id" class="reminder-schedule" :class="{'pending-time':reminder.dueAt===null}">
       <div class="reminder-date"><time v-if="reminder.dueAt">{{time(reminder.dueAt)}}</time><span v-else>待设置时间</span><span v-if="reminder.dueAt&&!isFuture(reminder)" class="small muted schedule-status">已到时间</span></div>
       <div><p class="small muted">{{reminder.schoolName}} · {{reminder.label}}</p><h2>{{reminder.title}}</h2><p class="small">{{reminder.dueAt?reminder.days.map(days=>days?`提前${days}天`:'到时').join('、'):'尚未开始提醒，请先设置具体时间。'}}</p>
+       <p v-if="reminder.dueAt&&reminder.delivery" class="small muted reminder-delivery-status" role="status">{{deliveryText(reminder)}}<span v-if="reminder.delivery.nextAt"> 下次：{{time(reminder.delivery.nextAt)}}。</span></p>
        <div class="action-row"><button class="text-button" :disabled="busy" @click="editing=editing?.id===reminder.id?null:reminder">{{reminder.dueAt?'编辑时间':'设置时间'}}</button><button class="text-button" :disabled="busy||!isFuture(reminder)" :title="isFuture(reminder)?'导出这条事项':'请先设置未来时间'" @click="download(reminder.id)">导出日历</button><button class="text-button" :disabled="busy" @click="remove(reminder.id)">移出提醒</button></div>
        <ReminderForm v-if="editing?.id===reminder.id" :key="reminder.id" :transport="transport" :school-id="reminder.schoolId" :item-id="reminder.itemId" :title="reminder.title" :reminder="reminder" @saved="apply($event);editing=null" @cancel="editing=null" />
       </div>

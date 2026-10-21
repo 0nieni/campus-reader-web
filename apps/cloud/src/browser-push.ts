@@ -20,7 +20,7 @@ export function checkedSubscription(value:unknown):BrowserPushSubscription {
   return{endpoint:endpoint.href,keys:{p256dh:input.keys.p256dh,auth:input.keys.auth}};
 }
 export function createPushRequest(subscription:BrowserPushSubscription,config:PushConfig,tag:string){
-  return webpush.generateRequestDetails(checkedSubscription(subscription),JSON.stringify({title:'校园阅览室',body:'你有新的提醒，请登录提醒中心查看。',tag,url:'/?view=reminders'}),{vapidDetails:config,TTL:86400,urgency:'normal',topic:tag.slice(0,32)});
+  return webpush.generateRequestDetails(checkedSubscription(subscription),JSON.stringify({title:'校园阅览室',body:'你有新的提醒，请登录提醒中心查看。',tag,url:'/?view=reminders'}),{vapidDetails:config,TTL:86400,urgency:'high',topic:tag.slice(0,32)});
 }
 export async function sendBrowserPush(subscription:BrowserPushSubscription,config:PushConfig,tag:string){
   const details=createPushRequest(subscription,config,tag);

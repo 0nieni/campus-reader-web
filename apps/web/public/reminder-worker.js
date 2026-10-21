@@ -1,6 +1,6 @@
 // Push worker only. No fetch handler, page cache, auth tokens or notice bodies.
 self.addEventListener('push',event=>{
- event.waitUntil(self.registration.showNotification('校园阅览室',{body:'你有新的提醒，请登录提醒中心查看。',tag:'campus-reader-reminders',data:{url:'/?view=reminders'}}));
+ event.waitUntil(self.registration.showNotification('校园阅览室',{body:'你有新的提醒，请登录提醒中心查看。',tag:'campus-reader-reminders',renotify:true,icon:'/app-icon-192.png',data:{url:'/?view=reminders'}}));
 });
 self.addEventListener('notificationclick',event=>{
  event.notification.close();

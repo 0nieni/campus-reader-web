@@ -19,6 +19,7 @@ it('requires manual Beijing date confirmation and does not start AI or request n
 it('shows only messages and individual time reminders, while push requires explicit authorization',async()=>{
  const state=fresh(),call=vi.fn(async(action:string,input:any)=>{
   if(action==='feed.list')return{items:[],nextCursor:null};
+  if(action==='reminders.state')state.deviceCount=browser.enablePush.mock.calls.length?1:0;
   return structuredClone(state);
  });
  const wrapper=mount(ReminderCenter,{props:{transport:{call} as unknown as Transport,schoolId:'bjtu',schoolName:'测试大学',revision:0,visible:true}});await flushPromises();
@@ -26,7 +27,7 @@ it('shows only messages and individual time reminders, while push requires expli
  const button=(text:string)=>wrapper.findAll('button').find(row=>row.text()===text)!;
  expect(wrapper.findAll('.reminder-tabs button').map(b=>b.text())).toEqual(['消息通知','时间提醒（0）']);
  expect(wrapper.text()).not.toContain('学校与关键词');expect(wrapper.find('.watch-form').exists()).toBe(false);
- await button('开启此浏览器推送').trigger('click');await flushPromises();expect(browser.enablePush).toHaveBeenCalledTimes(1);expect(wrapper.text()).toContain('发送测试通知');
+ await button('开启此浏览器推送').trigger('click');await flushPromises();expect(browser.enablePush).toHaveBeenCalledTimes(1);expect(wrapper.text()).toContain('发送测试通知');expect(wrapper.text()).toContain('已开启 1 个浏览器');
  expect(call.mock.calls.some(([action])=>action.startsWith('ai.')||action.startsWith('reminders.watch.'))).toBe(false);wrapper.unmount();
 });
 it('renders untrusted titles as text, marks notifications read and discards late results after unmount',async()=>{
@@ -65,4 +66,13 @@ it('explains unsupported push and disables authorization while retaining site re
  browser.pushSupport.mockReturnValueOnce('此浏览器暂不支持网页推送');const state=fresh();
  const wrapper=mount(ReminderCenter,{props:{transport:{call:async()=>state} as unknown as Transport,schoolId:null,schoolName:'',revision:0,visible:true}});await flushPromises();
  expect(wrapper.text()).toContain('此浏览器暂不支持网页推送');expect(wrapper.findAll('button').find(row=>row.text()==='开启此浏览器推送')!.attributes('disabled')).toBeDefined();expect(browser.enablePush).not.toHaveBeenCalled();wrapper.unmount();
+});
+it('labels minute registration honestly and provides setup instructions for all three device families',async()=>{
+ const state=fresh();state.deliveryMode='minute';state.queueConfigured=true;state.deviceCount=3;
+ state.reminders=[{id:'scheduled',schoolId:'bjtu',itemId:'one',title:'系统提醒公告',schoolName:'测试大学',label:'截止',days:[0],dueAt:'2027-06-20T01:30:00.000Z',createdAt:new Date().toISOString(),delivery:{status:'scheduled',nextAt:'2027-06-20T01:30:00.000Z'}}];
+ const call=vi.fn(async(action:string)=>action==='feed.list'?{items:[],nextCursor:null}:JSON.parse(JSON.stringify(state)));
+ const wrapper=mount(ReminderCenter,{props:{transport:{call} as unknown as Transport,schoolId:'bjtu',schoolName:'测试大学',revision:0,visible:true}});await flushPromises();
+ expect(wrapper.text()).toContain('按设定时间登记后台提醒');expect(wrapper.text()).toContain('Windows');expect(wrapper.text()).toContain('iPhone／iPad');expect(wrapper.text()).toContain('安卓');expect(wrapper.text()).toContain('3 个浏览器');
+ await wrapper.findAll('button').find(b=>b.text()==='时间提醒（1）')!.trigger('click');expect(wrapper.text()).toContain('已登记后台提醒');expect(wrapper.text()).not.toContain('09:00、20:00');
+ state.queueConfigured=false;state.reminders[0]!.delivery!.status='unconfigured';await wrapper.findAll('button').find(b=>b.text()==='检查提醒')!.trigger('click');await flushPromises();expect(wrapper.text()).toContain('分钟提醒服务待配置');wrapper.unmount();
 });

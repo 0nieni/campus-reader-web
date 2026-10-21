@@ -10,11 +10,12 @@ import type {ItemRow} from './repository';
 import {reject} from './errors';
 import {checkedSubscription,endpointHash,sendBrowserPush,type PushConfig} from './browser-push';
 import {reminderCalendar} from './reminder-calendar';
+import {syncReminderJobs,flushReminderJobs,reminderDeliveryState,type ReminderPublisher} from './reminder-jobs';
 
 type Notification=ReminderNotification&{reminderId?:string;watchId?:string;sent:Record<string,'sending'|'sent'|'failed'|'skipped'>};
 type StoredReminder=Reminder&{generation:string;fired:number[]};
 interface State {reminders:StoredReminder[];watches:NoticeWatch[];notifications:Notification[];lastScan?:number;more?:boolean;lastTest?:number}
-interface Options {now?:()=>number;push?:PushConfig;send?:typeof sendBrowserPush}
+interface Options {now?:()=>number;push?:PushConfig;send?:typeof sendBrowserPush;minuteMode?:boolean;queue?:ReminderPublisher}
 const day=86400000;
 const cleanText=(value:unknown,max:number,fallback='')=>{
   if(typeof value!=='string'||value.length>max||/[\x00-\x1f\x7f]/.test(value))reject('VALIDATION_FAILED','提醒文字过长或包含无效字符。');
@@ -34,6 +35,7 @@ export function reminderService(pool:SqlPool,options:Options={}){
       const {rows}=await client.query('SELECT body FROM campus_reminder_accounts WHERE owner_id=$1 FOR UPDATE',[owner]);
       const state={...empty(),...rows[0].body} as State;
       const result=await run(state,client);
+      if(options.minuteMode)await syncReminderJobs(client,owner,state.reminders,now());
       await client.query('UPDATE campus_reminder_accounts SET body=$2::jsonb,checked_at=$3 WHERE owner_id=$1',[owner,JSON.stringify(state),new Date(now()).toISOString()]);
       await client.query('COMMIT');return result;
     }catch(error){await client.query('ROLLBACK').catch(()=>{});throw error;}finally{client.release();}
@@ -75,7 +77,7 @@ export function reminderService(pool:SqlPool,options:Options={}){
     }
     state.more=false;
     // Throttle repeated badge reads. No background scraping and no AI calls.
-    if(!state.lastScan||time-state.lastScan>=60000){
+    if(!options.minuteMode&&(!state.lastScan||time-state.lastScan>=60000)){
       let remaining=50;
       for(const watch of state.watches){
         if(remaining<=0){state.more=true;break;}
@@ -102,8 +104,9 @@ export function reminderService(pool:SqlPool,options:Options={}){
   function dto(state:State):ReminderState{
     return{reminders:state.reminders.map(({generation,fired,...row})=>row),watches:state.watches,notifications:state.notifications.map(({sent,reminderId,watchId,...row})=>row),unread:state.notifications.filter(r=>!r.read).length,checkedAt:new Date(now()).toISOString(),more:Boolean(state.more),pushConfigured:Boolean(options.push),publicKey:options.push?.publicKey||null};
   }
-  async function handle(action:string,input:Record<string,unknown>,identity:IdentityContext):Promise<unknown>{
+  async function handleAction(action:string,input:Record<string,unknown>,identity:IdentityContext):Promise<unknown>{
     const owner=identity.dataOwnerId;
+    if(options.minuteMode&&action.startsWith('reminders.watch.'))reject('ACTION_NOT_ALLOWED','学校与关键词关注已移除。');
     if(action==='reminders.push.status'){
       if(typeof input.endpoint!=='string'||input.endpoint.length>2048)reject('VALIDATION_FAILED','推送设备信息无效。');
       const {rows}=await pool.query('SELECT endpoint_hash FROM campus_push_devices WHERE owner_id=$1 AND endpoint_hash=$2',[owner,endpointHash(input.endpoint)]);
@@ -115,7 +118,7 @@ export function reminderService(pool:SqlPool,options:Options={}){
       return transaction(owner,async(state,client)=>{
         const {rows}=await client.query('SELECT endpoint_hash FROM campus_push_devices WHERE owner_id=$1',[owner]);
         if(rows.length>=5&&!rows.some(row=>row.endpoint_hash===hash))reject('PUSH_LIMIT','每个账号最多启用5个浏览器，请先在旧设备关闭推送。');
-        await client.query('INSERT INTO campus_push_devices(endpoint_hash,owner_id,subscription) VALUES($1,$2,$3::jsonb) ON CONFLICT(endpoint_hash) DO UPDATE SET owner_id=EXCLUDED.owner_id,subscription=EXCLUDED.subscription,updated_at=now()',[hash,owner,JSON.stringify(subscription)]);
+        await client.query('INSERT INTO campus_push_devices(endpoint_hash,owner_id,subscription,binding_id,updated_at) VALUES($1,$2,$3::jsonb,$4,$5) ON CONFLICT(endpoint_hash) DO UPDATE SET owner_id=EXCLUDED.owner_id,subscription=EXCLUDED.subscription,binding_id=EXCLUDED.binding_id,updated_at=EXCLUDED.updated_at',[hash,owner,JSON.stringify(subscription),id(),new Date(now()).toISOString()]);
         for(const event of state.notifications)event.sent[hash]='skipped';
         return{id:hash};
       });
@@ -219,11 +222,86 @@ export function reminderService(pool:SqlPool,options:Options={}){
     }));
     return{accepted,failed};
   }
-  return{handle,dispatch};
+  async function handle(action:string,input:Record<string,unknown>,identity:IdentityContext){
+    const result=await handleAction(action,input,identity);
+    if(!options.minuteMode)return result;
+    if(options.queue&&options.push&&['reminders.save','reminders.state','reminders.push.subscribe'].includes(action)){
+      // Committed outbox survives a failed publication; reflect that failure in
+      // delivery state instead of falsely reporting a registered system alarm.
+      await flushReminderJobs(pool,options.queue,{owner:identity.dataOwnerId,now}).catch(()=>{});
+    }
+    if(result&&typeof result==='object'&&'reminders' in result){
+      const state=result as ReminderState;
+      return{...state,watches:[],deliveryMode:'minute',queueConfigured:Boolean(options.queue&&options.push),...await reminderDeliveryState(pool,identity.dataOwnerId,state.reminders,Boolean(options.queue),Boolean(options.push),now())};
+    }
+    return result;
+  }
+  async function prepare(owner:string){return transaction(owner,async(state,client)=>{await synchronize(state,client,owner);await client.query('UPDATE campus_reminder_accounts SET queue_checked_at=$2 WHERE owner_id=$1',[owner,new Date(now()).toISOString()]);});}
+  async function runJob(jobId:string){
+    if(!options.push)return{accepted:0,failed:0};
+    const push=options.push;
+    const found=await pool.query('SELECT owner_id FROM campus_reminder_jobs WHERE id=$1',[jobId]);
+    const owner=found.rows[0]?.owner_id;if(!owner)return{accepted:0,failed:0};
+    const jobs=await transaction(owner,async(state,client)=>{
+      const result=await client.query('SELECT * FROM campus_reminder_jobs WHERE id=$1 FOR UPDATE',[jobId]),job=result.rows[0];
+      if(!job||['processing','complete','cancelled','expired'].includes(job.state))return[];
+      const time=now(),at=Date.parse(job.run_at);
+      if(at>time)throw new Error('Task is not due');
+      await synchronize(state,client,owner);
+      const reminder=state.reminders.find(r=>r.id===job.reminder_id&&r.generation===job.generation);
+      const crossed=reminder?.dueAt?reminder.days.filter(offset=>Date.parse(reminder.dueAt!)-offset*day<=time):[];
+      if(!reminder||time-at>day||!crossed.length||job.offset_days!==Math.min(...crossed)){
+        await client.query("UPDATE campus_reminder_jobs SET state='cancelled',outcome='skipped',updated_at=$2 WHERE id=$1",[jobId,new Date(time).toISOString()]);return[];
+      }
+      const devices=await client.query('SELECT endpoint_hash,subscription,binding_id FROM campus_push_devices WHERE owner_id=$1 AND updated_at<=$2',[owner,new Date(at).toISOString()]);
+      const targets=[];
+      for(const device of devices.rows){
+        const claim=await client.query("INSERT INTO campus_reminder_deliveries(job_id,endpoint_hash,binding_id,state,created_at) VALUES($1,$2,$3,'sending',$4) ON CONFLICT DO NOTHING RETURNING endpoint_hash",[jobId,device.endpoint_hash,device.binding_id,new Date(time).toISOString()]);
+        if(claim.rows.length)targets.push({endpoint_hash:String(device.endpoint_hash),binding_id:String(device.binding_id),subscription:device.subscription,reminderId:String(job.reminder_id),generation:String(job.generation)});
+      }
+      await client.query("UPDATE campus_reminder_jobs SET state=$2,outcome=$3,updated_at=$4 WHERE id=$1",[jobId,targets.length?'processing':'complete',targets.length?null:'skipped',new Date(time).toISOString()]);return targets;
+    });
+    let accepted=0,failed=0;
+    await Promise.all(jobs.map(async job=>{
+      let outcome='skipped',expired=false;
+      try{
+        const allowed=await transaction(owner,async(state,client)=>{
+          await synchronize(state,client,owner);
+          if(!state.reminders.some(r=>r.id===job.reminderId&&r.generation===job.generation))return false;
+          const binding=await client.query('SELECT endpoint_hash FROM campus_push_devices WHERE endpoint_hash=$1 AND owner_id=$2 AND binding_id=$3',[job.endpoint_hash,owner,job.binding_id]);return Boolean(binding.rows.length);
+        });
+        if(allowed){
+          try{await send(checkedSubscription(job.subscription),push,jobId);outcome='sent';accepted++;}
+          catch(error){const code=Number((error as {statusCode?:number})?.statusCode);outcome=Number.isFinite(code)&&code>0?'failed':'unknown';expired=[404,410].includes(code);failed++;}
+        }
+        await transaction(owner,async(_state,client)=>{
+          await client.query("UPDATE campus_reminder_deliveries SET state=$4,finished_at=$5 WHERE job_id=$1 AND endpoint_hash=$2 AND binding_id=$3 AND state='sending'",[jobId,job.endpoint_hash,job.binding_id,outcome,new Date(now()).toISOString()]);
+          if(expired)await client.query('DELETE FROM campus_push_devices WHERE endpoint_hash=$1 AND owner_id=$2 AND binding_id=$3',[job.endpoint_hash,owner,job.binding_id]);
+        });
+      }catch{failed++;/* A durable sending claim is deliberately not retried. */}
+    }));
+    if(jobs.length){
+      const deliveries=await pool.query('SELECT state FROM campus_reminder_deliveries WHERE job_id=$1',[jobId]);
+      const states=deliveries.rows.map(row=>row.state),outcome=states.some(s=>s==='sending'||s==='unknown')?'unknown':states.includes('failed')?'failed':states.includes('sent')?'sent':'skipped';
+      await pool.query("UPDATE campus_reminder_jobs SET state='complete',outcome=$2,updated_at=$3 WHERE id=$1 AND state='processing'",[jobId,outcome,new Date(now()).toISOString()]);
+    }
+    return{accepted,failed};
+  }
+  return{handle,dispatch,prepare,runJob};
 }
 
 export async function runReminderTick(pool:SqlPool,options:Options&{budgetMs?:number}={}){
   const start=Date.now(),service=reminderService(pool,options);
+  if(options.minuteMode){
+    // Twice-daily repair registers the six-day horizon. Order separately from
+    // foreground checked_at so frequently used accounts cannot starve others.
+    const {rows}=await pool.query(`SELECT a.owner_id FROM campus_reminder_accounts a WHERE EXISTS(SELECT 1 FROM campus_push_devices d WHERE d.owner_id=a.owner_id)
+      ORDER BY a.queue_checked_at,a.owner_id LIMIT 100`);
+    let processed=0;
+    for(const row of rows){if(Date.now()-start>(options.budgetMs??18000)-4000)break;await service.prepare(row.owner_id);processed++;}
+    const result=options.queue&&options.push?await flushReminderJobs(pool,options.queue,{now:options.now,limit:80,budgetMs:Math.max(0,(options.budgetMs??18000)-(Date.now()-start))}):{queued:0,failed:0};
+    return{processed,accepted:result.queued,failed:result.failed};
+  }
   const {rows}=await pool.query('SELECT a.owner_id FROM campus_reminder_accounts a WHERE EXISTS(SELECT 1 FROM campus_push_devices d WHERE d.owner_id=a.owner_id) ORDER BY a.checked_at,a.owner_id LIMIT 20');
   let processed=0,accepted=0,failed=0;
   for(const row of rows){

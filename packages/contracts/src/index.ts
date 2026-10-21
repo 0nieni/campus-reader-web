@@ -63,11 +63,12 @@ export interface AiStartInput {
   provider?: "deepseek" | "openai"; model?: string; task: "summary" | "outline" | "answer"; question?: string; fingerprint?: string;
 }
 export interface ReminderInput { id?:string; schoolId:string; itemId:string; label:string; dueAt:string; days:number[] }
-export interface Reminder extends Omit<ReminderInput,'dueAt'> { id:string; title:string; schoolName:string; createdAt:string; days:number[]; dueAt:string|null }
+export interface ReminderDelivery {status:'unconfigured'|'no_device'|'pending'|'scheduled'|'later'|'registration_failed'|'sent'|'failed'|'unknown'|'finished';nextAt:string|null}
+export interface Reminder extends Omit<ReminderInput,'dueAt'> { id:string; title:string; schoolName:string; createdAt:string; days:number[]; dueAt:string|null;delivery?:ReminderDelivery }
 export type ScheduledReminder=Reminder&{dueAt:string};
 export interface NoticeWatch { id:string; schoolId:string; schoolName:string; keyword:string; createdAt:string }
 export interface ReminderNotification { id:string; kind:'deadline'|'new_notice'; title:string; message:string; schoolId:string; itemId:string; createdAt:string; read:boolean }
-export interface ReminderState { reminders:Reminder[]; watches:NoticeWatch[]; notifications:ReminderNotification[]; unread:number; checkedAt:string; more:boolean; pushConfigured:boolean; publicKey:string|null }
+export interface ReminderState { reminders:Reminder[]; watches:NoticeWatch[]; notifications:ReminderNotification[]; unread:number; checkedAt:string; more:boolean; pushConfigured:boolean; publicKey:string|null;deliveryMode?:'minute'|'daily';queueConfigured?:boolean;deviceCount?:number }
 export interface BrowserPushSubscription { endpoint:string; keys:{p256dh:string;auth:string} }
 export interface GatewayActions {
   'reminders.state':{input:Record<string,never>;output:ReminderState};

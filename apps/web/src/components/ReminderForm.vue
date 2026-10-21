@@ -28,7 +28,7 @@ async function save(){
     <label>事项名称<input v-model="label" required maxlength="80" placeholder="例如：报名截止"></label>
     <label>截止或自定时间（北京时间）<input v-model="when" required type="datetime-local"></label>
     <div class="reminder-offsets" role="group" aria-label="提醒时间"><label v-for="value in [7,3,1,0]" :key="value"><input v-model="days" type="checkbox" :value="value">{{value?`提前${value}天`:'到时提醒'}}</label></div>
-    <p class="small muted">站内检查会补显错过的提醒；后台推送每天09:00、20:00检查，可能晚于所设时刻。需要更及时的系统提醒可导出手机日历。</p>
+    <p class="small muted">保存后请在提醒中心核对后台登记状态，并在每台设备开启系统推送。系统或网络可能延迟显示；可同时导出日历作为补充。</p>
     <p v-if="error" class="error-message" role="alert">{{error}}</p>
     <div class="action-row"><button class="primary" type="submit">{{busy?'正在保存…':'保存提醒'}}</button><button class="text-button" type="button" @click="expanded=false;emit('cancel')">取消</button></div>
    </fieldset>
