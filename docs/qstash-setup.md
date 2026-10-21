@@ -1,5 +1,7 @@
 # 开启分钟级系统提醒
 
+> 已被2026-10-21的阿里云方案替代。当前实现不再读取 QSTASH_*，请使用 [阿里云配置指南](aliyun-reminders-setup.md)。下文保留为旧方案记录，不应继续按它配置。
+
 实现已接入PR，正式站点启用需要以下配置和发布。本指南不包含密钥，配置时不要将密钥粘贴到聊天、源码或截图中。
 
 ## 1. 创建免费QStash账号
@@ -17,7 +19,7 @@
 - `QSTASH_NEXT_SIGNING_KEY`：Next Signing Key。
 - `QSTASH_URL`：控制台显示的API基础地址，例如 `https://qstash.upstash.io`，不要附带 `/v2/publish` 等路径。
 
-前三个标记为Secret。四个变量均仅用于 **Production** 环境及 **Functions** scope，不放入Deploy Previews，不使用 `VITE_` 前缀。已有 `WEB_PUSH_PUBLIC_KEY`／`WEB_PUSH_PRIVATE_KEY` 无须重新生成。
+旧方案四个变量仅填 **Production**，免费套餐 Scope 保持默认 **All scopes**（包含 Functions），不放入 Deploy Previews，不使用 `VITE_` 前缀。单独限制 Functions 属于付费能力，不需要为此升级。已有 `WEB_PUSH_PUBLIC_KEY`／`WEB_PUSH_PRIVATE_KEY` 无须重新生成。
 
 环境变量修改后需要重新部署才会生效。当前PR仍须按双方互审约定审核后正式发布；不要把回调指向预览站点。
 

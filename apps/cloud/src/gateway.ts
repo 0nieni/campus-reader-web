@@ -19,7 +19,7 @@ import { checkedLabels, displayedCategories, originalCategories } from './notice
 const fields: Record<string, string[]> = {
   'reminders.state':[],
   'reminders.add':['schoolId','itemIds'],
-  'reminders.save':['id','schoolId','itemId','label','dueAt','days'],
+  'reminders.save':['id','schoolId','itemId','label','dueAt','days','channels'],
   'reminders.remove':['id'],
   'reminders.watch.save':['id','schoolId','keyword'],
   'reminders.watch.remove':['id'],
@@ -29,6 +29,9 @@ const fields: Record<string, string[]> = {
   'reminders.push.status':['endpoint'],
   'reminders.push.unsubscribe':['endpoint'],
   'reminders.push.test':['endpoint'],
+  'reminders.email.verify':[],
+  'reminders.email.test':[],
+  'reminders.email.enable':['enabled'],
   'sources.list':['schoolId'],
   'sources.save':['schoolId','sourceId','source'],
   'sources.test':['schoolId','sourceId'],

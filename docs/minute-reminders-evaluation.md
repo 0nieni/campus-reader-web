@@ -1,5 +1,7 @@
 # 关闭网页后的分钟提醒评估
 
+路线更新（2026-10-21）：用户已用 [阿里云计划](aliyun-reminders-plan-2026-10-21.md) 替代本文件后续 QStash 路线。新实现使用 FC 签名分钟触发、Netlify Blobs 唤醒索引及 DirectMail/标准 Web Push；账号和域名未准备，本次先交付代码与预览。见 [阿里云配置指南](aliyun-reminders-setup.md)。以下费用与状态属于历史记录。
+
 核对日期：2026-10-21。用户已选择QStash免费延时队列，要求覆盖Windows、iPhone／iPad和安卓。代码已接入，服务账号配置、正式发布和三端真实送达验收待完成；未调整付费计划。配置见 [开启分钟提醒](qstash-setup.md)。以下保留方案权衡与验收依据。
 
 ## 结论

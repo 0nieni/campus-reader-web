@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import {computed,onMounted,onUnmounted,ref,watch} from 'vue';
-import type {Reminder,ReminderState,ReminderNotification} from '@campus/contracts';
+import type {Reminder,ReminderState,ReminderNotification,ReminderChannelDelivery,ReminderEmailState} from '@campus/contracts';
 import type {Transport} from '../lib/transport';
 import {safeError} from '../lib/errors';
 import {pushSupport,currentPush,enablePush,disablePush} from '../lib/browser-push';
 import ReminderForm from './ReminderForm.vue';
 import ReminderNoticePicker from './ReminderNoticePicker.vue';
+import ReminderEmailSettings from './ReminderEmailSettings.vue';
 const props=defineProps<{transport:Transport;schoolId:string|null;schoolName:string;revision:number;visible:boolean}>();
 const emit=defineEmits<{unread:[count:number];changed:[state:ReminderState];open:[event:ReminderNotification];back:[]}>();
 const state=ref<ReminderState|null>(null),busy=ref(false),error=ref(''),message=ref(''),editing=ref<Reminder|null>(null),pushOn=ref(false),onlyUnread=ref(false),tab=ref<'notifications'|'schedule'>('notifications');
@@ -15,7 +16,16 @@ const schedule=computed(()=>[...(state.value?.reminders||[])].sort((a,b)=>a.dueA
 const futureCount=computed(()=>schedule.value.filter(r=>r.dueAt!==null&&Date.parse(r.dueAt)>clock.value).length);
 const pendingCount=computed(()=>schedule.value.filter(r=>r.dueAt===null).length);
 const exportHelp=computed(()=>futureCount.value?`仅导出${futureCount.value}条已设置未来时间的事项。`:pendingCount.value?'请先为待设置的公告填写未来时间，再导出日历。':'当前没有未来事项可导出；已到时间的提醒可重新设置时间。');
-const deliverySummary=computed(()=>!state.value?'正在检查推送服务':state.value.deliveryMode==='minute'?state.value.queueConfigured?'按设定时间登记后台提醒':'分钟提醒服务待配置':'后台每天09:00、20:00检查');
+const deliverySummary=computed(()=>{
+ if(!state.value)return'正在检查推送服务';
+ if(state.value.scheduler==='aliyun-fc'&&state.value.queueConfigured){const labels={unconfigured:'分钟提醒服务待配置',waiting:'等待定时提醒服务连接',active:'每分钟检查已登记事项',stale:'定时提醒服务连接已中断',failed:'定时提醒登记暂时失败'};return labels[state.value.schedulerHealth||'waiting'];}
+ return state.value.deliveryMode==='minute'?state.value.queueConfigured?'按设定时间登记后台提醒':'分钟提醒服务待配置':'后台每天09:00、20:00检查';
+});
+function channelText(delivery:ReminderChannelDelivery){
+ const labels={off:'未选择',unconfigured:'服务待配置',not_ready:'尚未开启或验证',pending:'待登记',registration_failed:'登记尚未成功，请稍后检查提醒',scheduled:'已登记',accepted:'服务已接收',failed:'发送失败',unknown:'结果未知，未自动重发',finished:'已结束',retrying:'暂时失败，等待重试',limited:'发送量受限，暂缓发送'};
+ return labels[delivery.status]+(delivery.nextAt?` · 下次 ${time(delivery.nextAt)}`:'');
+}
+function emailChanged(email:ReminderEmailState){if(state.value)state.value={...state.value,email};void load();}
 function deliveryText(reminder:Reminder){
  const labels={unconfigured:'分钟提醒服务待配置，站内提醒与日历仍可使用。',no_device:'尚未开启设备推送，请先点击上方“开启此浏览器推送”。',pending:'提醒已保存，正在等待后台登记。',scheduled:'已登记后台提醒，关闭页面后也可接收系统推送。',later:'远期提醒已保存，将在临近时自动登记。',registration_failed:'后台登记尚未成功，稍后点击“检查提醒”重试。',sent:'推送服务已接收；是否弹出请以设备通知为准。',failed:'最近一次发送失败，请检查设备订阅并发送测试通知。',unknown:'发送结果暂未确认，为避免重复打扰未自动重发。',finished:'本次后台提醒已结束。'};
  return reminder.delivery?labels[reminder.delivery.status]:'';
@@ -67,7 +77,8 @@ onUnmounted(()=>{active=false;ticket++;clearTimeout(timer);document.removeEventL
 <template>
  <section class="feature-surface reminders-center" aria-labelledby="reminders-title">
   <header class="feature-heading reminder-heading"><div><h1 id="reminders-title">提醒中心 <span v-if="state?.unread" class="unread-count">{{state.unread}}条未读</span></h1><p class="muted">勾选公告后逐篇设置时间 · 当前账号独立保存 · 北京时间</p></div><button class="text-button" @click="emit('back')">返回公告</button></header>
-  <aside class="reminder-delivery compact-delivery"><div class="delivery-copy"><strong>系统推送</strong><span class="small muted">{{deliverySummary}}</span><details><summary>说明与设备设置</summary><p v-if="state?.deliveryMode==='minute'">设定时间后请确认事项显示“已登记”。后台按设定时间发起推送；网络、系统权限或省电设置可能延迟显示。推送仅显示通用提示，登录后查看内容。</p><p v-else>网页打开时检查到期提醒；关闭后每天09:00、20:00后台检查。推送只显示通用提示，登录后查看内容。</p><ul><li>Windows：使用 Chrome 或 Edge，允许网站和系统通知；建议安装为应用，保留浏览器后台运行。</li><li>iPhone／iPad：在 Safari 中“添加到主屏幕”，从图标进入后开启推送。</li><li>安卓：使用支持网页推送的浏览器，允许通知及后台活动，以测试通知实测为准。</li></ul><p>每台设备都需登录后单独开启。退出账号会解绑当前浏览器；每账号最多5个浏览器。</p><p v-if="state?.deviceCount!==undefined">当前账号已开启 {{state.deviceCount}} 个浏览器。</p><p v-if="support">{{support}}</p><p v-else-if="state&&!state.pushConfigured">此环境暂未开启浏览器推送。预览环境仅验证站内提醒与日历。</p></details></div><div class="action-row"><button class="secondary" :disabled="busy||(!pushOn&&Boolean(support||!state?.pushConfigured))" @click="togglePush">{{pushOn?'关闭此浏览器推送':'开启此浏览器推送'}}</button><button v-if="pushOn&&state?.pushConfigured" class="text-button" :disabled="busy" @click="testPush">发送测试通知</button></div></aside>
+  <aside class="reminder-delivery compact-delivery"><div class="delivery-copy"><strong>浏览器通知</strong><span class="small muted">{{deliverySummary}}</span><details><summary>说明与设备设置</summary><p v-if="state?.deliveryMode==='minute'">设定时间后请确认事项显示“已登记”。后台按设定时间发起推送；网络、系统权限或省电设置可能延迟显示。推送仅显示通用提示，登录后查看内容。</p><p v-else>网页打开时检查到期提醒；关闭后每天09:00、20:00后台检查。推送只显示通用提示，登录后查看内容。</p><ul><li>Windows：使用 Chrome 或 Edge，允许网站和系统通知；建议安装为应用，保留浏览器后台运行。</li><li>iPhone／iPad：在 Safari 中“添加到主屏幕”，从图标进入后开启推送。</li><li>安卓：使用支持网页推送的浏览器，允许通知及后台活动，以测试通知实测为准。</li></ul><p>每台设备都需登录后单独开启。退出账号会解绑当前浏览器；每账号最多5个浏览器。</p><p v-if="state?.deviceCount!==undefined">当前账号已开启 {{state.deviceCount}} 个浏览器。</p><p v-if="support">{{support}}</p><p v-else-if="state&&!state.pushConfigured">此环境暂未开启浏览器推送。预览环境仅验证站内提醒与日历。</p></details></div><div class="action-row"><button class="secondary" :disabled="busy||(!pushOn&&Boolean(support||!state?.pushConfigured))" @click="togglePush">{{pushOn?'关闭此浏览器推送':'开启此浏览器推送'}}</button><button v-if="pushOn&&state?.pushConfigured" class="text-button" :disabled="busy" @click="testPush">发送测试通知</button></div></aside>
+  <ReminderEmailSettings v-if="state?.email" :transport="transport" :state="state.email" @changed="emailChanged" />
   <p v-if="support" class="small muted push-support-note">{{support}}</p>
   <p v-if="error" class="error-message" role="alert">{{error}}</p><p v-if="message" class="reminder-feedback" role="status">{{message}}</p>
   <div class="reminder-workspace">
@@ -87,7 +98,8 @@ onUnmounted(()=>{active=false;ticket++;clearTimeout(timer);document.removeEventL
      <article v-for="reminder in schedule" :key="reminder.id" class="reminder-schedule" :class="{'pending-time':reminder.dueAt===null}">
       <div class="reminder-date"><time v-if="reminder.dueAt">{{time(reminder.dueAt)}}</time><span v-else>待设置时间</span><span v-if="reminder.dueAt&&!isFuture(reminder)" class="small muted schedule-status">已到时间</span></div>
       <div><p class="small muted">{{reminder.schoolName}} · {{reminder.label}}</p><h2>{{reminder.title}}</h2><p class="small">{{reminder.dueAt?reminder.days.map(days=>days?`提前${days}天`:'到时').join('、'):'尚未开始提醒，请先设置具体时间。'}}</p>
-       <p v-if="reminder.dueAt&&reminder.delivery" class="small muted reminder-delivery-status" role="status">{{deliveryText(reminder)}}<span v-if="reminder.delivery.nextAt"> 下次：{{time(reminder.delivery.nextAt)}}。</span></p>
+       <div v-if="reminder.dueAt&&reminder.channelDelivery" class="small muted reminder-channel-status" role="status"><p>浏览器通知：{{channelText(reminder.channelDelivery.browser)}}</p><p>邮件提醒：{{channelText(reminder.channelDelivery.email)}}</p></div>
+       <p v-else-if="reminder.dueAt&&reminder.delivery" class="small muted reminder-delivery-status" role="status">{{deliveryText(reminder)}}<span v-if="reminder.delivery.nextAt"> 下次：{{time(reminder.delivery.nextAt)}}。</span></p>
        <div class="action-row"><button class="text-button" :disabled="busy" @click="editing=editing?.id===reminder.id?null:reminder">{{reminder.dueAt?'编辑时间':'设置时间'}}</button><button class="text-button" :disabled="busy||!isFuture(reminder)" :title="isFuture(reminder)?'导出这条事项':'请先设置未来时间'" @click="download(reminder.id)">导出日历</button><button class="text-button" :disabled="busy" @click="remove(reminder.id)">移出提醒</button></div>
        <ReminderForm v-if="editing?.id===reminder.id" :key="reminder.id" :transport="transport" :school-id="reminder.schoolId" :item-id="reminder.itemId" :title="reminder.title" :reminder="reminder" @saved="apply($event);editing=null" @cancel="editing=null" />
       </div>

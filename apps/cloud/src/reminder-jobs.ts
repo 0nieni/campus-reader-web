@@ -9,7 +9,7 @@ const iso=(time:number)=>new Date(time).toISOString();
 
 // Called inside the same transaction that saves the account. A failed enqueue
 // can never erase the task, and cancel/edit invalidates its old generation.
-export async function syncReminderJobs(sql:SqlExecutor,owner:string,reminders:VersionedReminder[],time:number){
+export async function syncReminderJobs(sql:SqlExecutor,owner:string,reminders:VersionedReminder[],time:number,provider:'qstash'|'aliyun-fc'='qstash'){
  const records:{id:string;reminder_id:string;generation:string;offset_days:number;run_at:string}[]=[];
  for(const reminder of reminders){
   if(!reminder.dueAt)continue;
@@ -18,10 +18,12 @@ export async function syncReminderJobs(sql:SqlExecutor,owner:string,reminders:Ve
    records.push({id:uuid(),reminder_id:reminder.id,generation:reminder.generation,offset_days:offset,run_at:iso(at)});
   }
  }
- if(records.length)await sql.query(`INSERT INTO campus_reminder_jobs(id,owner_id,reminder_id,generation,offset_days,run_at,created_at,updated_at)
-  SELECT r.id,$1,r.reminder_id,r.generation,r.offset_days,r.run_at::timestamptz,$3,$3 FROM jsonb_to_recordset($2::jsonb)
+ if(records.length)await sql.query(`INSERT INTO campus_reminder_jobs(id,owner_id,reminder_id,generation,offset_days,run_at,created_at,updated_at,provider)
+  SELECT r.id,$1,r.reminder_id,r.generation,r.offset_days,r.run_at::timestamptz,$3,$3,$4 FROM jsonb_to_recordset($2::jsonb)
    AS r(id text,reminder_id text,generation text,offset_days integer,run_at text)
-  ON CONFLICT(owner_id,reminder_id,generation,offset_days) DO NOTHING`,[owner,JSON.stringify(records),iso(time)]);
+  ON CONFLICT(owner_id,reminder_id,generation,offset_days) DO NOTHING`,[owner,JSON.stringify(records),iso(time),provider]);
+ if(provider==='aliyun-fc')await sql.query(`UPDATE campus_reminder_jobs SET provider='aliyun-fc',state='pending',lease_id=NULL,lease_until=NULL,registered_at=NULL,registration_error=NULL,retry_at='1970-01-01T00:00:00Z',updated_at=$2
+  WHERE owner_id=$1 AND provider='qstash' AND run_at>$2 AND state IN ('pending','registering','queued')`,[owner,iso(time)]);
  await sql.query(`UPDATE campus_reminder_jobs j SET state='cancelled',updated_at=$3 WHERE owner_id=$1 AND state IN ('pending','registering','queued')
   AND NOT EXISTS(SELECT 1 FROM jsonb_array_elements($2::jsonb) r WHERE r->>'id'=j.reminder_id AND r->>'generation'=j.generation AND r->'days' @> to_jsonb(j.offset_days))`,[owner,JSON.stringify(reminders),iso(time)]);
 }

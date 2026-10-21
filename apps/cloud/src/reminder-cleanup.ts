@@ -6,6 +6,8 @@ export async function cleanupReminderData(sql:SqlExecutor,now=Date.now()){
  await sql.query('DELETE FROM campus_push_devices WHERE updated_at < $1::timestamptz',[deviceBefore]);
  await sql.query("DELETE FROM campus_reminder_jobs WHERE run_at < $1::timestamptz OR (state='cancelled' AND updated_at < $1::timestamptz)",[before]);
  await sql.query('DELETE FROM campus_reminder_queue_budget WHERE day < $1::date',[before]);
+ await sql.query('DELETE FROM campus_reminder_email_budget WHERE day < $1::date',[before]);
+ await sql.query('UPDATE campus_reminder_email SET token_hash=NULL,token_expires=NULL WHERE token_expires < $1',[new Date(now).toISOString()]);
  // Application timestamps are canonical UTC ISO strings, including milliseconds.
  await sql.query(`UPDATE campus_reminder_accounts SET body=
    jsonb_set(jsonb_set(body,'{notifications}',coalesce((SELECT jsonb_agg(entry) FROM jsonb_array_elements(body->'notifications') entry WHERE entry->>'createdAt' >= $1),'[]'::jsonb)),

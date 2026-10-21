@@ -6,6 +6,7 @@ import {safeError} from '../lib/errors';
 const props=defineProps<{transport:Transport;schoolId:string;itemId:string;title:string;reminder?:Reminder}>();
 const emit=defineEmits<{saved:[state:ReminderState];cancel:[]}>();
 const expanded=ref(Boolean(props.reminder)),label=ref(props.reminder?.label||'报名／事项截止'),when=ref(props.reminder?.dueAt?new Date(Date.parse(props.reminder.dueAt)+8*3600000).toISOString().slice(0,16):''),days=ref(props.reminder?.days.length?[...props.reminder.days]:[7,3,1,0]),busy=ref(false),error=ref(''),message=ref('');
+const browser=ref(props.reminder?.channels?.browser??true),email=ref(props.reminder?.channels?.email??false);
 let active=true;onUnmounted(()=>{active=false;});
 async function save(){
  if(busy.value)return;busy.value=true;error.value='';message.value='';
@@ -13,7 +14,7 @@ async function save(){
   if(!/^\d{4}-\d\d-\d\dT\d\d:\d\d$/.test(when.value))throw new Error('请选择有效日期和具体时间。');
   const parsed=new Date(when.value+':00+08:00');
   if(!Number.isFinite(parsed.getTime())||new Date(parsed.getTime()+8*3600000).toISOString().slice(0,16)!==when.value)throw new Error('日期无效，请重新选择。');
-  const result=await props.transport.call('reminders.save',{...(props.reminder?{id:props.reminder.id}:{}),schoolId:props.schoolId,itemId:props.itemId,label:label.value,dueAt:parsed.toISOString(),days:days.value});
+  const result=await props.transport.call('reminders.save',{...(props.reminder?{id:props.reminder.id}:{}),schoolId:props.schoolId,itemId:props.itemId,label:label.value,dueAt:parsed.toISOString(),days:days.value,channels:{browser:browser.value,email:email.value}});
   if(!active)return;emit('saved',result);message.value='提醒已保存；已过去的提前档位会自动略过。';expanded.value=false;
  }catch(caught){if(active)error.value=caught instanceof Error&&!(caught as any).code?caught.message:safeError(caught);}finally{if(active)busy.value=false;}
 }
@@ -28,7 +29,8 @@ async function save(){
     <label>事项名称<input v-model="label" required maxlength="80" placeholder="例如：报名截止"></label>
     <label>截止或自定时间（北京时间）<input v-model="when" required type="datetime-local"></label>
     <div class="reminder-offsets" role="group" aria-label="提醒时间"><label v-for="value in [7,3,1,0]" :key="value"><input v-model="days" type="checkbox" :value="value">{{value?`提前${value}天`:'到时提醒'}}</label></div>
-    <p class="small muted">保存后请在提醒中心核对后台登记状态，并在每台设备开启系统推送。系统或网络可能延迟显示；可同时导出日历作为补充。</p>
+    <div class="reminder-offsets" role="group" aria-label="发送方式"><label><input v-model="browser" type="checkbox">浏览器通知</label><label><input v-model="email" type="checkbox">邮件提醒</label></div>
+    <p class="small muted">{{!browser&&!email?'仅保存站内提醒与日历事项。':'保存后请核对各通道状态。浏览器需逐台开启，邮件需验证邮箱并主动开启。'}} 系统或网络可能延迟显示。</p>
     <p v-if="error" class="error-message" role="alert">{{error}}</p>
     <div class="action-row"><button class="primary" type="submit">{{busy?'正在保存…':'保存提醒'}}</button><button class="text-button" type="button" @click="expanded=false;emit('cancel')">取消</button></div>
    </fieldset>

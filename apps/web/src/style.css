@@ -931,3 +931,10 @@ select {
 .notice-quick-actions button {font-size:12px;padding:3px 0;}
 .detail-reminder-action {display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin:15px 0;}
 @media(max-width:800px){.reminders-center{display:block;overflow:auto;padding:18px 20px;}.reminder-heading{display:flex!important;}.reminder-heading h1{font-size:23px;}.reminder-heading>button{margin-top:0!important;flex-shrink:0;font-size:12px;}.reminder-delivery{display:block;margin:0 0 14px;padding:10px 12px;}.reminder-delivery .action-row{max-width:none;margin-top:8px;}.reminder-tabs{gap:16px;font-size:13px;}.reminder-schedule{grid-template-columns:minmax(0,1fr);gap:8px;}.reminder-form,.watch-form{padding:15px;}.reminder-form input,.watch-form input,.picker-search input{font-size:16px;}.reminder-message{padding:18px 8px;gap:10px;}.reminder-message>button{font-size:12px;}.unread-count{margin-left:0;}.reminder-workspace{display:flex;flex-direction:column-reverse;min-height:0;gap:14px;}.reminder-content{overflow:visible;padding-right:0;}.reminder-picker{border-left:0;border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:0;}.picker-toggle{display:block;}.picker-results{max-height:320px;flex:auto;}.picker-body{flex:none;}.picker-footer{padding-bottom:10px;}}
+.reminder-email-settings{padding:10px 14px;margin:0 0 14px;border-left:3px solid #88a5df;background:#f3f6fc;flex-shrink:0}
+.email-setting-main{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.email-setting-main .action-row{margin:0;flex-wrap:wrap}
+.email-setting-main>div:first-child{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.reminder-email-settings>p{margin:8px 0 0}
+.reminder-channel-status p{margin:4px 0;overflow-wrap:anywhere}
+@media(max-width:650px){.email-setting-main{align-items:flex-start;flex-direction:column}.email-setting-main .action-row{flex-wrap:wrap}.reminder-email-settings{padding:12px}}

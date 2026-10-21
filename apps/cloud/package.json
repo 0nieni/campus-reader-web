@@ -9,8 +9,12 @@
     "test": "tsx --test tests/*.test.ts"
   },
   "dependencies": {
+    "@alicloud/dm20151123": "1.11.0",
+    "@alicloud/openapi-core": "1.0.8",
     "@campus/contracts": "0.1.0",
     "@cloudbase/node-sdk": "3.18.3",
+    "@darabonba/typescript": "1.0.5",
+    "@netlify/blobs": "11.1.5",
     "@netlify/database": "2.0.1",
     "@netlify/functions": "6.0.2",
     "@netlify/identity": "2.0.0",

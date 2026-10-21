@@ -11,11 +11,12 @@ import {reject} from './errors';
 import {checkedSubscription,endpointHash,sendBrowserPush,type PushConfig} from './browser-push';
 import {reminderCalendar} from './reminder-calendar';
 import {syncReminderJobs,flushReminderJobs,reminderDeliveryState,type ReminderPublisher} from './reminder-jobs';
+import {aliyunJobs,type AliyunOptions} from './aliyun-reminder-jobs';
 
 type Notification=ReminderNotification&{reminderId?:string;watchId?:string;sent:Record<string,'sending'|'sent'|'failed'|'skipped'>};
 type StoredReminder=Reminder&{generation:string;fired:number[]};
 interface State {reminders:StoredReminder[];watches:NoticeWatch[];notifications:Notification[];lastScan?:number;more?:boolean;lastTest?:number}
-interface Options {now?:()=>number;push?:PushConfig;send?:typeof sendBrowserPush;minuteMode?:boolean;queue?:ReminderPublisher}
+interface Options {now?:()=>number;push?:PushConfig;send?:typeof sendBrowserPush;minuteMode?:boolean;queue?:ReminderPublisher;aliyun?:AliyunOptions}
 const day=86400000;
 const cleanText=(value:unknown,max:number,fallback='')=>{
   if(typeof value!=='string'||value.length>max||/[\x00-\x1f\x7f]/.test(value))reject('VALIDATION_FAILED','提醒文字过长或包含无效字符。');
@@ -35,7 +36,7 @@ export function reminderService(pool:SqlPool,options:Options={}){
       const {rows}=await client.query('SELECT body FROM campus_reminder_accounts WHERE owner_id=$1 FOR UPDATE',[owner]);
       const state={...empty(),...rows[0].body} as State;
       const result=await run(state,client);
-      if(options.minuteMode)await syncReminderJobs(client,owner,state.reminders,now());
+      if(options.minuteMode)await syncReminderJobs(client,owner,state.reminders,now(),options.aliyun?'aliyun-fc':'qstash');
       await client.query('UPDATE campus_reminder_accounts SET body=$2::jsonb,checked_at=$3 WHERE owner_id=$1',[owner,JSON.stringify(state),new Date(now()).toISOString()]);
       await client.query('COMMIT');return result;
     }catch(error){await client.query('ROLLBACK').catch(()=>{});throw error;}finally{client.release();}
@@ -106,6 +107,10 @@ export function reminderService(pool:SqlPool,options:Options={}){
   }
   async function handleAction(action:string,input:Record<string,unknown>,identity:IdentityContext):Promise<unknown>{
     const owner=identity.dataOwnerId;
+    if(action.startsWith('reminders.email.')){
+      if(!options.aliyun?.email)reject('EMAIL_UNAVAILABLE','邮件提醒待配置。');
+      return options.aliyun.email.handle(action,input,owner);
+    }
     if(options.minuteMode&&action.startsWith('reminders.watch.'))reject('ACTION_NOT_ALLOWED','学校与关键词关注已移除。');
     if(action==='reminders.push.status'){
       if(typeof input.endpoint!=='string'||input.endpoint.length>2048)reject('VALIDATION_FAILED','推送设备信息无效。');
@@ -151,6 +156,7 @@ export function reminderService(pool:SqlPool,options:Options={}){
         if(state.reminders.length+additions.length>100)reject('REMINDER_LIMIT','每个账号最多保存100条提醒，请先移除已完成事项。');
         state.reminders.unshift(...additions.map(row=>({id:id(),schoolId,itemId:row._id,label:'报名／事项截止',dueAt:null,days:[],title:String(row.title||'未命名公告').slice(0,300),schoolName:school.name,createdAt:new Date(time).toISOString(),generation:id(),fired:[]})));
       }else if(action==='reminders.save'){
+        if(input.channels!==undefined&&(input.channels===null||typeof input.channels!=='object'||Array.isArray(input.channels)||Object.keys(input.channels).some(k=>!['browser','email'].includes(k))||typeof (input.channels as any).browser!=='boolean'||typeof (input.channels as any).email!=='boolean'))reject('VALIDATION_FAILED','请选择有效的提醒发送方式。');
         const existing=input.id===undefined?undefined:state.reminders.find(r=>r.id===identifier(input.id));
         if(input.id&&!existing)reject('NOT_FOUND','提醒不存在或不属于当前账号。');
         const schoolId=identifier(input.schoolId),itemId=identifier(input.itemId),row=await authorizedItem(repo,owner,schoolId,itemId,time,!existing);
@@ -163,7 +169,7 @@ export function reminderService(pool:SqlPool,options:Options={}){
         if(existing&&(existing.schoolId!==schoolId||existing.itemId!==itemId))reject('VALIDATION_FAILED','编辑提醒不能变更关联公告。');
         if(!existing&&state.reminders.length>=100)reject('REMINDER_LIMIT','每个账号最多保存100条提醒，请先移除已完成事项。');
         state.reminders=state.reminders.filter(r=>r.id!==reminderId);
-        state.reminders.unshift({id:reminderId,schoolId,itemId,label,dueAt:input.dueAt,days,title:String(row.title||'未命名公告').slice(0,300),schoolName:school!.name,createdAt:existing?.createdAt||new Date(time).toISOString(),generation:id(),fired:[]});
+        state.reminders.unshift({id:reminderId,schoolId,itemId,label,dueAt:input.dueAt,days,...(options.aliyun?{channels:(input.channels||existing?.channels||{browser:true,email:false}) as {browser:boolean;email:boolean}}:{}),title:String(row.title||'未命名公告').slice(0,300),schoolName:school!.name,createdAt:existing?.createdAt||new Date(time).toISOString(),generation:id(),fired:[]});
         for(const event of state.notifications)if(event.reminderId===reminderId)event.read=true;
       }else if(action==='reminders.remove'){
         const target=identifier(input.id);state.reminders=state.reminders.filter(r=>r.id!==target);for(const event of state.notifications)if(event.reminderId===target)event.read=true;
@@ -225,6 +231,11 @@ export function reminderService(pool:SqlPool,options:Options={}){
   async function handle(action:string,input:Record<string,unknown>,identity:IdentityContext){
     const result=await handleAction(action,input,identity);
     if(!options.minuteMode)return result;
+    if(aliyun){
+      const registered=await aliyun.register();
+      if(result&&typeof result==='object'&&'reminders' in result)return aliyun.decorate(identity.dataOwnerId,result as ReminderState,registered);
+      return result;
+    }
     if(options.queue&&options.push&&['reminders.save','reminders.state','reminders.push.subscribe'].includes(action)){
       // Committed outbox survives a failed publication; reflect that failure in
       // delivery state instead of falsely reporting a registered system alarm.
@@ -287,11 +298,19 @@ export function reminderService(pool:SqlPool,options:Options={}){
     }
     return{accepted,failed};
   }
-  return{handle,dispatch,prepare,runJob};
+  const aliyun=options.aliyun?aliyunJobs(pool,{...options.aliyun,now,push:options.push,send},async(owner,run)=>transaction(owner,async(state,client)=>{await synchronize(state,client,owner);return run(client,state.reminders);})):undefined;
+  return{handle,dispatch,prepare,runJob,aliyun};
 }
 
 export async function runReminderTick(pool:SqlPool,options:Options&{budgetMs?:number}={}){
   const start=Date.now(),service=reminderService(pool,options);
+  if(options.aliyun){
+    const {rows}=await pool.query('SELECT owner_id FROM campus_reminder_accounts ORDER BY queue_checked_at,owner_id LIMIT 100');let processed=0;
+    for(const row of rows){if(Date.now()-start>(options.budgetMs??18000)-4000)break;await service.prepare(row.owner_id);processed++;}
+    const registered=await service.aliyun!.register();
+    if(Date.now()-start<(options.budgetMs??18000)-5000)await options.aliyun.email?.feedback(1);
+    return{processed,accepted:registered?1:0,failed:registered?0:1};
+  }
   if(options.minuteMode){
     // Twice-daily repair registers the six-day horizon. Order separately from
     // foreground checked_at so frequently used accounts cannot starve others.

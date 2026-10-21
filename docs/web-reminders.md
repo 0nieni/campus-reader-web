@@ -1,5 +1,9 @@
 # 网页提醒
 
+当前实现（2026-10-21）：按新的计划，调度改为阿里云 FC 分钟触发与 Netlify Blobs 到期索引，邮件接入 DirectMail，浏览器继续标准 Web Push。增加独立邮箱验证/开关、逐篇通道、回执、配额及有界恢复；历史邮件默认关闭。配置见 [阿里云指南](aliyun-reminders-setup.md)，验收边界见 [验证记录](aliyun-reminders-verification.md)。本次只交付代码和预览，生产和真实送达尚待资源与授权。
+
+## 以下为旧 QStash 版本记录
+
 本版实现站内提醒、ICS日历导出及QStash延时任务驱动的标准Web Push，按本人逐篇设置的时间发起后台发送。“学校与关键词”已移除。当前PR仍待审核，真实队列需配置后正式发布；预览不发送真实推送。见 [配置指引](qstash-setup.md) 和 [方案评估](minute-reminders-evaluation.md)。邮件提醒和自动AI日期提取不在本版范围内。
 
 ## 使用方式

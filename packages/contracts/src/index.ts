@@ -62,13 +62,16 @@ export interface AiStartInput {
   schoolId: string; itemIds: string[]; requestId: string; service: "official" | "byok";
   provider?: "deepseek" | "openai"; model?: string; task: "summary" | "outline" | "answer"; question?: string; fingerprint?: string;
 }
-export interface ReminderInput { id?:string; schoolId:string; itemId:string; label:string; dueAt:string; days:number[] }
+export interface ReminderChannels {browser:boolean;email:boolean}
+export interface ReminderInput { id?:string; schoolId:string; itemId:string; label:string; dueAt:string; days:number[];channels?:ReminderChannels }
+export interface ReminderChannelDelivery {status:'off'|'unconfigured'|'not_ready'|'pending'|'registration_failed'|'scheduled'|'accepted'|'failed'|'unknown'|'finished'|'retrying'|'limited';nextAt:string|null}
 export interface ReminderDelivery {status:'unconfigured'|'no_device'|'pending'|'scheduled'|'later'|'registration_failed'|'sent'|'failed'|'unknown'|'finished';nextAt:string|null}
-export interface Reminder extends Omit<ReminderInput,'dueAt'> { id:string; title:string; schoolName:string; createdAt:string; days:number[]; dueAt:string|null;delivery?:ReminderDelivery }
+export interface Reminder extends Omit<ReminderInput,'dueAt'> { id:string; title:string; schoolName:string; createdAt:string; days:number[]; dueAt:string|null;delivery?:ReminderDelivery;channelDelivery?:{browser:ReminderChannelDelivery;email:ReminderChannelDelivery} }
 export type ScheduledReminder=Reminder&{dueAt:string};
 export interface NoticeWatch { id:string; schoolId:string; schoolName:string; keyword:string; createdAt:string }
 export interface ReminderNotification { id:string; kind:'deadline'|'new_notice'; title:string; message:string; schoolId:string; itemId:string; createdAt:string; read:boolean }
-export interface ReminderState { reminders:Reminder[]; watches:NoticeWatch[]; notifications:ReminderNotification[]; unread:number; checkedAt:string; more:boolean; pushConfigured:boolean; publicKey:string|null;deliveryMode?:'minute'|'daily';queueConfigured?:boolean;deviceCount?:number }
+export interface ReminderEmailState {configured:boolean;address:string|null;verified:boolean;enabled:boolean;suspended:boolean;usedToday:number;dailyLimit:number}
+export interface ReminderState { reminders:Reminder[]; watches:NoticeWatch[]; notifications:ReminderNotification[]; unread:number; checkedAt:string; more:boolean; pushConfigured:boolean; publicKey:string|null;deliveryMode?:'minute'|'daily';queueConfigured?:boolean;deviceCount?:number;scheduler?:'aliyun-fc'|'qstash';schedulerHealth?:'unconfigured'|'waiting'|'active'|'stale'|'failed';schedulerCheckedAt?:string|null;email?:ReminderEmailState }
 export interface BrowserPushSubscription { endpoint:string; keys:{p256dh:string;auth:string} }
 export interface GatewayActions {
   'reminders.state':{input:Record<string,never>;output:ReminderState};
@@ -83,6 +86,9 @@ export interface GatewayActions {
   'reminders.push.status':{input:{endpoint:string};output:{active:boolean}};
   'reminders.push.unsubscribe':{input:{endpoint:string};output:{removed:boolean}};
   'reminders.push.test':{input:{endpoint:string};output:{accepted:boolean}};
+  'reminders.email.verify':{input:Record<string,never>;output:ReminderEmailState};
+  'reminders.email.test':{input:Record<string,never>;output:ReminderEmailState};
+  'reminders.email.enable':{input:{enabled:boolean};output:ReminderEmailState};
   "sources.list":{input:{schoolId:string};output:{sources:WebsiteSource[]}};
   "sources.save":{input:{schoolId:string;sourceId?:string;source:WebsiteSourceInput};output:{id:string}};
   "sources.test":{input:{schoolId:string;sourceId:string};output:{count:number;titles:string[];message:string}};
