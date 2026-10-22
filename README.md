@@ -10,7 +10,7 @@
 
 联网搜索使用可选服务端 `TAVILY_API_KEY`，通过 [Tavily Search API](https://docs.tavily.com/documentation/api-reference/endpoint/search) 搜索所选学校的官方域名；每账号每天最多 20 次、至少间隔 15 秒。最多五条候选、最多读取前三条正文；缺少 Key 或失败时明确提示并保留已有公告。搜索摘要不作正文证据，新候选不自动订阅，取得的临时正文按账号和学校隔离、24 小时到期。已知链接复用公告 ID 与全部来源许可，核验达到 200 条且仍未匹配时仅展示只读线索。临时结果用于本次明确搜索的对话或显式选入，不进入后续自动推荐。真实搜索及模型联调需要部署后的有效凭据，当前不声称已完成线上验证。
 
-对话 v2 指令由 [对话式阅读指南](docs/ai-reading-guide.md)生成，修改后运行 `node tools/sync-ai-guide.mjs`；`npm run typecheck` 会校验一致性。产品分工、接口与验收见 [重做方案](docs/ai-reading-redesign.md)，最新进度和验证状态见 [PROGRESS.md](PROGRESS.md)。新增第八份迁移 `20261022000100_ai_conversations.sql`，排在已发布的七份迁移之后；由正常部署应用，不改写原迁移。本地实现不等于线上发布。
+对话 v2 指令由 [对话式阅读指南](docs/ai-reading-guide.md)生成，修改后运行 `node tools/sync-ai-guide.mjs`；`npm run typecheck` 会校验一致性。产品分工、接口与验收见 [重做方案](docs/ai-reading-redesign.md)，最新进度和验证状态见 [PROGRESS.md](PROGRESS.md)。对话迁移 `20261019000100_ai_conversations.sql` 已在 Netlify 预览数据库应用，必须保留原文件名与内容；原 main 七份迁移也不改写。跨分支迁移历史须在正常部署中核对。本地实现不等于线上发布。
 
 对话口吻已更新为 v2.2“自然干练、有温度”：先回答当前问题，在用户目标明确、准备参与或完成阶段步骤时，适量补一两条可执行的后续建议。单纯查时间、要求简短、资料不足或已拒绝建议时停止扩展。人格、触发/停止规则及八类短示例都进入实际模型指令；语言效果尚未经过真实模型评测，不承诺后台跟进或提醒。
 
