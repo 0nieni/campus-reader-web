@@ -17,6 +17,21 @@ import { filtersOf, filterSince, matchesFilters } from "./filters";
 import { checkedLabels, displayedCategories, originalCategories } from './notice-labels';
 
 const fields: Record<string, string[]> = {
+  'reminders.state':[],
+  'reminders.add':['schoolId','itemIds'],
+  'reminders.save':['id','schoolId','itemId','label','dueAt','days','channels'],
+  'reminders.remove':['id'],
+  'reminders.watch.save':['id','schoolId','keyword'],
+  'reminders.watch.remove':['id'],
+  'reminders.read':['id'],
+  'reminders.export':['id'],
+  'reminders.push.subscribe':['subscription'],
+  'reminders.push.status':['endpoint'],
+  'reminders.push.unsubscribe':['endpoint'],
+  'reminders.push.test':['endpoint'],
+  'reminders.email.verify':[],
+  'reminders.email.test':[],
+  'reminders.email.enable':['enabled'],
   'sources.list':['schoolId'],
   'sources.save':['schoolId','sourceId','source'],
   'sources.test':['schoolId','sourceId'],
@@ -120,13 +135,14 @@ async function session(
   repo: Repository,
   directory = false,
   websites = false,
+  reminders = false,
 ): Promise<WorkspaceSession> {
   const id = await repo.selectedSchool(identity.dataOwnerId);
   return {
     identity: { uid: identity.uid, username: null },
     school: id ? await repo.school(id) : null,
     legacyLinked: identity.legacyLinked,
-    capabilities: { reading: true, ai: true, operations: false, ...(directory ? { schoolDirectory:true } : {}), ...(websites?{websiteSources:true}:{}), ...(repo.setLabels ? {noticeLabels:true} : {}) },
+    capabilities: { reading: true, ai: true, operations: false, ...(directory ? { schoolDirectory:true } : {}), ...(websites?{websiteSources:true}:{}), ...(reminders?{reminders:true}:{}), ...(repo.setLabels ? {noticeLabels:true} : {}) },
   };
 }
 
@@ -134,7 +150,7 @@ export function createGateway(
   repo: Repository,
   config: OwnerConfig,
   now: () => number = Date.now,
-  features?: { websites?:{handle(action:string,input:Record<string,unknown>,identity:IdentityContext):Promise<unknown>}; bookmarks?: { handle(action: string, input: Record<string, unknown>, identity: IdentityContext): Promise<unknown>; has(ownerId: string, schoolId: string, itemId: string): Promise<boolean> }; ai?: { handle(action: string, input: Record<string, unknown>, identity: IdentityContext): Promise<unknown> }; directory?: { refresh(schoolId:string):Promise<unknown>; request(name:unknown,identity:IdentityContext):Promise<unknown> } },
+  features?: { reminders?:{handle(action:string,input:Record<string,unknown>,identity:IdentityContext):Promise<unknown>}; websites?:{handle(action:string,input:Record<string,unknown>,identity:IdentityContext):Promise<unknown>}; bookmarks?: { handle(action: string, input: Record<string, unknown>, identity: IdentityContext): Promise<unknown>; has(ownerId: string, schoolId: string, itemId: string): Promise<boolean> }; ai?: { handle(action: string, input: Record<string, unknown>, identity: IdentityContext): Promise<unknown> }; directory?: { refresh(schoolId:string):Promise<unknown>; request(name:unknown,identity:IdentityContext):Promise<unknown> } },
 ) {
   return async (
     event: unknown,
@@ -146,6 +162,10 @@ export function createGateway(
       const { action, input } = inputOf(event);
       operation = action;
       const filters = action === "feed.list" ? filtersOf(input) : {};
+      if(action.startsWith('reminders.')){
+        if(!features?.reminders)reject('SERVICE_UNAVAILABLE','此环境尚未接通提醒服务。');
+        return{ok:true,data:await features.reminders.handle(action,input,identity)};
+      }
       if(action.startsWith('sources.')){
         if(!features?.websites)reject('SERVICE_UNAVAILABLE','网站来源管理尚未接通。');
         return{ok:true,data:await features.websites.handle(action,input,identity)};
@@ -159,7 +179,7 @@ export function createGateway(
         return { ok: true, data: await features.ai.handle(action, input, identity) };
       }
       if (action === "session.get")
-        return { ok: true, data: await session(identity, repo,Boolean(features?.directory),Boolean(features?.websites)) };
+        return { ok: true, data: await session(identity, repo,Boolean(features?.directory),Boolean(features?.websites),Boolean(features?.reminders)) };
       if (action === 'school.request') {
         if (!features?.directory) reject('SERVICE_UNAVAILABLE','学校申请服务尚未接通。');
         return { ok:true,data:await features.directory.request(input.schoolName,identity) };
@@ -180,7 +200,7 @@ export function createGateway(
       if (!school) reject("SCHOOL_NOT_FOUND", "学校不在目录中，请重新选择。");
       if (action === "school.select") {
         await repo.selectSchool(identity.dataOwnerId, schoolId);
-        return { ok: true, data: await session(identity, repo,Boolean(features?.directory),Boolean(features?.websites)) };
+        return { ok: true, data: await session(identity, repo,Boolean(features?.directory),Boolean(features?.websites),Boolean(features?.reminders)) };
       }
       if ((await repo.selectedSchool(identity.dataOwnerId)) !== schoolId)
         reject("STALE_SCOPE", "当前学校已变化，请刷新后重试。");

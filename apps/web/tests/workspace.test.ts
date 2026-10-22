@@ -63,6 +63,25 @@ function fixture() {
 }
 beforeEach(() => setActivePinia(createPinia()));
 describe("session and data race boundaries", () => {
+  it('adds a notice beside the AI action and configures its time only in reminder center', async () => {
+    const {fake}=fixture();
+    const state={reminders:[] as any[],watches:[],notifications:[],unread:0,checkedAt:new Date().toISOString(),more:false,pushConfigured:false,publicKey:null};
+    vi.mocked(fake.call).mockImplementation(async(action:string,input:any)=>{
+      if(action==='session.get')return{...session,capabilities:{...session.capabilities,reminders:true}};
+      if(action==='feed.list')return{items:[detail],nextCursor:null};
+      if(action==='feed.detail')return detail;
+      if(action==='school.list')return{schools:[session.school!],nextCursor:null};
+      if(action==='reminders.add'){state.reminders.push({id:'pending',itemId:detail.id,schoolId:'bjtu',schoolName:'测试学校',title:detail.title,label:'截止',dueAt:null,days:[],createdAt:new Date().toISOString()});return structuredClone(state);}
+      if(action==='reminders.state')return structuredClone(state);
+      throw new Error('unexpected '+action);
+    });
+    const wrapper=mount(App,{props:{transport:fake,configurationIssues:[]},global:{plugins:[createPinia()]}});await flushPromises();
+    expect(wrapper.findAll('.notice-quick-actions button').map(b=>b.text())).toEqual(['加入提醒','用 AI 生成摘要']);
+    await wrapper.get('.notice-remind').trigger('click');await flushPromises();
+    expect(fake.call).toHaveBeenCalledWith('reminders.add',{schoolId:'bjtu',itemIds:['one']});expect(wrapper.get('.notice-remind').text()).toBe('已加入提醒');
+    expect(wrapper.find('input[type=datetime-local]').exists()).toBe(false);
+    await wrapper.get('.notice-open').trigger('click');await flushPromises();expect(wrapper.find('.detail-reminder-action').exists()).toBe(true);expect(wrapper.find('input[type=datetime-local]').exists()).toBe(false);wrapper.unmount();
+  });
   it('changing search discards the previous page request and preserves filters for pagination', async () => {
     const { fake } = fixture();
     const store = workspaceStore(fake)();
