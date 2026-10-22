@@ -28,6 +28,12 @@
 [database.migrations]
   path = "netlify/database/migrations"
 
+# PR14's existing preview applied the AI migration before main's reminders.
+# Keep that preview's original names and checksums; production and new branches
+# use the canonical history above, with AI appended after the reminder migrations.
+[context.AI_module.database.migrations]
+  path = "netlify/database/pr14-migrations"
+
 [[headers]]
   for = "/*"
   [headers.values]

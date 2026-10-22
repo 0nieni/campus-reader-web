@@ -1,0 +1,3 @@
+# Applied migration checksums include line endings. Preserve exact SQL bytes
+# across Windows/Linux checkouts; CRLF is intentional in older migration files.
+netlify/database/**/*.sql -text whitespace=cr-at-eol
