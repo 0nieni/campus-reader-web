@@ -20,6 +20,9 @@
 [functions.cleanup]
   schedule = "17 18 * * *"
 
+[functions.reminders]
+  schedule = "0 1,12 * * *"
+
 # The Netlify monorepo package directory is apps/web. Resolve migrations from
 # the repository base explicitly instead of package-directory auto-detection.
 [database.migrations]
@@ -30,3 +33,8 @@
   [headers.values]
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "strict-origin-when-cross-origin"
+
+[[headers]]
+  for = "/reminder-worker.js"
+  [headers.values]
+    Cache-Control = "no-cache"

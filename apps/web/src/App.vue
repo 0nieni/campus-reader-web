@@ -15,6 +15,8 @@ import { safeError, ClientError } from "./lib/errors";
 import InvitationPanel from './components/InvitationPanel.vue';
 import SchoolRequestForm from './components/SchoolRequestForm.vue';
 import NoticeLabelsEditor from './components/NoticeLabelsEditor.vue';
+const ReminderCenter=defineAsyncComponent({loader:()=>import('./components/ReminderCenter.vue'),loadingComponent:featureLoading,errorComponent:featureFailed});
+import type {ReminderNotification,ReminderState} from '@campus/contracts';
 
 const props = defineProps<{
   transport?: Transport;
@@ -26,19 +28,38 @@ const featureTransport: Transport = { ...transport, call: (async (action, input)
   try { return await transport.call(action, input); }
   catch (caught) { if (caught instanceof ClientError && ["UNAUTHENTICATED", "FORBIDDEN"].includes(caught.code)) store.clear(); throw caught; }
 }) as Transport["call"] };
-const view = ref<"feed" | "favorites" | "ai" | "sources">("feed"), selection = ref<Notice[]>([]), bookmarkBusy = ref(false);
+const view = ref<"feed" | "favorites" | "ai" | "sources" | "reminders">("feed"), selection = ref<Notice[]>([]), bookmarkBusy = ref(false);
 const advancedReading = ref(false);
+const unreadReminders=ref(0),reminderRevision=ref(0);
+const reminderKeys=ref<string[]>([]),addingReminder=ref(''),reminderFeedback=ref('');
+let requestedReminders=new URLSearchParams(location.search).get('view')==='reminders';
 const requestingSchool = ref(false), schoolQuery = ref('');
 const matchingSchools = computed(() => store.schools.filter(school=>school.name.includes(schoolQuery.value.trim())));
 watch(() => store.auth?.uid,()=>{requestingSchool.value=false;schoolQuery.value='';});
-watch(() => store.auth?.uid, () => { view.value = "feed"; selection.value = []; });
-watch(() => store.workspace?.school?.id, () => { selection.value = []; advancedReading.value = false; });
+watch(() => store.auth?.uid, () => { view.value = "feed"; selection.value = []; unreadReminders.value=0;reminderKeys.value=[];reminderFeedback.value='';addingReminder.value=''; });
+watch(()=>store.workspace?.capabilities.reminders,enabled=>{if(enabled&&requestedReminders){navigate('reminders');requestedReminders=false;}});
+watch(() => store.workspace?.school?.id, () => { selection.value = [];advancedReading.value=false;reminderFeedback.value=''; });
+function applyReminderState(state:ReminderState){unreadReminders.value=state.unread;reminderKeys.value=state.reminders.map(r=>`${r.schoolId}/${r.itemId}`);}
+function alreadyReminded(itemId:string){return reminderKeys.value.includes(`${store.workspace?.school?.id}/${itemId}`);}
+async function addReminder(item:Notice){
+ const schoolId=store.workspace?.school?.id,uid=store.auth?.uid;if(!schoolId||!uid||addingReminder.value||alreadyReminded(item.id))return;
+ addingReminder.value=item.id;reminderFeedback.value='';
+ try{const result=await featureTransport.call('reminders.add',{schoolId,itemIds:[item.id]});if(store.auth?.uid===uid){applyReminderState(result);reminderRevision.value++;if(store.workspace?.school?.id===schoolId)reminderFeedback.value='已加入提醒中心，请在“时间提醒”中设置时间。';}}
+ catch(caught){if(store.auth?.uid===uid)store.error=safeError(caught);}
+ finally{if(store.auth?.uid===uid)addingReminder.value='';}
+}
 function chooseNotice(item: Notice) {
   if (selection.value.some(row => row.id === item.id)) selection.value = selection.value.filter(row => row.id !== item.id);
   else if (selection.value.length < 8) selection.value.push(item);
   else store.error = "一次最多选择 8 篇公告。";
 }
-function navigate(target: "feed" | "favorites" | "ai" | "sources") { store.closeNotice(); advancedReading.value = false; view.value = target; }
+function navigate(target: "feed" | "favorites" | "ai" | "sources" | "reminders") { store.closeNotice(); advancedReading.value=false; view.value = target; }
+async function openReminder(event:ReminderNotification){
+  const uid=store.auth?.uid;navigate('feed');
+  if(store.workspace?.school?.id!==event.schoolId)await store.selectSchool(event.schoolId);
+  if(store.auth?.uid===uid&&store.workspace?.school?.id===event.schoolId)await store.openNotice(event.itemId);
+}
+function pushNavigation(event:MessageEvent){if(event.data?.type==='open-reminders'){if(store.workspace?.capabilities.reminders)navigate('reminders');else requestedReminders=true;}}
 async function saveBookmark() {
   const item = store.detail, schoolId = store.workspace?.school?.id, uid = store.auth?.uid;
   if (!item || !schoolId || bookmarkBusy.value) return;
@@ -101,10 +122,12 @@ const date = new Intl.DateTimeFormat("zh-CN", {
 }).format(new Date());
 let unwatch: (() => void) | undefined;
 onMounted(() => {
+  navigator.serviceWorker?.addEventListener('message',pushNavigation);
   unwatch = store.watchSession();
   if (!issues.length) void store.connect();
 });
 onUnmounted(() => {
+  navigator.serviceWorker?.removeEventListener('message',pushNavigation);
   unwatch?.();
   password.value = "";
   store.clear();
@@ -251,7 +274,7 @@ function schoolChanged(event: Event) {
     <main
       v-else
       class="workspace"
-      :class="{ 'show-detail': view === 'feed' && (store.detail || store.detailLoading), 'feature-view': view !== 'feed' }"
+      :class="{ 'show-detail': view === 'feed' && (store.detail || store.detailLoading), 'feature-view': view !== 'feed', 'reminder-view': view === 'reminders' }"
     >
       <aside class="navigation" aria-label="工作区导航">
         <div class="workspace-name">我的阅览室</div>
@@ -259,6 +282,7 @@ function schoolChanged(event: Event) {
           <span aria-hidden="true">▤</span> 公告
         </button>
         <button class="nav-item" :class="{ active: view === 'favorites' }" @click="navigate('favorites')"><span aria-hidden="true">☆</span>收藏</button>
+        <button v-if="store.workspace.capabilities.reminders" class="nav-item" :class="{active:view==='reminders'}" @click="navigate('reminders')"><span aria-hidden="true">◷</span>提醒<span v-if="unreadReminders" class="reminder-badge" :aria-label="`${unreadReminders}条未读提醒`">{{unreadReminders>99?'99+':unreadReminders}}</span></button>
         <button v-if="store.workspace.capabilities.websiteSources" class="nav-item" :class="{active:view==='sources'}" @click="navigate('sources')"><span aria-hidden="true">↗</span>公告来源</button>
         <button class="nav-item" :class="{ active: view === 'ai' }" @click="navigate('ai')"><span aria-hidden="true">✧</span>AI 阅读{{ selection.length ? `（${selection.length}）` : '' }}</button>
         <div class="navigation-note">
@@ -370,6 +394,7 @@ function schoolChanged(event: Event) {
         <p v-if="store.error" class="error-message" role="alert">
           {{ store.error }}
         </p>
+        <p v-if="reminderFeedback" class="feed-update" role="status">{{reminderFeedback}}<button class="text-button" @click="navigate('reminders')">前往提醒中心</button></p>
         <div v-if="store.pendingUpdates" class="feed-update" role="status">
           <span>公告有更新，可刷新列表；当前阅读内容已保留。</span>
           <button class="text-button" :disabled="store.loading" @click="store.applyUpdates()">显示更新</button>
@@ -422,7 +447,7 @@ function schoolChanged(event: Event) {
               <h2>{{ item.title }}</h2>
 
             </button>
-            <button class="text-button notice-read" @click="selection = [item]; navigate('ai')">用 AI 生成摘要</button>
+            <div class="notice-quick-actions"><button v-if="store.workspace.capabilities.reminders" class="text-button notice-remind" :disabled="Boolean(addingReminder)||alreadyReminded(item.id)" @click="addReminder(item)">{{alreadyReminded(item.id)?'已加入提醒':addingReminder===item.id?'正在加入…':'加入提醒'}}</button><button class="text-button notice-read" @click="selection = [item]; navigate('ai')">用 AI 生成摘要</button></div>
             <label class="selection-toggle"><input type="checkbox" :checked="selection.some(row => row.id === item.id)" :disabled="selection.length >= 8 && !selection.some(row => row.id === item.id)" @change="chooseNotice(item)" />用于 AI 阅读</label>
           </article>
           <button
@@ -469,6 +494,7 @@ function schoolChanged(event: Event) {
           </p>
           <div class="action-row detail-actions"><button class="secondary" :disabled="bookmarkBusy" @click="saveBookmark">{{ store.detail.bookmarked ? '取消收藏' : '收藏公告' }}</button><button class="text-button" @click="chooseNotice(store.detail)">{{ selection.some(row => row.id === store.detail!.id) ? '从 AI 选择中移除' : '选入 AI 阅读' }}</button><button v-if="selection.length" class="text-button" @click="navigate('ai')">阅读已选 {{ selection.length }} 篇</button></div>
           <NoticeLabelsEditor v-if="store.workspace.capabilities.noticeLabels && store.workspace.school" :key="`${store.auth?.uid}:${store.detail.id}`" :transport="featureTransport" :school-id="store.workspace.school.id" :item-id="store.detail.id" :categories="store.detail.categories" :customized="Boolean(store.detail.categoriesCustomized)" @saved="store.noticeLabelsChanged" />
+          <div v-if="store.workspace.capabilities.reminders" class="detail-reminder-action"><button class="secondary" :disabled="Boolean(addingReminder)||alreadyReminded(store.detail.id)" @click="addReminder(store.detail)">{{alreadyReminded(store.detail.id)?'已加入提醒中心':'加入提醒'}}</button><button class="text-button" @click="navigate('reminders')">前往提醒中心设置时间</button></div>
           <div class="original-source" v-if="original">
             <a :href="original" target="_blank" rel="noopener noreferrer"
               >打开原文 ↗</a
@@ -494,6 +520,7 @@ function schoolChanged(event: Event) {
         </div>
       </section>
       <BookmarksPanel v-if="view === 'favorites'" :transport="featureTransport" :school-id="store.workspace.school?.id || null" @open="openFavorite" />
+      <ReminderCenter v-if="store.workspace.capabilities.reminders" v-show="view==='reminders'" :key="`reminders:${store.auth?.uid}`" :transport="featureTransport" :school-id="store.workspace.school?.id||null" :school-name="store.workspace.school?.name||''" :revision="reminderRevision" :visible="view==='reminders'" @unread="unreadReminders=$event" @changed="applyReminderState" @open="openReminder" @back="navigate('feed')" />
       <WebsiteSourcesPanel v-if="view === 'sources'" :key="`${store.auth?.uid}:${store.workspace.school?.id}`" :transport="featureTransport" :school-id="store.workspace.school?.id || null" :school-name="store.workspace.school?.name || ''" @changed="selection=[];store.sourcesChanged()" @back="navigate('feed')" />
       <AssistantPanel v-if="view === 'ai' && !advancedReading" :key="`assistant:${store.auth?.uid}:${store.workspace.school?.id}`" :transport="featureTransport" :school-id="store.workspace.school?.id || null" :selection="selection" @remove="selection = selection.filter(item => item.id !== $event)" @back="navigate('feed')" @advanced="advancedReading = true" />
       <ReadingPanel v-if="view === 'ai' && advancedReading" :key="`reading:${store.auth?.uid}:${store.workspace.school?.id}`" :transport="featureTransport" :school-id="store.workspace.school?.id || null" :selection="selection" @remove="selection = selection.filter(item => item.id !== $event)" @back="advancedReading = false" />
