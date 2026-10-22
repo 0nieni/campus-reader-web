@@ -17,6 +17,10 @@ import { filtersOf, filterSince, matchesFilters } from "./filters";
 import { checkedLabels, displayedCategories, originalCategories } from './notice-labels';
 
 const fields: Record<string, string[]> = {
+  'ai.memory.get': ['schoolId'],
+  'ai.memory.configure': ['schoolId','enabled','version'],
+  'ai.memory.forget': ['schoolId','id','version'],
+  'ai.memory.clear': ['schoolId','version'],
   'ai.profile.get': ['schoolId'],
   'ai.profile.save': ['schoolId','interests','goals','learningEnabled','version'],
   'ai.profile.clearBehavior': ['schoolId'],

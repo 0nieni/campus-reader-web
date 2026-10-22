@@ -62,7 +62,7 @@ export interface AiStartInput {
   schoolId: string; itemIds: string[]; requestId: string; service: "official" | "byok";
   provider?: "deepseek" | "openai"; model?: string; task: "summary" | "outline" | "answer"; question?: string; fingerprint?: string;
 }
-export type { AiPreferences, RecommendedNotice, AiRecommendations, ChatReference, AiChatTurn, AiConversation } from './assistant';
+export type { AiPreferences, AiMemorySlot, AiMemoryItem, AiMemoryState, RecommendedNotice, AiRecommendations, ChatReference, AiChatTurn, AiConversation } from './assistant';
 import type { AssistantActions } from './assistant';
 export interface ReminderChannels {browser:boolean;email:boolean}
 export interface ReminderInput { id?:string; schoolId:string; itemId:string; label:string; dueAt:string; days:number[];channels?:ReminderChannels }

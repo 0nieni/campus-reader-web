@@ -14,19 +14,27 @@ test('real SQL assistant retention removes sensitive bodies and prunes opt-in be
     await server.applyMigrations(fileURLToPath(new URL('../../../netlify/database/migrations', import.meta.url)));
     const put = (c: string, id: string, body: Record<string, unknown>) => db.collection(c).doc(id).set({ _id: id, ...body });
     await put('web_ai_conversations', 'old-conv', { owner: 'u', schoolId: 'bjtu', turns: [{ question: 'private' }], expireAt: new Date(now - 1).toISOString() });
-    await put('web_ai_tasks', 'old-task', { docs: ['private'], result: 'private', chat: { history: 'private' }, expireAt: new Date(now - 1).toISOString() });
+    await put('web_ai_tasks', 'old-task', { docs: ['private'], result: 'private', chat: { history: 'private' }, memoryProposals: [{ text: 'private' }], expireAt: new Date(now - 1).toISOString() });
     await put('items', 'old-search', { contentText: 'private', aiSearchExpiresAt: new Date(now - 1).toISOString(), status: 'published' });
     const fresh = { itemId: 'new', at: now - 10, day: '2026-10-19', categories: ['academic'] };
     await put('user_profiles', 'u', { selectedSchoolId: 'bjtu', webBookmarks: ['keep'], aiAssistant: { bjtu: { preferences: { learningEnabled: true, version: 2 }, dismissed: ['keep'], behaviorClearedAt: 5, behavior: [fresh, { ...fresh, itemId: 'old', at: now - 31 * 86400000 }] }, other: { preferences: { learningEnabled: false }, behavior: [fresh] } } });
+    const observedAt = new Date(now - 31 * 86400000).toISOString();
+    await put('user_profiles', 'memory-only', { unrelated: 'keep', aiMemory: { bjtu: { enabled: true, generation: 3, version: 4, items: [{ id: 'progress', slot: 'progress', text: 'private obsolete stage', createdAt: observedAt, updatedAt: observedAt, expiresAt: new Date(now - 1).toISOString() }], processedRequests: ['keep-request'] } } });
     await cleanupAssistantData(sql, now);
     const row = async (c: string, id: string) => (await db.collection(c).doc(id).get()).data as any;
     assert.equal((await row('web_ai_conversations', 'old-conv')).turns, undefined);
     assert.equal((await row('web_ai_tasks', 'old-task')).chat, undefined);
+    assert.equal((await row('web_ai_tasks', 'old-task')).memoryProposals, undefined);
     assert.equal((await row('items', 'old-search')).contentText, undefined);
     assert.equal((await row('items', 'old-search')).status, 'withdrawn');
     const p = await row('user_profiles', 'u'); assert.deepEqual(p.webBookmarks, ['keep']); assert.equal(p.selectedSchoolId, 'bjtu');
     assert.deepEqual(p.aiAssistant.bjtu.behavior, [fresh]); assert.deepEqual(p.aiAssistant.other.behavior, []);
     assert.equal(p.aiAssistant.bjtu.preferences.version, 2); assert.deepEqual(p.aiAssistant.bjtu.dismissed, ['keep']);
+    const memory = await row('user_profiles', 'memory-only');
+    assert.equal(memory.unrelated, 'keep');
+    assert.deepEqual(memory.aiMemory.bjtu.items, []);
+    assert.equal(memory.aiMemory.bjtu.updatedAtBySlot.progress, observedAt);
+    assert.equal(memory.aiMemory.bjtu.generation, 3);
     await cleanupAssistantData(sql, now); assert.deepEqual((await row('user_profiles', 'u')).aiAssistant.bjtu.behavior, [fresh]);
   } finally { await pool.end(); await server.stop(); }
 });

@@ -1,7 +1,8 @@
 /** Historical replies explain conversational references, not new facts. */
 export interface HistoryEvidence { itemId: string; version: string }
 export interface ContextExchange { question: string; answer: string; evidence: HistoryEvidence[] }
-export interface ChatContext { history: string; expireAt: string; evidence?: HistoryEvidence[] }
+export interface MemorySnapshot { enabled: boolean; generation: number; items: Array<{ id: string; slot: string; text: string }> }
+export interface ChatContext { history: string; expireAt: string; evidence?: HistoryEvidence[]; memory?: MemorySnapshot }
 
 export function buildChatContext(schoolId: string, preferences: { interests?: string[]; goals?: string } | undefined, exchanges: ContextExchange[], titles: string[], search?: { state: string; message: string }) {
   const shorten = (text: string, max: number) => text.length > max ? text.slice(0, max) + '…〔历史内容已缩短〕' : text;
