@@ -58,4 +58,4 @@ Files: apps/cloud/src/ai-service.ts, assistant-chat.ts, assistant-service.ts, ch
 - [x] 同步 README/设计/指南/PROGRESS，说明默认自动、期限、管理和未实测边界；原先“确认保存”提议标为被替代。
 - [x] npm ci、ai:guide:check、typecheck、全量测试、build、netlify:build。
 - [x] 独立非Astra审查；neat-freak知识收尾，保留原始工作区，不写个人记忆、不清场。
-- [ ] 核实真实AI_module、远端基线及无队友覆盖后普通推送；不合并main、不部署。
+- [x] 核实真实AI_module、远端基线及无队友覆盖后普通推送；不合并main、不部署。
