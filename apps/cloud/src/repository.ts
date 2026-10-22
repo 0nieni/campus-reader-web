@@ -2,6 +2,7 @@ import type { School, FeedFilters } from "@campus/contracts";
 import type { Resource, Scope } from "./scope";
 
 export interface ItemRow extends Resource {
+  aiSearchExpiresAt?: string;
   _id: string;
   title?: string;
   sourceName?: string;

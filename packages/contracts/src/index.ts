@@ -62,6 +62,8 @@ export interface AiStartInput {
   schoolId: string; itemIds: string[]; requestId: string; service: "official" | "byok";
   provider?: "deepseek" | "openai"; model?: string; task: "summary" | "outline" | "answer"; question?: string; fingerprint?: string;
 }
+export type { AiPreferences, RecommendedNotice, AiRecommendations, ChatReference, AiChatTurn, AiConversation } from './assistant';
+import type { AssistantActions } from './assistant';
 export interface ReminderChannels {browser:boolean;email:boolean}
 export interface ReminderInput { id?:string; schoolId:string; itemId:string; label:string; dueAt:string; days:number[];channels?:ReminderChannels }
 export interface ReminderChannelDelivery {status:'off'|'unconfigured'|'not_ready'|'pending'|'registration_failed'|'scheduled'|'accepted'|'failed'|'unknown'|'finished'|'retrying'|'limited';nextAt:string|null}
@@ -73,7 +75,7 @@ export interface ReminderNotification { id:string; kind:'deadline'|'new_notice';
 export interface ReminderEmailState {configured:boolean;address:string|null;verified:boolean;enabled:boolean;suspended:boolean;usedToday:number;dailyLimit:number}
 export interface ReminderState { reminders:Reminder[]; watches:NoticeWatch[]; notifications:ReminderNotification[]; unread:number; checkedAt:string; more:boolean; pushConfigured:boolean; publicKey:string|null;deliveryMode?:'minute'|'daily';queueConfigured?:boolean;deviceCount?:number;scheduler?:'aliyun-fc'|'qstash';schedulerHealth?:'unconfigured'|'waiting'|'active'|'stale'|'failed';schedulerCheckedAt?:string|null;email?:ReminderEmailState }
 export interface BrowserPushSubscription { endpoint:string; keys:{p256dh:string;auth:string} }
-export interface GatewayActions {
+export interface GatewayActions extends AssistantActions {
   'reminders.state':{input:Record<string,never>;output:ReminderState};
   'reminders.add':{input:{schoolId:string;itemIds:string[]};output:ReminderState};
   'reminders.save':{input:ReminderInput;output:ReminderState};

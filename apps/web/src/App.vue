@@ -4,7 +4,7 @@ import { noticeCategories, type FeedFilters, type Notice, type Favorite } from "
 const featureLoading = defineComponent(() => () => h("section", { class: "feature-surface", role: "status" }, "正在打开功能页…"));
 const featureFailed = defineComponent(() => () => h("section", { class: "feature-surface", role: "alert" }, "功能页加载失败，请刷新网页后重试。"));
 const BookmarksPanel = defineAsyncComponent({ loader: () => import("./components/BookmarksPanel.vue"), loadingComponent: featureLoading, errorComponent: featureFailed });
-const ReadingPanel = defineAsyncComponent({ loader: () => import("./components/ReadingPanel.vue"), loadingComponent: featureLoading, errorComponent: featureFailed });
+const AssistantPanel = defineAsyncComponent({ loader: () => import('./components/AssistantPanel.vue'), loadingComponent: featureLoading, errorComponent: featureFailed });
 const WebsiteSourcesPanel = defineAsyncComponent({loader:()=>import('./components/WebsiteSourcesPanel.vue'),loadingComponent:featureLoading,errorComponent:featureFailed});
 import { siteTransport as cloudTransport, setupIssues, regionNeedsVerification, isNetlify } from "./lib/site-transport";
 import type { Transport } from "./lib/transport";
@@ -520,7 +520,7 @@ function schoolChanged(event: Event) {
       <BookmarksPanel v-if="view === 'favorites'" :transport="featureTransport" :school-id="store.workspace.school?.id || null" @open="openFavorite" />
       <ReminderCenter v-if="store.workspace.capabilities.reminders" v-show="view==='reminders'" :key="`reminders:${store.auth?.uid}`" :transport="featureTransport" :school-id="store.workspace.school?.id||null" :school-name="store.workspace.school?.name||''" :revision="reminderRevision" :visible="view==='reminders'" @unread="unreadReminders=$event" @changed="applyReminderState" @open="openReminder" @back="navigate('feed')" />
       <WebsiteSourcesPanel v-if="view === 'sources'" :key="`${store.auth?.uid}:${store.workspace.school?.id}`" :transport="featureTransport" :school-id="store.workspace.school?.id || null" :school-name="store.workspace.school?.name || ''" @changed="selection=[];store.sourcesChanged()" @back="navigate('feed')" />
-      <ReadingPanel v-if="view === 'ai'" :transport="featureTransport" :school-id="store.workspace.school?.id || null" :selection="selection" @remove="selection = selection.filter(item => item.id !== $event)" @back="navigate('feed')" />
+      <AssistantPanel v-if="view === 'ai'" :key="`assistant:${store.auth?.uid}:${store.workspace.school?.id}`" :transport="featureTransport" :school-id="store.workspace.school?.id || null" :selection="selection" @remove="selection = selection.filter(item => item.id !== $event)" @back="navigate('feed')" />
     </main>
     <footer v-if="!store.workspace" class="page-footer">
       <span>校园阅览室</span><span>阅读有来源，重要信息不遗漏。</span>

@@ -17,6 +17,20 @@ import { filtersOf, filterSince, matchesFilters } from "./filters";
 import { checkedLabels, displayedCategories, originalCategories } from './notice-labels';
 
 const fields: Record<string, string[]> = {
+  'ai.profile.get': ['schoolId'],
+  'ai.profile.save': ['schoolId','interests','goals','learningEnabled','version'],
+  'ai.profile.clearBehavior': ['schoolId'],
+  'ai.behavior': ['schoolId','itemId'],
+  'ai.dismiss': ['schoolId','itemId','dismissed'],
+  'ai.recommend': ['schoolId','query','search'],
+  'ai.chat.create': ['schoolId','requestId'],
+  'ai.chat.get': ['conversationId'],
+  'ai.chat.send': ['conversationId','requestId','question','itemIds','service','provider','model'],
+  'ai.chat.step': ['conversationId','turnId','step','connection'],
+  'ai.chat.cancel': ['conversationId','turnId'],
+  'ai.chat.resolve': ['conversationId','turnId','charged'],
+  'ai.chat.clear': ['conversationId'],
+  'ai.chat.latest': ['schoolId'],
   'reminders.state':[],
   'reminders.add':['schoolId','itemIds'],
   'reminders.save':['id','schoolId','itemId','label','dueAt','days','channels'],
@@ -123,6 +137,7 @@ export function originalUrl(row: ItemRow): string | null {
   }
 }
 export function isRetained(row: ItemRow, since: string): boolean {
+  if (row.aiSearchExpiresAt && (!Number.isFinite(Date.parse(row.aiSearchExpiresAt)) || Date.parse(row.aiSearchExpiresAt) <= Date.now())) return false;
   const date = row.publishedAt || row.discoveredAt || row.createdAt;
   return Boolean(
     date &&

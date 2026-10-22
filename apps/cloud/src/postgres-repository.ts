@@ -54,6 +54,7 @@ export function postgresRepository(pool: SqlPool): Repository {
       // SQL predicates precede pagination. The gateway also rechecks every returned row.
       const visible = visibleItemsSql;
       const where = ["collection='items'", "body->>'status'='published'", visible, "coalesce(nullif(body->>'publishedAt',''),nullif(body->>'discoveredAt',''),body->>'createdAt') >= $5"];
+      where.push(`(body->>'aiSearchExpiresAt' IS NULL OR body->>'aiSearchExpiresAt'>${bind(new Date().toISOString())})`);
       if (filters.keyword) where.push(`strpos(lower(coalesce(body->>'title','') || E'\\n' || coalesce(body->>'contentText','') || E'\\n' || coalesce(body->'summary'->>'oneLine','')), lower(${bind(filters.keyword)}))>0`);
       const effectiveCategories = `coalesce(labels.categories,CASE WHEN jsonb_typeof(body->'categories')='array' THEN CASE WHEN jsonb_array_length(body->'categories')>0 THEN body->'categories' ELSE jsonb_build_array(body->>'category') END ELSE jsonb_build_array(body->>'category') END)`;
       if (filters.categories?.length) where.push(`jsonb_exists_any(${effectiveCategories},${bind(filters.categories)}::text[])`);

@@ -1,30 +1,36 @@
 import { createHash } from "node:crypto";
 import type { ReadingPackage, ReadingDocument } from "@campus/contracts";
-import type { Repository } from "./repository";
+import type { ItemRow, Repository } from "./repository";
 import { authorizedItem, identifier } from "./access";
 import { originalUrl } from "./gateway";
 import { READING_GUIDE, GUIDE_VERSION } from "./reading-guide";
 import { reject } from "./errors";
-import { isPrivate } from "./scope";
+import { isPrivate, sourceVisible } from "./scope";
 import { readDoc, type Database } from "./storage";
 export const digest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 export async function readingPackage(db: Database, repo: Repository, owner: string, schoolId: string, ids: unknown, forModel = true): Promise<ReadingPackage> {
   if (!Array.isArray(ids) || !ids.length || ids.length > 8) reject("VALIDATION_FAILED", "请明确选择 1～8 篇公告。");
   const unique = [...new Set(ids.map(identifier))];
   const rows = await Promise.all(unique.map(id=>authorizedItem(repo,owner,schoolId,id)));
+  const scope = forModel ? await repo.scope(schoolId, owner) : null;
+  async function checkPolicy(row: ItemRow) {
+    const sourceIds = [...new Set([row.sourceId, ...(row.sourceIds || [])].filter((id): id is string => Boolean(id)))];
+    if (row.aiProcessing === "import_only" || !sourceIds.length) reject("AI_POLICY_BLOCKED", "所选资料仅供导入或缺少来源策略，不能发送模型。");
+    const sources = await Promise.all(sourceIds.map(id => readDoc(db, "sources", id)));
+    if (sources.some((source, index) => !source || source.enabled === false || source.deleted === true || source.aiProcessing === "import_only" ||
+        ((source.scope === "school" || source.importKind === "website" || source.type === "ai_search") && !source.schoolIds?.includes(schoolId)) ||
+        ((source.scope || isPrivate(source)) ? !sourceVisible(source, schoolId, owner) : !scope!.publicSourceIds.includes(sourceIds[index]!))) ||
+        (isPrivate(row) && (row.aiProcessing !== "allow" || sources.some(source => source?.aiProcessing !== "allow"))))
+      reject("AI_POLICY_BLOCKED", "所选资料的来源已停用、不可访问或不允许 AI 处理；私人资料需明确允许。");
+  }
+  // Check authorization before body retrieval as well as on every task reload.
+  if (forModel) await Promise.all(rows.map(checkPolicy));
   const materials = await Promise.all(rows.map(row=>repo.material ? repo.material(row) : row));
   const docs: ReadingDocument[] = [];
   for (let index = 0; index < unique.length; index++) {
     const itemId = unique[index]!, row = materials[index]!;
     if (!row.contentText?.trim()) reject("NO_MATERIAL", "所选公告缺少正文，请取消选择。");
-    if (forModel) {
-      const sourceIds = [...new Set([row.sourceId, ...(row.sourceIds || [])].filter((id): id is string => Boolean(id)))];
-      if (row.aiProcessing === "import_only" || !sourceIds.length) reject("AI_POLICY_BLOCKED", "所选资料仅供导入或缺少来源策略，不能发送模型。");
-      const sources = await Promise.all(sourceIds.map(id => readDoc(db, "sources", id)));
-      if (sources.some(source => !source || source.aiProcessing === "import_only") ||
-          (isPrivate(row) && (row.aiProcessing !== "allow" || sources.some(source => source?.aiProcessing !== "allow"))))
-        reject("AI_POLICY_BLOCKED", "所选资料的来源不允许 AI 处理；私人资料需明确允许。");
-    }
+    if (forModel) await checkPolicy(row);
     const reference = `R${docs.length + 1}`, url = originalUrl(row);
     const metadata = { school_id: row.scope === "global" ? null : schoolId, item_id: itemId, title: row.title || "未命名公告", source_name: row.sourceName || "未提供", original_url: url, published_at: row.publishedAt || null, version: row.updatedAt || row.createdAt || null };
     const markdown = `---\n${Object.entries(metadata).map(([key, value]) => `${key}: ${JSON.stringify(value)}`).join("\n")}\nreference: ${reference}\n---\n\n# ${row.title || "未命名公告"}\n\n${row.contentText}\n\n## 附件状态\n本次未提供附件正文，不代表原公告没有附件。`;
