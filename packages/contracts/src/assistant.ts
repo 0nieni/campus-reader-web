@@ -2,7 +2,7 @@ import type { AiConnection, AiQuota, Notice, ReadingTask } from './index';
 
 export interface AiPreferences { schoolId: string; interests: string[]; goals: string; learningEnabled: boolean; version: number }
 export type AiMemorySlot = 'major' | 'year' | 'interests' | 'response_style' | 'goal' | 'progress';
-export interface AiMemoryItem { id: AiMemorySlot; slot: AiMemorySlot; text: string; createdAt: string; updatedAt: string; expiresAt: string | null }
+export interface AiMemoryItem { id: string; slot: AiMemorySlot; goalId?: string; text: string; createdAt: string; updatedAt: string; expiresAt: string | null }
 export interface AiMemoryState { schoolId: string; enabled: boolean; version: number; generation: number; items: AiMemoryItem[] }
 export interface RecommendedNotice extends Notice { originalUrl: string | null; reason: string; readState: 'body' | 'title_only' | 'snippet_only' | 'unavailable'; checkedAt: string | null; allowAi: boolean }
 export interface AiRecommendations { items: RecommendedNotice[]; search: { state: 'idle' | 'unconfigured' | 'complete' | 'failed'; message: string }; coverage: string }
@@ -12,7 +12,7 @@ export interface AiConversation { id: string; schoolId: string; createdAt: strin
 export interface AssistantActions {
   'ai.memory.get': { input: { schoolId: string }; output: AiMemoryState };
   'ai.memory.configure': { input: { schoolId: string; enabled: boolean; version: number }; output: AiMemoryState };
-  'ai.memory.forget': { input: { schoolId: string; id: AiMemorySlot; version: number }; output: AiMemoryState };
+  'ai.memory.forget': { input: { schoolId: string; id: string; version: number }; output: AiMemoryState };
   'ai.memory.clear': { input: { schoolId: string; version: number }; output: AiMemoryState };
   'ai.profile.get': { input: { schoolId: string }; output: AiPreferences };
   'ai.profile.save': { input: AiPreferences; output: AiPreferences };

@@ -39,5 +39,18 @@ test('real SQL memory writes use one connection and preserve explicit preference
     assert.equal(row.aiAssistant.bjtu.preferences.goals, '寻找讲座');
     assert.deepEqual((await memory.get(identity.dataOwnerId, 'bjtu')).items, []);
     assert.equal(await memory.apply(identity.dataOwnerId, 'bjtu', { requestId: 'sql-memory-late-0001', question: '我对编程感兴趣', proposals: [{ slot: 'interests', text: '我对编程感兴趣', evidence: '我对编程感兴趣' }], generation: 0, observedAt }), 0);
+    for (const [i, text] of ['我准备考研', '我准备申请实习'].entries()) {
+      assert.equal(await memory.apply(identity.dataOwnerId, 'bjtu', { requestId: `sql-goal-${i}`, question: text, proposals: [{ slot: 'goal', text, evidence: text }], generation: 1, observedAt }), 1);
+    }
+    assert.equal((await memory.get(identity.dataOwnerId, 'bjtu')).items.length, 2);
+    const command = { requestId: 'sql-delete-command', question: '我现在不准备考研了' };
+    const result = await memory.command(identity.dataOwnerId, 'bjtu', command);
+    assert.equal(result.changed, true);
+    assert.deepEqual(await memory.command(identity.dataOwnerId, 'bjtu', command), result);
+    const remaining = await memory.get(identity.dataOwnerId, 'bjtu');
+    assert.equal(remaining.generation, 2);
+    assert.deepEqual(remaining.items.map(item => item.text), ['我准备申请实习']);
+    const finalRow = (await db.collection('user_profiles').doc(identity.dataOwnerId).get()).data as any;
+    assert.equal(finalRow.aiAssistant.bjtu.preferences.goals, '寻找讲座');
   } finally { await pool.end(); await server.stop(); }
 });

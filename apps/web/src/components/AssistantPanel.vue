@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
-import type { AiChatTurn, AiConversation, AiConnection, AiMemorySlot, AiMemoryState, AiPreferences, AiRecommendations, GatewayActions, Notice, RecommendedNotice } from '@campus/contracts';
+import type { AiChatTurn, AiConversation, AiConnection, AiMemoryItem, AiMemorySlot, AiMemoryState, AiPreferences, AiRecommendations, GatewayActions, Notice, RecommendedNotice } from '@campus/contracts';
 import type { Transport } from '../lib/transport';
 import { ClientError, safeError } from '../lib/errors';
 import { downloadFile, renderMarkdown } from '../lib/markdown';
@@ -20,7 +20,18 @@ let active = true, epoch = 0, stopped = true, createRequestId = '', sendRequestI
 const selected = computed(() => [...new Map([...props.selection, ...localSources.value].map(item => [item.id, item])).values()]);
 const unresolved = computed(() => chat.value?.turns.some(turn => ['ready', 'running', 'uncertain'].includes(turn.state) || turn.quotaHeld));
 const canExport = computed(() => Boolean(chat.value?.turns.some(turn => turn.result) && !busy.value && !loading.value));
-const canSend = computed(() => Boolean(props.schoolId && !loading.value && !busy.value && !unresolved.value && question.value.trim() && question.value.length <= 1500 && selected.value.length <= 8 && (service.value === 'official' ? status.value?.officialConfigured && (status.value?.quota.remaining || 0) > 0 : model.value.trim() && apiKey.value)));
+const memoryCommand = computed(() => {
+  // This only opens the send control. The server decides whether to execute or clarify.
+  const text = question.value.trim().replace(/[。！!]+$/, '').replace(/^请/, '');
+  if (/[\n\r?？“”"'‘’「」『』，,；;]/.test(text) || /如果|假如|假设|假装|例如|举例|示例|朋友|同学|室友|别人|他人|公告|原文|不要|不许|别把|别忘|不能|不想|不希望|怎么|如何|有什么|是否|是不是|吗|呢|好不好|行不行|会怎样/.test(text)) return false;
+  return /^(?:忘掉|忘记|删除)我的(?:专业|年级|兴趣|回答偏好|目标|进展)$/.test(text)
+    || /^(?:忘掉|忘记|删除|清除)(?:我的)?目标\s*[\p{L}\p{N}][\p{L}\p{N} +#.-]{0,29}$/u.test(text)
+    || /^(?:清空|清除)(?:我的)?自动记忆$/.test(text)
+    || /^我现在不(?:再)?准备.{1,60}了$/.test(text)
+    || /^把目标.{0,60}改成.{1,60}$/.test(text)
+    || /^我的专业改成.{1,60}专业$/.test(text);
+});
+const canSend = computed(() => Boolean(props.schoolId && !loading.value && !busy.value && !unresolved.value && question.value.trim() && question.value.length <= 1500 && selected.value.length <= 8 && (memoryCommand.value || (service.value === 'official' ? status.value?.officialConfigured && (status.value?.quota.remaining || 0) > 0 : model.value.trim() && apiKey.value))));
 function current(ticket: number) { return active && ticket === epoch; }
 function safeLink(value: string | null) { try { const url = new URL(value || ''); return ['https:', 'http:'].includes(url.protocol) && !url.username && !url.password ? url.href : undefined; } catch { return undefined; } }
 function sourceTime(value: string | null) { return value && Number.isFinite(Date.parse(value)) ? new Date(value).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) : '未提供'; }
@@ -34,6 +45,11 @@ function expireMemory() {
   if (!memory.value) return;
   const items = memory.value.items.filter(item => !item.expiresAt || Date.parse(item.expiresAt) > Date.now());
   if (items.length !== memory.value.items.length) memory.value = { ...memory.value, items };
+}
+function progressGoal(item: AiMemoryItem) {
+  const goalId = item.goalId || (item.id === 'progress' ? 'goal' : undefined);
+  const goal = goalId && memory.value?.items.find(value => value.slot === 'goal' && value.id === goalId);
+  return goal ? `所属目标：${goal.text}` : '未关联目标';
 }
 function applyChat(value: AiConversation | null) {
   if (value && (value.schoolId !== props.schoolId || Date.parse(value.expireAt) <= Date.now())) { chat.value = null; note.value = '对话已满 24 小时，请开始新对话。'; return; }
@@ -86,12 +102,16 @@ async function mutation(work: (ticket: number) => Promise<void>) {
   try { await work(ticket); } catch (caught) { if (current(ticket)) error.value = safeError(caught); }
   finally { if (current(ticket)) busy.value = false; }
 }
-async function refreshMemory(ticket: number) {
+async function refreshMemory(ticket: number, refreshReasons = false) {
   if (!current(ticket) || !props.schoolId) return;
   try { const value = await props.transport.call('ai.memory.get', { schoolId: props.schoolId }); if (current(ticket)) applyMemory(value); }
   catch (caught) { if (current(ticket)) error.value = safeError(caught); }
+  if (refreshReasons && current(ticket)) {
+    try { await refreshRecommendations(ticket); }
+    catch (caught) { if (current(ticket)) error.value = safeError(caught); }
+  }
 }
-async function changeMemory(action: 'configure' | 'forget' | 'clear', id?: AiMemorySlot) {
+async function changeMemory(action: 'configure' | 'forget' | 'clear', id?: string) {
   if (!memory.value) return;
   const enabled = memoryEnabled.value;
   await mutation(async ticket => {
@@ -174,7 +194,7 @@ async function dismiss(item: RecommendedNotice, undo = false) {
 }
 async function recover(ticket: number, conversationId: string) {
   if (!current(ticket)) return;
-  try { const value = await props.transport.call('ai.chat.get', { conversationId }); if (current(ticket)) { applyChat(value); await refreshMemory(ticket); } }
+  try { const value = await props.transport.call('ai.chat.get', { conversationId }); if (current(ticket)) { applyChat(value); const last = value.turns.at(-1); await refreshMemory(ticket, last?.state === 'complete' && !last.taskId); } }
   catch (caught) { if (current(ticket)) error.value = safeError(caught); }
 }
 async function stepTurn(ticket: number, turnId: string) {
@@ -203,15 +223,17 @@ async function stepTurn(ticket: number, turnId: string) {
   }
   if (current(ticket)) {
     stopped = true;
-    if (!recovered && chat.value?.turns.find(turn => turn.id === turnId)?.state === 'complete') await refreshMemory(ticket);
+    const completed = chat.value?.turns.find(turn => turn.id === turnId);
+    if (!recovered && completed?.state === 'complete') await refreshMemory(ticket, !completed.taskId);
     await refreshQuota(ticket);
   }
 }
 async function send() {
   if (!canSend.value) return;
   await mutation(async ticket => {
-    const text = question.value.trim(), itemIds = selected.value.map(item => item.id);
-    const signature = JSON.stringify([props.schoolId, text, itemIds, service.value, provider.value, model.value.trim()]);
+    const text = question.value.trim(), itemIds = memoryCommand.value ? [] : selected.value.map(item => item.id);
+    const sendService = memoryCommand.value ? 'official' : service.value;
+    const signature = JSON.stringify([props.schoolId, text, itemIds, sendService, provider.value, model.value.trim()]);
     if (signature !== sendSignature) { sendRequestId = crypto.randomUUID(); sendSignature = signature; }
     if (!chat.value) {
       createRequestId ||= crypto.randomUUID();
@@ -222,7 +244,7 @@ async function send() {
     }
     const conversationId = chat.value.id;
     try {
-      const value = await props.transport.call('ai.chat.send', { conversationId, requestId: sendRequestId, question: text, ...(itemIds.length ? { itemIds } : {}), service: service.value, ...(service.value === 'byok' ? { provider: provider.value, model: model.value.trim() } : {}) });
+      const value = await props.transport.call('ai.chat.send', { conversationId, requestId: sendRequestId, question: text, ...(itemIds.length ? { itemIds } : {}), service: sendService, ...(sendService === 'byok' ? { provider: provider.value, model: model.value.trim() } : {}) });
       if (!current(ticket)) return;
       replaceTurn(value);
       releaseSearchSelection(value);
@@ -333,6 +355,7 @@ onUnmounted(() => { active = false; reset(); clearInterval(timer); });
           <ul v-else class="memory-list">
             <li v-for="item in memory.items" :key="item.id">
               <strong>{{ memoryNames[item.slot] }}</strong><p>{{ item.text }}</p>
+              <small v-if="item.slot === 'progress'">{{ progressGoal(item) }}</small>
               <small>{{ item.expiresAt ? `到期：${sourceTime(item.expiresAt)}（北京时间）` : '无固定到期，可随时删除' }}</small>
               <button :data-test="`forget-memory-${item.id}`" class="text-button" :disabled="busy || loading" :aria-label="`删除${memoryNames[item.slot]}记忆`" @click="changeMemory('forget', item.id)">删除</button>
             </li>

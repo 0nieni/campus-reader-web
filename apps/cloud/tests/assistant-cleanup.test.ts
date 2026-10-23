@@ -20,6 +20,14 @@ test('real SQL assistant retention removes sensitive bodies and prunes opt-in be
     await put('user_profiles', 'u', { selectedSchoolId: 'bjtu', webBookmarks: ['keep'], aiAssistant: { bjtu: { preferences: { learningEnabled: true, version: 2 }, dismissed: ['keep'], behaviorClearedAt: 5, behavior: [fresh, { ...fresh, itemId: 'old', at: now - 31 * 86400000 }] }, other: { preferences: { learningEnabled: false }, behavior: [fresh] } } });
     const observedAt = new Date(now - 31 * 86400000).toISOString();
     await put('user_profiles', 'memory-only', { unrelated: 'keep', aiMemory: { bjtu: { enabled: true, generation: 3, version: 4, items: [{ id: 'progress', slot: 'progress', text: 'private obsolete stage', createdAt: observedAt, updatedAt: observedAt, expiresAt: new Date(now - 1).toISOString() }], processedRequests: ['keep-request'] } } });
+    await put('user_profiles', 'linked-memory', { aiMemory: { bjtu: { enabled: true, version: 1, items: [
+      { id: 'goal_linked', slot: 'goal', text: 'obsolete goal', createdAt: observedAt, updatedAt: observedAt, expiresAt: new Date(now - 1).toISOString() },
+      { id: 'progress_linked', slot: 'progress', goalId: 'goal_linked', text: 'orphan stage', createdAt: observedAt, updatedAt: observedAt, expiresAt: new Date(now + 10000).toISOString() },
+    ], commandRequests: [
+      { requestId: 'keep-command', at: new Date(now - 47 * 3600000).toISOString(), fingerprint: 'keep', result: { handled: true, changed: true, message: 'done' } },
+      { requestId: 'expired-command', at: new Date(now - 48 * 3600000).toISOString(), fingerprint: 'expired', result: { handled: true, changed: true } },
+      { requestId: 'undated-command', fingerprint: 'unknown', result: { handled: true, changed: false } },
+    ] } } });
     await cleanupAssistantData(sql, now);
     const row = async (c: string, id: string) => (await db.collection(c).doc(id).get()).data as any;
     assert.equal((await row('web_ai_conversations', 'old-conv')).turns, undefined);
@@ -35,6 +43,12 @@ test('real SQL assistant retention removes sensitive bodies and prunes opt-in be
     assert.deepEqual(memory.aiMemory.bjtu.items, []);
     assert.equal(memory.aiMemory.bjtu.updatedAtBySlot.progress, observedAt);
     assert.equal(memory.aiMemory.bjtu.generation, 3);
+    const linked = (await row('user_profiles', 'linked-memory')).aiMemory.bjtu;
+    assert.deepEqual(linked.items, []);
+    assert.equal(linked.updatedAtByItem.goal_linked, observedAt);
+    assert.equal(linked.updatedAtByItem.progress_linked, observedAt);
+    assert.equal(linked.commandRequests[0].requestId, 'keep-command');
+    assert.equal(linked.commandRequests.length, 1);
     await cleanupAssistantData(sql, now); assert.deepEqual((await row('user_profiles', 'u')).aiAssistant.bjtu.behavior, [fresh]);
   } finally { await pool.end(); await server.stop(); }
 });

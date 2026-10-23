@@ -6,13 +6,14 @@ import { atomic, readDoc, seed, transactionRow, type Database } from './storage'
 import { digest, readingPackage } from './reading-package';
 import { AppError, reject } from './errors';
 import type { aiService } from './ai-service';
-import { buildChatContext, type ContextExchange, type MemorySnapshot } from './chat-context';
+import { buildChatContext, type ContextExchange, type MemorySnapshot, type MemoryDependency } from './chat-context';
 import { chatSearchQuery } from './chat-intent';
-import { memoryService } from './assistant-memory';
+import { memoryService, selectMemoryItems } from './assistant-memory';
+import { buildConversationSummary } from './conversation-summary';
 
 const COLLECTION = 'web_ai_conversations';
 const unreadableMaterial = new Set(['NO_MATERIAL', 'SOURCE_UNAVAILABLE', 'SOURCE_LOGIN_REQUIRED', 'SOURCE_RESTRICTED', 'SOURCE_NOT_FOUND', 'SOURCE_ROBOTS_BLOCKED', 'SOURCE_BUSY', 'SOURCE_DAILY_LIMIT']);
-type SavedTurn = { id: string; question: string; fingerprint: string; taskId: string | null; materialIds: string[]; references: AiChatTurn['references']; reply?: string; error?: string; history: string; evidence?: import('./chat-context').HistoryEvidence[]; memory?: MemorySnapshot; search?: AiRecommendations['search']; preparing?: boolean; preparationStartedAt?: number; cancelled?: boolean; service: 'official' | 'byok'; provider?: string; model?: string };
+type SavedTurn = { id: string; question: string; fingerprint: string; taskId: string | null; materialIds: string[]; references: AiChatTurn['references']; reply?: string; error?: string; history: string; summary?: string; evidence?: import('./chat-context').HistoryEvidence[]; memory?: MemorySnapshot; memoryDependencies?: MemoryDependency[]; search?: AiRecommendations['search']; preparing?: boolean; preparationStartedAt?: number; cancelled?: boolean; service: 'official' | 'byok'; provider?: string; model?: string };
 type Conversation = { _id: string; owner: string; schoolId: string; createdAt: string; expireAt: string; turns: SavedTurn[]; pendingTurn: string | null; purged?: boolean };
 type Ai = ReturnType<typeof aiService>;
 export function assistantChat(db: Database, repo: Repository, ai: Ai, recommend: (owner: string, schoolId: string, query?: string) => Promise<AiRecommendations>, now = Date.now, discover?: (schoolId: string, query: string, identity: IdentityContext) => Promise<AiRecommendations>) {
@@ -142,6 +143,21 @@ export function assistantChat(db: Database, repo: Repository, ai: Ai, recommend:
           });
           if (!acquired) return publicTurn(row, turn!);
           try {
+            // Explicit memory management never depends on materials, model setup or quota.
+            const command = await memory.command(owner, row.schoolId, { requestId: digest(['chat-memory-command', row._id, id]), question });
+            if (command.handled) {
+              const saved: SavedTurn = { ...pending, preparing: false, reply: command.message || '请说明要修改或删除哪条自动记忆。' };
+              await load(row._id, owner);
+              await atomic(db, async tx => {
+                const ref = tx.collection(COLLECTION).doc(row._id), current = transactionRow((await ref.get()).data) as Conversation;
+                if (current.purged || Date.parse(current.expireAt) <= now()) reject('RESULT_EXPIRED', '对话已到期或清除。');
+                const existing = current.turns.find(value => value.id === id);
+                if (!existing?.preparing || current.pendingTurn !== id) { turn = existing || { ...pending, preparing: false, cancelled: true }; return; }
+                await ref.update({ turns: current.turns.map(value => value.id === id ? saved : value), pendingTurn: null });
+                turn = saved;
+              });
+              return publicTurn(row, turn!);
+            }
             const searchQuery = discover ? chatSearchQuery(question) : null;
             const discovery = searchQuery ? await discover!(row.schoolId, searchQuery, identity) : null;
             let ids = discovery ? discovery.items.filter(item => item.allowAi).map(item => item.id).slice(0, 5) : explicitIds;
@@ -174,20 +190,28 @@ export function assistantChat(db: Database, repo: Repository, ai: Ai, recommend:
             const profile = await readDoc(db, 'user_profiles', owner);
             const prefs = profile?.aiAssistant?.[row.schoolId]?.preferences;
             const memoryState = await memory.get(owner, row.schoolId);
-            const memorySnapshot: MemorySnapshot = { enabled: memoryState.enabled, generation: memoryState.generation, items: memoryState.enabled ? memoryState.items.map(({ id, slot, text }) => ({ id, slot, text })) : [] };
+            const memorySnapshot: MemorySnapshot = { enabled: memoryState.enabled, generation: memoryState.generation, items: memoryState.enabled ? selectMemoryItems(memoryState.items, question).map(({ id, slot, text, goalId }) => ({ id, slot, text, ...(goalId ? { goalId } : {}) })) : [] };
             const exchanges: ContextExchange[] = [];
-            for (const prior of row.turns.slice(-3)) {
+            const older: ContextExchange[] = [];
+            for (const [index, prior] of row.turns.entries()) {
+              if (!prior.taskId) continue;
               if ((prior.memory?.generation ?? 0) !== memoryState.generation) continue;
               if (prior.memory?.items.some(saved => !memoryState.items.some(item => item.id === saved.id && item.text === saved.text))) continue;
-              const visible = await publicTurn(row, prior);
+              let visible: AiChatTurn;
+              try { visible = await publicTurn(row, prior); }
+              catch (error) { if (error instanceof AppError && unreadableMaterial.has(error.code)) continue; throw error; }
               if (visible.state !== 'complete' || !visible.result) continue;
               const task = prior.taskId ? await readDoc(db, 'web_ai_tasks', prior.taskId) : null;
+              const memoryDependencies: MemoryDependency[] = [...(task?.chat?.memory?.items || prior.memory?.items || []).map(({ id, text }: MemoryDependency) => ({ id, text })), ...(task?.chat?.memoryDependencies || prior.memoryDependencies || [])];
+              if (memoryDependencies.some(saved => !memoryState.items.some(item => item.id === saved.id && item.text === saved.text))) continue;
               const evidence = task ? [...(task.docs || []).map((doc: { itemId: string; version: string }) => ({ itemId: doc.itemId, version: doc.version })), ...(task.chat?.evidence || [])] : [];
-              exchanges.push({ question: prior.question, answer: visible.result, evidence });
+              const exchange = { question: prior.question, answer: visible.result, evidence, memoryDependencies };
+              if (index < row.turns.length - 3) older.push(exchange); else exchanges.push(exchange);
             }
-            const { history, evidence } = buildChatContext(row.schoolId, prefs, exchanges, pack?.docs.map(doc => doc.title) || [], discovery?.search);
+            const summaryInput = buildConversationSummary(older);
+            const { history, evidence, summary, memoryDependencies } = buildChatContext(row.schoolId, prefs, exchanges, pack?.docs.map(doc => doc.title) || [], discovery?.search, summaryInput);
             const taskId = pack ? digest([owner, digest(['chat-turn', row._id, id])]) : null;
-            turn = { id, question, fingerprint, taskId, materialIds: pack?.docs.map(d => d.itemId) || [], references: pack?.docs.map(d => ({ reference: d.reference, itemId: d.itemId, title: d.title, originalUrl: d.originalUrl })) || [], history, evidence, memory: memorySnapshot, ...(discovery ? { search: discovery.search } : {}), service: input.service === 'byok' ? 'byok' : 'official', ...(input.provider ? { provider: String(input.provider) } : {}), ...(input.model ? { model: String(input.model) } : {}), ...(!pack ? { reply: missingExplicit ? '所选公告有正文暂时不可读取，请查看原文或调整选择后再提问。此提示未调用模型，不扣官方次数。' : '当前没有可供 AI 阅读的公告正文。请先选择本校公告，或使用联网搜索查找公开公告，再继续提问。此提示未调用模型，不扣官方次数。' } : {}) };
+            turn = { id, question, fingerprint, taskId, materialIds: pack?.docs.map(d => d.itemId) || [], references: pack?.docs.map(d => ({ reference: d.reference, itemId: d.itemId, title: d.title, originalUrl: d.originalUrl })) || [], history, summary, evidence, memory: memorySnapshot, memoryDependencies, ...(discovery ? { search: discovery.search } : {}), service: input.service === 'byok' ? 'byok' : 'official', ...(input.provider ? { provider: String(input.provider) } : {}), ...(input.model ? { model: String(input.model) } : {}), ...(!pack ? { reply: missingExplicit ? '所选公告有正文暂时不可读取，请查看原文或调整选择后再提问。此提示未调用模型，不扣官方次数。' : '当前没有可供 AI 阅读的公告正文。请先选择本校公告，或使用联网搜索查找公开公告，再继续提问。此提示未调用模型，不扣官方次数。' } : {}) };
             const saved = turn;
             await authorizeSchool(repo, owner, row.schoolId);
             await atomic(db, async tx => {
@@ -208,7 +232,7 @@ export function assistantChat(db: Database, repo: Repository, ai: Ai, recommend:
         if (!turn!.taskId) return publicTurn(row, turn!);
         let task: ReadingTask;
         try {
-          task = await ai.handle('ai.start', { schoolId: row.schoolId, itemIds: turn!.materialIds, requestId: digest(['chat-turn', row._id, id]), service: turn!.service, provider: turn!.provider, model: turn!.model, task: 'answer', question: turn!.question, chat: { history: turn!.history, evidence: turn!.evidence, memory: turn!.memory, expireAt: row.expireAt } }, identity) as ReadingTask;
+          task = await ai.handle('ai.start', { schoolId: row.schoolId, itemIds: turn!.materialIds, requestId: digest(['chat-turn', row._id, id]), service: turn!.service, provider: turn!.provider, model: turn!.model, task: 'answer', question: turn!.question, chat: { history: turn!.history, summary: turn!.summary, evidence: turn!.evidence, memory: turn!.memory, memoryDependencies: turn!.memoryDependencies, expireAt: row.expireAt } }, identity) as ReadingTask;
         } catch (error) {
           // Preserve idempotency and a safe explanation; do not leave the conversation locked.
           const message = error instanceof AppError ? error.message : '本轮准备未完成，请查询对话状态。';

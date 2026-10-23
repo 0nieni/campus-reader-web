@@ -1,5 +1,6 @@
 import { postgresStorage, type SqlPool } from './postgres-storage';
 import { atomic, transactionRow } from './storage';
+import { memoryCommandReceiptLifetimeMs } from './memory-command';
 
 /** Reuses the daily cleanup wake; bounds profile work and rotates by last sweep. */
 export async function cleanupAssistantData(pool: SqlPool, now = Date.now()) {
@@ -29,9 +30,22 @@ export async function cleanupAssistantData(pool: SqlPool, now = Date.now()) {
       if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
       const state = value as Record<string, any>, items = Array.isArray(state.items) ? state.items : [];
       const watermarks = { ...(state.updatedAtBySlot || {}) };
+      const itemWatermarks = { ...(state.updatedAtByItem || {}) };
       for (const item of items) if (item && slots.includes(item.slot) && Number.isFinite(Date.parse(item.updatedAt)) && (!watermarks[item.slot] || Date.parse(item.updatedAt) > Date.parse(watermarks[item.slot]))) watermarks[item.slot] = item.updatedAt;
-      const kept = items.filter((item: any) => item && (item.expiresAt === null || Number.isFinite(Date.parse(item.expiresAt)) && Date.parse(item.expiresAt) > now));
-      memories[schoolId] = { ...state, items: kept, updatedAtBySlot: watermarks, version: Number(state.version || 0) + (kept.length < items.length ? 1 : 0) };
+      for (const item of items) if (item && typeof item.id === 'string' && /^[A-Za-z0-9_-]{1,200}$/.test(item.id) && !['__proto__', 'constructor', 'prototype'].includes(item.id)
+        && Number.isFinite(Date.parse(item.updatedAt)) && (!itemWatermarks[item.id] || Date.parse(item.updatedAt) > Date.parse(itemWatermarks[item.id]))) itemWatermarks[item.id] = item.updatedAt;
+      const goals = items.filter((item: any) => item?.slot === 'goal');
+      const normalized = items.map((item: any) => {
+        if (item?.slot !== 'progress') return item;
+        const goal = item.goalId ? goals.find((goal: any) => goal.id === item.goalId) : goals.length === 1 ? goals[0] : undefined;
+        return goal ? { ...item, goalId: goal.id, expiresAt: goal.expiresAt && (!item.expiresAt || Date.parse(item.expiresAt) > Date.parse(goal.expiresAt)) ? goal.expiresAt : item.expiresAt } : item;
+      });
+      const active = normalized.filter((item: any) => item && (item.expiresAt === null || Number.isFinite(Date.parse(item.expiresAt)) && Date.parse(item.expiresAt) > now));
+      const activeGoalIds = new Set(active.filter((item: any) => item.slot === 'goal').map((item: any) => item.id));
+      const kept = active.filter((item: any) => item.slot !== 'progress' || !item.goalId || activeGoalIds.has(item.goalId));
+      const commandRequests = Array.isArray(state.commandRequests) ? state.commandRequests.filter((receipt: any) => receipt && typeof receipt.at === 'string'
+        && Date.parse(receipt.at) > now - memoryCommandReceiptLifetimeMs && Date.parse(receipt.at) <= now) : [];
+      memories[schoolId] = { ...state, items: kept, updatedAtBySlot: watermarks, updatedAtByItem: itemWatermarks, commandRequests, version: Number(state.version || 0) + (kept.length < items.length ? 1 : 0) };
     }
     await ref.update({ ...(row.aiAssistant ? { aiAssistant: profiles } : {}), ...(row.aiMemory ? { aiMemory: memories } : {}), aiAssistantCleanupAt: at });
   });

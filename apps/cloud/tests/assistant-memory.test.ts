@@ -224,14 +224,15 @@ test('memory transactions never obtain another repository connection while holdi
 });
 
 test('locked profile scope rejects a school switch between authorization and mutation', async () => {
-  for (const operation of ['apply', 'configure']) {
+  for (const operation of ['apply', 'configure', 'command']) {
     const f = setup(), start = f.db.startTransaction.bind(f.db);
     f.db.startTransaction = async () => {
       f.rows('user_profiles').get(identity.dataOwnerId)!.selectedSchoolId = 'other';
       return start();
     };
     if (operation === 'apply') await assert.rejects(f.apply(), { code: 'STALE_SCOPE' });
-    else await assert.rejects(f.handle('ai.memory.configure', { enabled: false, version: 0 }), { code: 'STALE_SCOPE' });
+    else if (operation === 'configure') await assert.rejects(f.handle('ai.memory.configure', { enabled: false, version: 0 }), { code: 'STALE_SCOPE' });
+    else await assert.rejects(f.service.command(identity.dataOwnerId, 'bjtu', { requestId: 'scope-command', question: '清空自动记忆' }), { code: 'STALE_SCOPE' });
     assert.equal(f.rows('user_profiles').get(identity.dataOwnerId)!.aiMemory, undefined);
   }
 });
@@ -245,4 +246,222 @@ test('recent request ledger remains bounded and never retains raw question or ev
   assert.equal(stored.processedRequests.includes('repeat-44'), true);
   assert.equal((await f.state()).version, 1);
   assert.equal(stored.question, undefined);
+});
+
+const goalProposal = (text: string, goalId?: string): MemoryProposal => ({ slot: 'goal', text, evidence: text, ...(goalId ? { goalId } : {}) });
+
+test('three independent stable goals coexist, a fourth cannot evict one, and targeted corrections retain identity', async () => {
+  const f = setup();
+  for (const [i, text] of ['我准备考研', '我准备申请实习', '我计划参加蓝桥杯'].entries()) {
+    assert.equal(await f.apply(`independent-${i}`, [goalProposal(text)]), 1);
+  }
+  const initial = (await f.state()).items;
+  assert.equal(initial.length, 3);
+  assert.equal(new Set(initial.map(item => item.id)).size, 3);
+  assert.equal(await f.apply('fourth', [goalProposal('我计划学习英语')]), 0);
+  f.advance(day);
+  assert.equal(await f.apply('correct-goal', [goalProposal('我准备申请暑期实习', initial[1].id)], { observedAt: at + day }), 1);
+  const updated = (await f.state()).items;
+  assert.equal(updated.length, 3);
+  assert.equal(updated.find(item => item.id === initial[1].id)?.text, '我准备申请暑期实习');
+  assert.equal(updated.find(item => item.id === initial[0].id)?.text, '我准备考研');
+  assert.equal(await f.apply('missing-target', [goalProposal('我准备学习英语', 'missing')], { observedAt: at + day }), 0);
+});
+
+test('progress requires an explicit goal with multiple goals and forget cascades only its own progress', async () => {
+  const f = setup();
+  await f.apply('g1', [goalProposal('我准备考研')]); await f.apply('g2', [goalProposal('我准备申请实习')]);
+  const [g1, g2] = (await f.state()).items;
+  const progress = { slot: 'progress', text: '我已完成报名材料', evidence: '我已完成报名材料' } as MemoryProposal;
+  assert.equal(await f.apply('ambiguous-progress', [progress]), 0);
+  assert.equal(await f.apply('linked-progress', [{ ...progress, goalId: g1.id }]), 1);
+  assert.equal((await f.state()).items.find(item => item.slot === 'progress')?.goalId, g1.id);
+  const state = await f.state();
+  const result = await f.handle('ai.memory.forget', { id: g1.id, version: state.version });
+  assert.deepEqual(result.items.map(item => item.id), [g2.id]);
+  assert.equal(await f.apply('late', [{ ...progress, goalId: g1.id }]), 0);
+});
+
+test('legacy goal/progress remain readable, linked progress never outlives its goal', async () => {
+  const f = setup(), stamp = new Date(at).toISOString();
+  f.rows('user_profiles').get(identity.dataOwnerId)!.aiMemory = { bjtu: { version: 1, generation: 0, items: [
+    { id: 'goal', slot: 'goal', text: '我准备考研', createdAt: stamp, updatedAt: stamp, expiresAt: new Date(at + 2 * day).toISOString() },
+    { id: 'progress', slot: 'progress', text: '我已完成报名', createdAt: stamp, updatedAt: stamp, expiresAt: new Date(at + 30 * day).toISOString() },
+  ] } };
+  assert.deepEqual((await f.state()).items.map(item => item.id), ['goal', 'progress']);
+  f.advance(day);
+  const text = '我已提交报名材料';
+  assert.equal(await f.apply('new-progress', [{ slot: 'progress', text, evidence: text, goalId: 'goal' }], { observedAt: at + day }), 1);
+  assert.equal((await f.state()).items.find(item => item.slot === 'progress')?.expiresAt, new Date(at + 2 * day).toISOString());
+  f.advance(day);
+  assert.deepEqual((await f.state()).items, []);
+});
+
+test('memory commands are atomic, replay exact outcomes, preserve manual preferences and invalidate late learning', async () => {
+  const f = setup(); await f.apply();
+  const profile = f.rows('user_profiles').get(identity.dataOwnerId)!;
+  profile.aiAssistant = { bjtu: { preferences: { goals: '保留手填目标', version: 1 } } };
+  const result = await f.service.command(identity.dataOwnerId, 'bjtu', { requestId: 'forget-command', question: '忘掉我的专业' });
+  assert.equal(result.handled, true); assert.equal(result.changed, true);
+  assert.equal((await f.state()).generation, 1); assert.deepEqual((await f.state()).items, []);
+  assert.equal(await f.apply('late-command'), 0);
+  assert.equal(await f.apply('new-learning', [major], { generation: 1 }), 1);
+  assert.deepEqual(await f.service.command(identity.dataOwnerId, 'bjtu', { requestId: 'forget-command', question: '忘掉我的专业' }), result);
+  assert.equal((await f.state()).generation, 1);
+  assert.equal((await f.state()).items.length, 1);
+  assert.equal(f.rows('user_profiles').get(identity.dataOwnerId)!.aiAssistant.bjtu.preferences.goals, '保留手填目标');
+  await assert.rejects(f.service.command(identity.dataOwnerId, 'bjtu', { requestId: 'forget-command', question: '清空自动记忆' }), { code: 'REQUEST_CONFLICT' });
+});
+
+test('clear major corrections and abandoned goals work while disabled correction cannot relearn', async () => {
+  const f = setup(); await f.apply(); await f.apply('goal-for-command', [goalProposal('我准备考研')]);
+  const corrected = await f.service.command(identity.dataOwnerId, 'bjtu', { requestId: 'correct-command', question: '我现在是数学专业' });
+  assert.equal(corrected.changed, true); assert.equal((await f.state()).items.find(item => item.slot === 'major')?.text, '我现在是数学专业');
+  assert.equal((await f.service.command(identity.dataOwnerId, 'bjtu', { requestId: 'abandon-command', question: '我现在不准备考研了' })).changed, true);
+  assert.equal((await f.state()).items.some(item => item.slot === 'goal'), false);
+  const state = await f.state(); await f.handle('ai.memory.configure', { enabled: false, version: state.version });
+  const disabled = await f.service.command(identity.dataOwnerId, 'bjtu', { requestId: 'disabled-correct', question: '我的专业改成物理' });
+  assert.equal(disabled.handled, true);
+  assert.equal((await f.state()).items.some(item => item.slot === 'major'), false);
+  assert.equal((await f.state()).enabled, false);
+  assert.equal((await f.service.command(identity.dataOwnerId, 'bjtu', { requestId: 'disabled-clear', question: '清空自动记忆' })).handled, true);
+});
+
+test('hypothetical, quoted, negated and third-party commands never mutate; ambiguous and sensitive corrections clarify', async () => {
+  for (const question of ['如果我说忘掉我的专业会怎样', '不要忘掉我的专业', '朋友说忘掉我的专业', '“忘掉我的专业”', '不要把目标考研改成实习', '假如我现在是数学专业']) {
+    const f = setup(); await f.apply();
+    const result = await f.service.command(identity.dataOwnerId, 'bjtu', { requestId: 'non-command', question });
+    assert.equal(result.handled, false, question); assert.equal((await f.state()).generation, 0); assert.equal((await f.state()).items.length, 1);
+  }
+  for (const question of ['忘掉那个目标', '把目标考研改成我的密码secret123', '我的专业改成邮箱test@example.com']) {
+    const f = setup(); await f.apply();
+    const result = await f.service.command(identity.dataOwnerId, 'bjtu', { requestId: 'clarify-command', question });
+    assert.equal(result.handled, true, question); assert.equal(result.changed, false); assert.ok(result.message); assert.equal((await f.state()).generation, 0);
+  }
+});
+
+test('goal replacement is unique and cascades stale progress; concurrent command replays mutate once', async () => {
+  const f = setup(); await f.apply('g1', [goalProposal('我准备考研')]);
+  const goal = (await f.state()).items[0];
+  const text = '我已完成报名'; await f.apply('p1', [{ slot: 'progress', text, evidence: text, goalId: goal.id }]);
+  const input = { requestId: 'replace-command', question: '把目标考研改成准备实习' };
+  const [first, replay] = await Promise.all([f.service.command(identity.dataOwnerId, 'bjtu', input), f.service.command(identity.dataOwnerId, 'bjtu', input)]);
+  assert.deepEqual(first, replay); assert.equal(first.changed, true);
+  const state = await f.state(); assert.equal(state.generation, 1); assert.equal(state.items.length, 1); assert.equal(state.items[0].id, goal.id); assert.match(state.items[0].text, /准备实习/);
+  await assert.rejects(f.service.command(identity.dataOwnerId, 'other', input), { code: 'STALE_SCOPE' });
+});
+
+test('legacy progress is capped even before rewriting, and delayed progress cannot attach to a corrected goal', async () => {
+  const f = setup(), stamp = new Date(at).toISOString();
+  f.rows('user_profiles').get(identity.dataOwnerId)!.aiMemory = { bjtu: { items: [
+    { id: 'goal', slot: 'goal', text: '我准备考研', createdAt: stamp, updatedAt: stamp, expiresAt: new Date(at + day).toISOString() },
+    { id: 'progress', slot: 'progress', text: '我已完成报名', createdAt: stamp, updatedAt: stamp, expiresAt: new Date(at + 30 * day).toISOString() },
+  ] } };
+  f.advance(day); assert.deepEqual((await f.state()).items, []);
+  const g = setup(); await g.apply('goal', [goalProposal('我准备考研')]);
+  const goalId = (await g.state()).items[0].id;
+  g.advance(2 * day);
+  await g.apply('updated-goal', [goalProposal('我准备申请实习', goalId)], { observedAt: at + 2 * day });
+  const text = '我已完成报名';
+  assert.equal(await g.apply('late-stage', [{ slot: 'progress', text, evidence: text, goalId }], { observedAt: at + day }), 0);
+});
+
+test('questions and mixed instructions do not masquerade as explicit correction or abandonment', async () => {
+  for (const question of ['我现在不准备考研了吗', '我的专业现在是数学吗', '我的专业是计算机专业吗', '我现在是数学专业，帮我看看公告', '我的专业是计算机专业还是数学专业', '我现在是数学专业的话能选什么课', '我的专业是数学专业有什么比赛']) {
+    const f = setup(); await f.apply(); await f.apply('goal', [goalProposal('我准备考研')]);
+    const before = await f.state();
+    assert.equal((await f.service.command(identity.dataOwnerId, 'bjtu', { requestId: 'not-directive', question })).handled, false, question);
+    assert.deepEqual(await f.state(), before);
+  }
+});
+
+test('shared generic goal words never authorize deleting a different named goal', async () => {
+  const f = setup(); await f.apply('coding', [goalProposal('我想参加编程竞赛')]);
+  const before = await f.state();
+  const result = await f.service.command(identity.dataOwnerId, 'bjtu', { requestId: 'different-goal', question: '忘掉目标数学竞赛' });
+  assert.equal(result.changed, true, 'an explicit forget still fences older pending observations');
+  const after = await f.state();
+  assert.deepEqual(after.items, before.items);
+  assert.equal(after.generation, before.generation + 1);
+  assert.match(result.message!, /没有找到/);
+});
+
+test('explicit but incomplete slot operations clarify without deletion, including after an ambiguous replay', async () => {
+  const f = setup(); await f.apply();
+  const question = '忘掉我的专业和兴趣';
+  const first = await f.service.command(identity.dataOwnerId, 'bjtu', { requestId: 'incomplete-slots', question });
+  assert.equal(first.handled, true); assert.equal(first.changed, false); assert.ok(first.message);
+  assert.equal((await f.state()).generation, 0); assert.equal((await f.state()).items.length, 1);
+  assert.deepEqual(await f.service.command(identity.dataOwnerId, 'bjtu', { requestId: 'incomplete-slots', question }), first);
+});
+
+test('two goals in one successful round are independent and their progress never crosses goals', async () => {
+  const f = setup();
+  assert.equal(await f.apply('two-goals', [goalProposal('我准备考研'), goalProposal('我准备申请实习')]), 2);
+  const [first, second] = (await f.state()).items;
+  const text = '我已完成报名材料';
+  assert.equal(await f.apply('two-stages', [{ slot: 'progress', text, evidence: text, goalId: first.id }, { slot: 'progress', text, evidence: text, goalId: second.id }]), 2);
+  const state = await f.state();
+  assert.equal(state.items.length, 4);
+  const result = await f.handle('ai.memory.forget', { id: first.id, version: state.version });
+  assert.deepEqual(result.items.map(item => item.goalId || item.id), [second.id, second.id]);
+});
+
+test('command receipts keep complete replay results beyond forty commands within 48h and expire by time', async () => {
+  const f = setup(); await f.apply();
+  const input = { requestId: 'retained-command', question: '忘掉我的专业' };
+  const result = await f.service.command(identity.dataOwnerId, 'bjtu', input);
+  await f.apply('after-command', [major], { generation: 1 });
+  for (let i = 0; i < 45; i++) await f.service.command(identity.dataOwnerId, 'bjtu', { requestId: `clarify-${i}`, question: '忘掉那个目标' });
+  f.advance(47 * 3600000);
+  assert.deepEqual(await f.service.command(identity.dataOwnerId, 'bjtu', input), result);
+  assert.equal((await f.state()).items.length, 1);
+  assert.equal((await f.state()).generation, 1);
+  let receipts = f.rows('user_profiles').get(identity.dataOwnerId)!.aiMemory.bjtu.commandRequests;
+  assert.equal(receipts.length, 46);
+  assert.equal(receipts[0].at, new Date(at).toISOString());
+  assert.equal(receipts[0].question, undefined);
+  f.advance(3600000);
+  await f.service.command(identity.dataOwnerId, 'bjtu', { requestId: 'fresh-command', question: '忘掉我的年级' });
+  receipts = f.rows('user_profiles').get(identity.dataOwnerId)!.aiMemory.bjtu.commandRequests;
+  assert.deepEqual(receipts.map((entry: any) => entry.requestId), ['fresh-command']);
+  assert.equal(receipts[0].at, new Date(at + 48 * 3600000).toISOString());
+});
+
+test('forgetting an absent slot or named goal fences in-flight learning without claiming to delete a stored item', async () => {
+  for (const [question, proposal] of [
+    ['忘掉我的专业', major],
+    ['我现在不准备考研了', goalProposal('我准备考研')],
+  ] as const) {
+    const f = setup(), input = { requestId: 'absent-forget', question };
+    const first = await f.service.command(identity.dataOwnerId, 'bjtu', input);
+    assert.equal(first.handled, true); assert.equal(first.changed, true);
+    assert.match(first.message!, /没有/);
+    assert.equal((await f.state()).generation, 1);
+    assert.equal(await f.apply('old-observation', [proposal]), 0);
+    assert.deepEqual(await f.service.command(identity.dataOwnerId, 'bjtu', input), first);
+    assert.equal((await f.state()).generation, 1);
+    assert.deepEqual((await f.state()).items, []);
+  }
+});
+
+test('ambiguous alternatives and conditional questions never replace goals or majors or clear their progress', async () => {
+  for (const question of [
+    '把目标考研改成准备实习还是准备保研',
+    '把目标考研改成准备实习或准备保研',
+    '把目标考研改成实习的话能做什么',
+    '我的专业是计算机或数学',
+    '我的专业改成计算机或数学',
+    '我的专业改成数学的话能选什么课',
+  ]) {
+    const f = setup(); await f.apply(); await f.apply('g1', [goalProposal('我准备考研')]);
+    const goalId = (await f.state()).items.find(item => item.slot === 'goal')!.id;
+    const text = '我已完成报名材料';
+    await f.apply('p1', [{ slot: 'progress', text, evidence: text, goalId }]);
+    const before = await f.state();
+    const result = await f.service.command(identity.dataOwnerId, 'bjtu', { requestId: 'ambiguous-correction', question });
+    assert.notEqual(result.changed, true, question);
+    assert.deepEqual(await f.state(), before, question);
+    if (result.handled) assert.ok(result.message, 'ambiguous command must explain how to clarify');
+  }
 });

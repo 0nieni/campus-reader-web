@@ -413,3 +413,165 @@ it('a revoked-source failed turn with held quota can cancel and then resolve the
   await w.get('#assistant-question').setValue('换一个问题'); expect(w.get('[data-test="send"]').attributes('disabled')).toBeUndefined();
   expect(vi.mocked(fake.call).mock.calls.some(([action]) => ['ai.chat.send', 'ai.chat.step'].includes(action))).toBe(false);
 });
+
+it('shows independent goals and identifies the goal belonging to each progress item', async () => {
+  const items: AiMemoryItem[] = [
+    { ...memoryItem, id: 'goal-exam', text: '准备考研' },
+    { ...memoryItem, id: 'goal-work', text: '准备实习' },
+    { ...memoryItem, id: 'progress-exam', slot: 'progress', text: '已复习数学第一章', goalId: 'goal-exam' },
+    { ...memoryItem, id: 'progress-work', slot: 'progress', text: '已完成简历', goalId: 'goal-work' },
+    { ...memoryItem, id: 'progress-unlinked', slot: 'progress', text: '旧版未关联进展' },
+  ];
+  const fake = fakeTransport(a => a === 'ai.memory.get' ? memory(items) : undefined);
+  const w = open(fake); await flushPromises();
+  const rows = w.findAll('.memory-list li');
+  expect(rows).toHaveLength(5);
+  expect(rows.find(row => row.text().includes('已复习数学第一章'))!.text()).toContain('所属目标：准备考研');
+  expect(rows.find(row => row.text().includes('已完成简历'))!.text()).toContain('所属目标：准备实习');
+  expect(rows.find(row => row.text().includes('旧版未关联进展'))!.text()).toContain('未关联目标');
+  expect(rows.find(row => row.text().includes('准备考研'))!.text()).toContain('到期：');
+});
+it('deletes a goal using its actual stable string id without deleting a different goal', async () => {
+  const exam = { ...memoryItem, id: 'goal-exam', text: '准备考研' }, work = { ...memoryItem, id: 'goal-work', text: '准备实习' };
+  const fake = fakeTransport(a => a === 'ai.memory.get' ? memory([exam, work]) : a === 'ai.memory.forget' ? { ...memory([work]), version: 3 } : undefined);
+  const w = open(fake); await flushPromises();
+  await w.get('[data-test="forget-memory-goal-exam"]').trigger('click'); await flushPromises();
+  expect(fake.call).toHaveBeenCalledWith('ai.memory.forget', { schoolId: 'bjtu', id: 'goal-exam', version: 2 });
+  expect(w.get('.memory-list').text()).not.toContain('准备考研'); expect(w.get('.memory-list').text()).toContain('准备实习');
+});
+it.each([
+  '忘掉我的专业', '清空自动记忆', '我现在不准备考研了', '把目标考研改成准备实习', '我的专业改成数学专业',
+])('sends the explicit memory command %s without a configured model or available quota', async command => {
+  const fake = fakeTransport(a => a === 'ai.status' ? { quota: { limit: 3, remaining: 0, used: 3, held: 0 }, officialConfigured: false, officialModel: '', providers: [] }
+    : a === 'ai.chat.send' ? { ...turn, taskId: null, state: 'complete', result: '已处理自动记忆。', quotaHeld: false, references: [] } : undefined);
+  const w = open(fake); await flushPromises(); await w.get('#assistant-question').setValue(command);
+  expect(w.get('[data-test="send"]').attributes('disabled')).toBeUndefined();
+  await w.get('form.assistant-composer').trigger('submit'); await flushPromises();
+  expect(w.get('.markdown-content').text()).toContain('已处理自动记忆');
+  expect(fake.call).toHaveBeenCalledWith('ai.chat.send', expect.objectContaining({ question: command, service: 'official' }));
+  expect(vi.mocked(fake.call).mock.calls.some(([a]) => a === 'ai.chat.step')).toBe(false);
+});
+it('sends a memory command with BYOK selected and no credentials, leaving ordinary BYOK questions guarded', async () => {
+  const fake = fakeTransport(a => a === 'ai.chat.send' ? { ...turn, taskId: null, state: 'complete', result: '已忘记专业。', quotaHeld: false } : undefined);
+  const w = open(fake); await flushPromises(); await w.get('input[value="byok"]').setValue();
+  await w.get('#assistant-question').setValue('需要什么材料？'); expect(w.get('[data-test="send"]').attributes('disabled')).toBeDefined();
+  await w.get('#assistant-question').setValue('忘掉我的专业'); expect(w.get('[data-test="send"]').attributes('disabled')).toBeUndefined();
+  await w.get('form.assistant-composer').trigger('submit'); await flushPromises();
+  expect(w.get('.markdown-content').text()).toContain('已忘记专业');
+  const input = vi.mocked(fake.call).mock.calls.find(([a]) => a === 'ai.chat.send')![1];
+  expect(input).toMatchObject({ service: 'official' }); expect(input).not.toHaveProperty('model'); expect(input).not.toHaveProperty('provider');
+});
+it.each([
+  '需要什么材料？', '我不想忘掉我的专业', '如果我说忘掉我的专业会怎样', '“忘掉我的专业”是什么意思',
+  '朋友说忘掉我的专业', '我现在不准备考研了吗？', '把目标考研改成准备实习有什么建议', '我的专业改成数学专业后该选什么课？',
+])('keeps the ordinary or non-actionable question %s blocked without official quota', async question => {
+  const fake = fakeTransport(a => a === 'ai.status' ? { quota: { limit: 3, remaining: 0, used: 3, held: 0 }, officialConfigured: true, officialModel: 'chat', providers: [] } : undefined);
+  const w = open(fake); await flushPromises(); await w.get('#assistant-question').setValue(question);
+  expect(w.get('[data-test="send"]').attributes('disabled')).toBeDefined();
+  await w.get('form.assistant-composer').trigger('submit'); await flushPromises();
+  expect(vi.mocked(fake.call).mock.calls.some(([a]) => a === 'ai.chat.send')).toBe(false);
+});
+it('waits for command completion before refreshing authoritative memory and recommendation reasons', async () => {
+  let finish!: (value: AiChatTurn) => void, changed = false;
+  const pending = new Promise<AiChatTurn>(resolve => { finish = resolve; });
+  const confirm = vi.spyOn(window, 'confirm');
+  const fake = fakeTransport(a => {
+    if (a === 'ai.memory.get') return memory(changed ? [] : [memoryItem]);
+    if (a === 'ai.recommend') return { items: [{ ...notice, originalUrl: null, reason: changed ? '当前手动偏好推荐' : '自动记忆中的旧目标推荐', readState: 'title_only', checkedAt: null, allowAi: true }], search: { state: 'idle', message: '' }, coverage: '' };
+    if (a === 'ai.chat.send') return pending;
+  });
+  const w = open(fake); await flushPromises(); await w.get('#assistant-question').setValue('忘掉我的目标');
+  await w.get('form.assistant-composer').trigger('submit'); await flushPromises();
+  expect(w.get('.memory-list').text()).toContain(memoryItem.text);
+  expect(w.get('[data-test="send"]').attributes('disabled')).toBeDefined();
+  changed = true; finish({ ...turn, taskId: null, state: 'complete', quotaHeld: false, result: '已忘记这个目标。' }); await flushPromises();
+  expect(w.get('.markdown-content').text()).toContain('已忘记这个目标');
+  expect(w.text()).not.toContain(memoryItem.text); expect(w.text()).not.toContain('自动记忆中的旧目标推荐'); expect(w.text()).toContain('当前手动偏好推荐');
+  expect(confirm).not.toHaveBeenCalled();
+  expect(vi.mocked(fake.call).mock.calls.some(([a]) => ['ai.memory.clear', 'ai.memory.forget', 'ai.memory.configure'].includes(a))).toBe(false);
+});
+it('shows an ambiguous command clarification without claiming a deletion or changing local memory', async () => {
+  const fake = fakeTransport(a => a === 'ai.memory.get' ? memory([memoryItem])
+    : a === 'ai.chat.send' ? { ...turn, taskId: null, state: 'complete', result: '请说明要忘记哪一个目标。', quotaHeld: false } : undefined);
+  const w = open(fake); await flushPromises(); await w.get('#assistant-question').setValue('忘掉我的目标');
+  await w.get('form.assistant-composer').trigger('submit'); await flushPromises();
+  expect(w.get('.markdown-content').text()).toContain('请说明要忘记哪一个目标');
+  expect(w.get('.memory-list').text()).toContain(memoryItem.text); expect(w.text()).not.toContain('已删除这条自动记忆');
+  expect(vi.mocked(fake.call).mock.calls.some(([a]) => ['ai.memory.clear', 'ai.memory.forget', 'ai.chat.step'].includes(a))).toBe(false);
+});
+it('preserves a completed command when recommendation refresh fails instead of recovering or resending it', async () => {
+  let completed = false;
+  const fake = fakeTransport(a => {
+    if (a === 'ai.chat.send') { completed = true; return { ...turn, taskId: null, state: 'complete', quotaHeld: false, result: '已清空自动记忆。' }; }
+    if (a === 'ai.memory.get') return memory(completed ? [] : [memoryItem]);
+    if (a === 'ai.recommend' && completed) throw new Error('recommendation unavailable');
+  });
+  const w = open(fake); await flushPromises(); await w.get('#assistant-question').setValue('清空自动记忆');
+  await w.get('form.assistant-composer').trigger('submit'); await flushPromises();
+  expect(w.get('.markdown-content').text()).toContain('已清空自动记忆'); expect(w.text()).not.toContain(memoryItem.text); expect(w.find('.error-message').exists()).toBe(true);
+  expect(vi.mocked(fake.call).mock.calls.some(([a]) => ['ai.chat.get', 'ai.chat.step'].includes(a))).toBe(false);
+});
+it('associates legacy progress with the legacy goal without guessing among new goals', async () => {
+  const fake = fakeTransport(a => a === 'ai.memory.get' ? memory([memoryItem, { ...memoryItem, id: 'progress', slot: 'progress', text: '已开始训练' }]) : undefined);
+  const w = open(fake); await flushPromises();
+  expect(w.findAll('.memory-list li').find(row => row.text().includes('已开始训练'))!.text()).toContain(`所属目标：${memoryItem.text}`);
+});
+it('keeps memory commands blocked while an existing turn holds quota or is unfinished', async () => {
+  const fake = fakeTransport(a => a === 'ai.chat.latest' ? { conversation: conversation([{ ...turn, state: 'uncertain' }]) } : undefined);
+  const w = open(fake); await flushPromises(); await w.get('#assistant-question').setValue('忘掉我的专业');
+  expect(w.get('[data-test="send"]').attributes('disabled')).toBeDefined();
+  await w.get('form.assistant-composer').trigger('submit'); await flushPromises();
+  expect(vi.mocked(fake.call).mock.calls.some(([a]) => a === 'ai.chat.send')).toBe(false);
+});
+it('discards a completed old-school command before refreshing memory or recommendation reasons', async () => {
+  let finish!: (value: AiChatTurn) => void;
+  const pending = new Promise<AiChatTurn>(resolve => { finish = resolve; });
+  const fake = fakeTransport((a, input) => a === 'ai.chat.send' ? pending : a === 'ai.memory.get' ? { ...memory([{ ...memoryItem, text: input.schoolId === 'other' ? '新学校目标' : '旧学校目标' }]), schoolId: input.schoolId } : undefined);
+  const w = open(fake); await flushPromises(); await w.get('#assistant-question').setValue('忘掉我的目标');
+  await w.get('form.assistant-composer').trigger('submit'); await flushPromises();
+  await w.setProps({ schoolId: 'other' }); await flushPromises();
+  finish({ ...turn, taskId: null, state: 'complete', quotaHeld: false, result: '旧学校目标已删除。' }); await flushPromises();
+  expect(w.text()).toContain('新学校目标'); expect(w.text()).not.toContain('旧学校目标已删除');
+  expect(vi.mocked(fake.call).mock.calls.filter(([a]) => a === 'ai.memory.get')).toHaveLength(2);
+  expect(vi.mocked(fake.call).mock.calls.filter(([a]) => a === 'ai.recommend')).toHaveLength(2);
+});
+it.each([
+  '忘掉目标考研', '忘记目标考研', '删除目标考研', '清除目标考研',
+  '忘掉我的目标考研', '忘记我的目标考研', '删除我的目标考研', '清除我的目标考研',
+])('allows the named goal command %s with zero quota and no configured model', async command => {
+  const fake = fakeTransport(a => a === 'ai.status' ? { quota: { limit: 3, remaining: 0, used: 3, held: 0 }, officialConfigured: false, officialModel: '', providers: [] }
+    : a === 'ai.chat.send' ? { ...turn, taskId: null, state: 'complete', result: '已删除考研目标，其他目标保留。', quotaHeld: false } : undefined);
+  const w = open(fake); await flushPromises(); await w.get('#assistant-question').setValue(command);
+  expect(w.get('[data-test="send"]').attributes('disabled')).toBeUndefined();
+  await w.get('form.assistant-composer').trigger('submit'); await flushPromises();
+  expect(w.get('.markdown-content').text()).toContain('其他目标保留');
+  expect(fake.call).toHaveBeenCalledWith('ai.chat.send', expect.objectContaining({ question: command, service: 'official' }));
+});
+it.each([
+  '忘掉目标考研有什么后果', '忘掉目标考研是不是合理', '忘掉目标考研可以吗？',
+  '“忘掉目标考研”', '`忘掉目标考研`', '朋友让我忘掉目标考研', '忘掉目标考研是朋友说的',
+  '如果我忘掉目标考研', '假设忘掉目标考研', '不要忘掉目标考研', '我不想忘掉目标考研',
+])('does not treat the non-direct named goal statement %s as a free command', async question => {
+  const fake = fakeTransport(a => a === 'ai.status' ? { quota: { limit: 3, remaining: 0, used: 3, held: 0 }, officialConfigured: false, officialModel: '', providers: [] } : undefined);
+  const w = open(fake); await flushPromises(); await w.get('#assistant-question').setValue(question);
+  expect(w.get('[data-test="send"]').attributes('disabled')).toBeDefined();
+  await w.get('form.assistant-composer').trigger('submit'); await flushPromises();
+  expect(vi.mocked(fake.call).mock.calls.some(([a]) => a === 'ai.chat.send')).toBe(false);
+});
+it('refreshes recommendations after recovering a lost completed program command response', async () => {
+  let recovered = false;
+  const fake = fakeTransport(a => {
+    if (a === 'ai.chat.send') throw new Error('command response lost');
+    if (a === 'ai.chat.get') { recovered = true; return conversation([{ ...turn, taskId: null, state: 'complete', result: '已删除考研目标。', quotaHeld: false }]); }
+    if (a === 'ai.memory.get') return memory(recovered ? [] : [memoryItem]);
+    if (a === 'ai.recommend') return { items: [{ ...notice, originalUrl: null, reason: recovered ? '当前手动偏好推荐' : '恢复前的旧目标推荐', readState: 'title_only', checkedAt: null, allowAi: true }], search: { state: 'idle', message: '' }, coverage: '' };
+  });
+  const w = open(fake); await flushPromises(); await w.get('#assistant-question').setValue('忘掉我的目标');
+  await w.get('form.assistant-composer').trigger('submit'); await flushPromises();
+  expect(w.get('.markdown-content').text()).toContain('已删除考研目标');
+  expect(w.text()).not.toContain(memoryItem.text); expect(w.text()).not.toContain('恢复前的旧目标推荐'); expect(w.text()).toContain('当前手动偏好推荐');
+  expect(fake.call).toHaveBeenCalledWith('ai.chat.get', { conversationId: 'chat-1' });
+  expect(vi.mocked(fake.call).mock.calls.filter(([a]) => a === 'ai.recommend')).toHaveLength(2);
+  expect(vi.mocked(fake.call).mock.calls.filter(([a]) => a === 'ai.chat.send')).toHaveLength(1);
+  expect(vi.mocked(fake.call).mock.calls.some(([a]) => a === 'ai.chat.step')).toBe(false);
+});
