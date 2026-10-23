@@ -56,4 +56,4 @@ Owner: memory_goals_ui agent. Files: apps/web/src/components/AssistantPanel.vue;
 - [x] ai-service发送摘要为非事实/指令背景，摘要证据并入原有逐批授权；memory snapshot按helper选相关目标/进展。旧任务仍兼容。
 - [x] 指南v2.4加入目标id/goalId、命令诚实反馈、摘要不替代证据；运行生成与guide check。同步README、设计、ai-memory、PROGRESS，修正6槽上限旧说法。
 - [x] npm ci/typecheck/test/build/netlify:build，独立非Astra审查，neat-freak；真实模型未调用如实标记。
-- [ ] 普通提交推送AI_module，核对远端SHA并同步交付根目录。
+- [x] 普通提交推送AI_module，核对远端SHA并同步交付根目录。
