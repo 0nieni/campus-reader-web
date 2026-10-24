@@ -1,4 +1,4 @@
-import type { School, FeedFilters } from "@campus/contracts";
+import type { School, FeedFilters,SourceDisplayState } from "@campus/contracts";
 import type { Resource, Scope } from "./scope";
 
 export interface ItemRow extends Resource {
@@ -23,6 +23,10 @@ export interface Repository {
   school(id: string): Promise<School | null>;
   schools(offset: number, limit: number): Promise<School[]>;
   selectSchool(ownerId: string, schoolId: string): Promise<void>;
+  hiddenFeedSources?(ownerId:string,schoolId:string):Promise<string[]>;
+  setSourceFeedVisibility?(ownerId:string,schoolId:string,sourceId:string,visible:boolean):Promise<{visible:boolean}>;
+  sourceDisplayState?(ownerId:string,schoolId:string):Promise<SourceDisplayState>;
+  setAllSourceFeedVisibility?(ownerId:string,schoolId:string,visible:boolean):Promise<SourceDisplayState>;
   scope(schoolId: string, ownerId: string): Promise<Scope>;
   items(
     scope: Scope,
@@ -30,6 +34,7 @@ export interface Repository {
     limit: number,
     since: string,
     filters?: FeedFilters,
+    feedOptions?: {hiddenSourceIds:string[]},
   ): Promise<ItemRow[]>;
   item(id: string): Promise<ItemRow | null>;
   /** Invoked only after scope/ownership checks. Existing imported bodies are retained. */
