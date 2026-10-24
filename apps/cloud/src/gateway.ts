@@ -17,6 +17,10 @@ import { filtersOf, filterSince, matchesFilters } from "./filters";
 import { checkedLabels, displayedCategories, originalCategories } from './notice-labels';
 
 const fields: Record<string, string[]> = {
+  'ai.providers.list': [],
+  'ai.providers.save': ['profile'],
+  'ai.providers.remove': ['id','version'],
+  'ai.providers.select': ['id','model','version'],
   'ai.profile.get': ['schoolId'],
   'ai.profile.save': ['schoolId','interests','goals','learningEnabled','version'],
   'ai.profile.clearBehavior': ['schoolId'],
@@ -25,7 +29,7 @@ const fields: Record<string, string[]> = {
   'ai.recommend': ['schoolId','query','search'],
   'ai.chat.create': ['schoolId','requestId'],
   'ai.chat.get': ['conversationId'],
-  'ai.chat.send': ['conversationId','requestId','question','itemIds','service','provider','model'],
+  'ai.chat.send': ['conversationId','requestId','question','itemIds','service','provider','model','providerProfile'],
   'ai.chat.step': ['conversationId','turnId','step','connection'],
   'ai.chat.cancel': ['conversationId','turnId'],
   'ai.chat.resolve': ['conversationId','turnId','charged'],
@@ -66,7 +70,7 @@ const fields: Record<string, string[]> = {
   "ai.diagnose": [],
   "ai.preview": ["schoolId", "itemIds"],
   "ai.export": ["schoolId", "itemIds"],
-  "ai.start": ["schoolId", "itemIds", "requestId", "service", "provider", "model", "task", "question", "fingerprint"],
+  "ai.start": ["schoolId", "itemIds", "requestId", "service", "provider", "model", "task", "question", "fingerprint", "providerProfile"],
   "ai.test": ["schoolId", "requestId", "provider", "model"],
   "ai.step": ["taskId", "step", "connection"],
   "ai.task": ["taskId"],

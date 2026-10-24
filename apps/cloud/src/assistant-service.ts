@@ -12,6 +12,7 @@ import { digest } from './reading-package';
 import { AppError, reject } from './errors';
 import { isRetained, originalUrl, toNotice } from './gateway';
 import { isPrivate, itemVisible, sourceVisible, type Scope } from './scope';
+import type { ProviderProfiles } from './ai-provider-profiles';
 
 function canonicalUrl(value: unknown): string | null {
   if (typeof value !== 'string') return null;
@@ -32,7 +33,7 @@ function publicCandidate(row: ItemRow, scope: Scope, current: number): boolean {
 }
 
 const actions = new Set(['ai.profile.get','ai.profile.save','ai.profile.clearBehavior','ai.behavior','ai.dismiss','ai.recommend','ai.chat.create','ai.chat.get','ai.chat.send','ai.chat.step','ai.chat.cancel','ai.chat.resolve','ai.chat.clear','ai.chat.latest']);
-export function assistantService(db: Database, repo: Repository, ai: ReturnType<typeof aiService>, now = Date.now, search = searchAnnouncements, reader: PageReader = readSchoolPage) {
+export function assistantService(db: Database, repo: Repository, ai: ReturnType<typeof aiService>, now = Date.now, search = searchAnnouncements, reader: PageReader = readSchoolPage, providers?: ProviderProfiles) {
   const profile = assistantProfile(db, repo, now);
   const chat = assistantChat(db, repo, ai, profile.recommend, now, async (schoolId, query, identity) => {
     try { return await recommendations({ schoolId, query, search: true }, identity); }
@@ -41,7 +42,7 @@ export function assistantService(db: Database, repo: Repository, ai: ReturnType<
       const local = await profile.recommend(identity.dataOwnerId, schoolId, query);
       return { ...local, search: { state: 'failed', message: error.message } };
     }
-  });
+  }, providers);
   async function searchBudget(owner: string) {
     await seed(db, 'user_profiles', owner, {});
     await atomic(db, async tx => {

@@ -1,5 +1,7 @@
 # 校园阅览室
 
+个人服务商功能新增于 `codex/ai-companion-model-settings`：AI 阅读的“服务模型调整”支持每账号独立保存加密 API Key、多套配置、模型选择及四种接口协议，保留官方 AI 和临时 API。保存与启用分开，切换只影响新轮次；旧配置删改时停止未完成任务。接入需追加迁移与服务端 `AI_PROVIDER_ENCRYPTION_KEY`，见 [个人服务商使用与接入](docs/ai-provider-profiles.md) 和 [CC Switch 源码分析](docs/cc-switch-provider-analysis.md)。当前完成本地验证；功能分支供审核，正式启用仍需配置变量和部署迁移。
+
 面向受邀用户的校园公告、收藏与 AI 阅读网站。Vue 3 + TypeScript + Netlify Functions、Identity 和 Database。代码仓库保持私有，各账号的数据独立。
 
 ## AI 阅读助手（本地实现，尚未部署）

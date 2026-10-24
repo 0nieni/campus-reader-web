@@ -15,6 +15,7 @@ import { schoolRequests } from '../../apps/cloud/src/school-requests';
 import {websiteSources} from '../../apps/cloud/src/website-sources';
 import {reminderService} from '../../apps/cloud/src/reminders';
 import {reminderRuntime} from '../../apps/cloud/src/netlify-reminder-runtime';
+import {providerProfiles} from '../../apps/cloud/src/ai-provider-profiles';
 declare const Netlify: { env: { get(name: string): string | undefined } };
 let pool: SqlPool | undefined;
 export default createSiteApi({
@@ -34,7 +35,8 @@ export default createSiteApi({
     const directory = schoolDirectory(pool,repo);
     const websites=websiteSources(pool,repo);
     repo.material = row=>row.importKind==='website'?websites.material(row):directory.material(row);
-    const ai = aiService(db, repo), assistant = assistantService(db, repo, ai);
+    const providers = providerProfiles(pool, {encryptionKey:()=>Netlify.env.get('AI_PROVIDER_ENCRYPTION_KEY')});
+    const ai = aiService(db, repo, undefined, undefined, undefined, providers), assistant = assistantService(db, repo, ai, undefined, undefined, undefined, providers);
     const request = schoolRequests(pool,async fields => {
       // Fixed site target: never accept URLs, recipients, email addresses or UID
       // from the browser. Notification recipients are configured in Netlify Forms.

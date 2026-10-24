@@ -12,6 +12,8 @@ import { verifiedRelay, type RelayBatch } from "./relay-protocol";
 import { diagnoseOfficial, failureMessages } from "./model-diagnostics";
 import { CHAT_READING_GUIDE, CHAT_GUIDE_VERSION } from './chat-guide';
 import type { ChatContext } from './chat-context';
+import type { ProviderProfiles } from './ai-provider-profiles';
+import { checkedProviderRef } from './provider-endpoints';
 
 const TASKS = "web_ai_tasks", ACCOUNTS = "web_ai_accounts";
 export const beijingDay = (now = Date.now()) => new Date(now + 8 * 3600000).toISOString().slice(0, 10);
@@ -35,7 +37,7 @@ export function officialConfig(): { connection: Connection; endpoint: string } |
     return { connection, endpoint };
   } catch { return null; }
 }
-export function aiService(db: Database, repo: Repository, complete = userCompletion, now: () => number = Date.now, diagnose = diagnoseOfficial) {
+export function aiService(db: Database, repo: Repository, complete = userCompletion, now: () => number = Date.now, diagnose = diagnoseOfficial, profiles?: ProviderProfiles) {
   const iso = () => new Date(now()).toISOString();
   const purge = async (id: string) => db.collection(TASKS).doc(id).update({ docs: db.command.remove(), notes: db.command.remove(), batches: db.command.remove(), question: db.command.remove(), result: db.command.remove(), chat: db.command.remove(), purged: true });
   const taskRef = (tx: Parameters<Parameters<typeof atomic>[1]>[0], id: string) => tx.collection(TASKS).doc(id);
@@ -65,13 +67,19 @@ export function aiService(db: Database, repo: Repository, complete = userComplet
     return { id: row.id, schoolId: row.schoolId, service: row.service, provider: row.provider, model: row.model, task: row.task,
       state: row.state === "new" ? "failed" : row.state, step: row.step, totalSteps: row.batches.length + 1,
       title: row.state === "new" ? "未开始的阅读任务" : row.testOnly ? "API 连接测试" : row.docs.map(doc => doc.title).join("；"), result: row.state === "complete" ? row.result : null,
-      message: row.state === "new" ? "任务尚未取得额度或未完成创建，请检查额度后重新发起。" : row.message, ...(row.failureCode ? { failureCode: row.failureCode } : {}), expireAt: row.expireAt, createdAt: row.createdAt, quotaHeld: row.quotaHeld };
+      message: row.state === "new" ? "任务尚未取得额度或未完成创建，请检查额度后重新发起。" : row.message, ...(row.failureCode ? { failureCode: row.failureCode } : {}), ...(row.providerProfile ? { providerProfile: row.providerProfile } : {}), expireAt: row.expireAt, createdAt: row.createdAt, quotaHeld: row.quotaHeld };
   }
   async function finish(id: string, patch: Partial<Task>, success: boolean, expectedStep?: number) {
     await atomic(db, async tx => {
       const ref = taskRef(tx, id), row = transactionRow((await ref.get()).data) as Task;
       if (["complete", "failed"].includes(row.state) || (expectedStep !== undefined && (row.inFlight !== expectedStep || row.step !== expectedStep))) return;
       if (row.state === "cancelled" && patch.state !== "cancelled") { patch = { state: "cancelled", result: null, message: "任务已取消，本批未发布为结果。" }; success = false; }
+      // Recovery/settlement must remain possible after a profile is removed.
+      // Only accepting new model output requires the original profile version.
+      if (success && patch.state === 'complete' && row.providerProfile) {
+        if (!profiles) reject('PROVIDER_STORAGE_UNAVAILABLE', '个人配置执行尚未启用。');
+        await profiles.guard(tx, row.owner, row.providerProfile, row.model);
+      }
       if (row.quotaHeld) {
         const account = tx.collection(ACCOUNTS).doc(row.accountId), a = transactionRow((await account.get()).data);
         await account.update({ held: Math.max(0, Number(a.held) - 1), used: Number(a.used) + (success ? 1 : 0) });
@@ -92,9 +100,27 @@ export function aiService(db: Database, repo: Repository, complete = userComplet
     const { data } = await db.collection(TASKS).where({ owner, expireAt: db.command.lte(iso()), purged: db.command.neq(true) }).limit(20).get();
     for (const row of data) await purge(String(row._id));
   }
+  async function savedConnection(task: Task, owner: string): Promise<Connection> {
+    if (!profiles) reject('PROVIDER_STORAGE_UNAVAILABLE', '个人配置执行尚未启用，请联系管理员。');
+    return profiles.resolve(owner, task.providerProfile!, task.model);
+  }
+  async function stopInvalidProfile(task: Task, error: unknown) {
+    if (!(error instanceof AppError)) throw error;
+    await atomic(db, async tx => {
+      const ref = taskRef(tx, task.id), row = transactionRow((await ref.get()).data) as Task;
+      if (row.state === 'ready' && row.step === task.step && row.inFlight === null) await ref.update({ state: 'failed', message: error.message, failureCode: error.code, result: null });
+    });
+  }
   return {
     async handle(action: string, input: Record<string, unknown>, identity: IdentityContext): Promise<unknown> {
       const owner = identity.dataOwnerId;
+      if (action.startsWith('ai.providers.')) {
+        if (!profiles) {
+          if (action === 'ai.providers.list') return { storageConfigured: false, version: 0, profiles: [], selection: null };
+          reject('PROVIDER_STORAGE_UNAVAILABLE', '个人配置保存尚未启用，请在正式网站配置服务端加密密钥。');
+        }
+        return profiles.handle(action, input, owner);
+      }
       if (action === "ai.diagnose") {
         const official = officialConfig();
         return official ? diagnose(official.connection, official.endpoint) : { code: "MODEL_NOT_CONFIGURED", message: "官方模型配置不完整，请检查服务端模型环境变量并重新部署。" };
@@ -136,15 +162,17 @@ export function aiService(db: Database, repo: Repository, complete = userComplet
         if (!testing && input.fingerprint !== undefined && input.fingerprint !== pack.fingerprint) reject("MATERIAL_CHANGED", "资料自预览后已有变化，请重新预览再开始。");
         const official = officialConfig();
         if (input.service === "official" && !official) reject("MODEL_NOT_CONFIGURED", "官方模型尚未配置，可配置云端模型或使用我的 API。");
-        const connection = input.service === "official" ? official!.connection : { provider: input.provider, model: input.model, apiKey: "validation-only" } as Connection;
+        const profileRef = input.providerProfile === undefined ? undefined : checkedProviderRef(input.providerProfile);
+        if (profileRef && (input.service !== 'byok' || input.provider !== undefined || !profiles)) reject('VALIDATION_FAILED', '已保存配置只能用于个人 API，请重新选择服务商。');
+        const connection = input.service === "official" ? official!.connection : profileRef ? await profiles!.resolve(owner, profileRef, String(input.model || '')) : { provider: input.provider, model: input.model, apiKey: "validation-only" } as Connection;
         validateConnection(connection);
         const id = digest([owner, requestId]), day = beijingDay(now()), accountId = digest([owner, day]);
-        const endpointHash = input.service === "official" ? digest(official!.endpoint) : "";
+        const endpointHash = input.service === "official" ? digest(official!.endpoint) : profileRef ? digest([connection.endpoint,connection.protocol]) : "";
         // chat is an internal service argument; the public ai.start gateway never accepts it.
         const chat = input.chat as Task['chat'];
         if (chat && (typeof chat.history !== 'string' || chat.history.length > 3500 || !Number.isFinite(Date.parse(chat.expireAt)) || Date.parse(chat.expireAt) <= now() || Date.parse(chat.expireAt) > now() + 86400000)) reject('VALIDATION_FAILED', '对话上下文或有效期无效。');
-        const fingerprint = digest([schoolId, pack.fingerprint, chat ? CHAT_GUIDE_VERSION : GUIDE_VERSION, EXECUTION_VERSION, input.service, connection.provider, connection.model, endpointHash, input.task, String(input.question || "").trim(), chat || null]);
-        const task = { id, owner, schoolId, service: input.service, provider: connection.provider, model: connection.model, task: input.task, question: String(input.question || "").trim(), fingerprint, versions: pack.fingerprint, accountId, docs: pack.docs, batches: splitDocuments(pack.docs), notes: [], step: 0, state: "new", inFlight: null, startedAt: null, result: null, message: "资料已准备，等待开始。", quotaHeld: false, createdAt: iso(), expireAt: chat?.expireAt || new Date(now() + 86400000).toISOString(), testOnly: testing, ...(chat ? { chat } : {}) };
+        const fingerprint = digest([schoolId, pack.fingerprint, chat ? CHAT_GUIDE_VERSION : GUIDE_VERSION, EXECUTION_VERSION, input.service, connection.provider, connection.model, endpointHash, input.task, String(input.question || "").trim(), chat || null, ...(profileRef ? [profileRef] : [])]);
+        const task = { id, owner, schoolId, service: input.service, provider: connection.provider, model: connection.model, ...(profileRef ? { providerProfile: profileRef } : {}), task: input.task, question: String(input.question || "").trim(), fingerprint, versions: pack.fingerprint, accountId, docs: pack.docs, batches: splitDocuments(pack.docs), notes: [], step: 0, state: "new", inFlight: null, startedAt: null, result: null, message: "资料已准备，等待开始。", quotaHeld: false, createdAt: iso(), expireAt: chat?.expireAt || new Date(now() + 86400000).toISOString(), testOnly: testing, ...(chat ? { chat } : {}) };
         // Before reservation, retain only the idempotency metadata, never material bodies.
         await seed(db, TASKS, id, { ...task, docs: [], batches: [], notes: [], question: "", result: null, ...(chat ? { chat: { history: '', expireAt: chat.expireAt } } : {}), endpointHash });
         if (input.service === "official") await seed(db, ACCOUNTS, accountId, { owner, day, used: 0, held: 0 });
@@ -153,6 +181,7 @@ export function aiService(db: Database, repo: Repository, complete = userComplet
           if (row.fingerprint !== fingerprint) reject("REQUEST_CONFLICT", "同一请求编号不能更换学校、资料、任务或模型。");
           if (Date.parse(row.expireAt) <= now()) reject("RESULT_EXPIRED", "任务已满 24 小时，请新建阅读任务。");
           if (row.state !== "new") return;
+          if (profileRef) await profiles!.guard(tx, owner, profileRef, connection.model);
           if (row.service === "official") {
             const account = tx.collection(ACCOUNTS).doc(row.accountId), a = transactionRow((await account.get()).data);
             if (Number(a.used) + Number(a.held) >= dailyLimit()) reject("AI_QUOTA_EXHAUSTED", "今日官方次数已用完或被进行中任务预占；我的 API 和搜索仍可使用。");
@@ -169,6 +198,10 @@ export function aiService(db: Database, repo: Repository, complete = userComplet
         return { ...publicTask(await load(id, owner, false)), title: "已结算的阅读任务", result: null };
       }
       if (action === "ai.task") {
+        if (task.providerProfile && task.state === 'ready') {
+          try { await savedConnection(task, owner); }
+          catch (error) { await stopInvalidProfile(task, error); task = await load(id, owner); }
+        }
         if (task.state === "running" && Date.parse(task.startedAt || "") + 40000 < now()) {
           await atomic(db, async tx => { const ref = taskRef(tx, id), row = transactionRow((await ref.get()).data) as Task; if (row.state === "running" && Date.parse(row.startedAt || "") + 40000 < now()) await ref.update({ state: "uncertain", message: "上一批状态不明，已暂停，未自动重发或释放预占。请核查服务商用量。" }); });
           task = await load(id, owner);
@@ -180,7 +213,7 @@ export function aiService(db: Database, repo: Repository, complete = userComplet
         await atomic(db, async tx => {
           const ref = taskRef(tx, id), row = transactionRow((await ref.get()).data) as Task;
           if (["complete", "failed", "cancelled"].includes(row.state)) return;
-          if (row.inFlight !== null || row.state === "uncertain") { await ref.update({ state: "cancelled", message: "已停止后续调用；已提交的一批可能仍计费，官方预占暂保留。" }); return; }
+          if (row.inFlight !== null || row.state === "uncertain") { await ref.update({ state: "cancelled", message: row.quotaHeld ? "已停止后续调用；已提交的一批可能仍计费，官方预占暂保留。" : "已结束本轮，停止后续调用；已提交的一批可能仍由服务商计费，请核查用量。" }); return; }
           if (row.quotaHeld) { const account = tx.collection(ACCOUNTS).doc(row.accountId), a = transactionRow((await account.get()).data); await account.update({ held: Math.max(0, Number(a.held) - 1) }); }
           await ref.update({ state: "cancelled", quotaHeld: false, message: "任务已取消，未继续发送模型。" });
         });
@@ -198,7 +231,13 @@ export function aiService(db: Database, repo: Repository, complete = userComplet
       if (input.step !== task.step) return publicTask(task);
       const official = officialConfig();
       let connection: Connection;
-      if (task.service === "official") { if (!official || official.connection.model !== task.model || official.connection.provider !== task.provider || digest(official.endpoint) !== task.endpointHash) reject("MODEL_NOT_CONFIGURED", "官方模型配置已变化，请取消并重新创建任务。"); connection = official.connection; }
+      if (task.providerProfile) {
+        if (relay || input.connection !== undefined) reject('VALIDATION_FAILED', '已保存配置由服务端读取，无需重复传入密钥。');
+        try { connection = await savedConnection(task, owner); }
+        catch (error) { await stopInvalidProfile(task, error); return publicTask(await load(id, owner)); }
+        if (digest([connection.endpoint,connection.protocol]) !== task.endpointHash) { await stopInvalidProfile(task, new AppError('PROVIDER_PROFILE_CHANGED', '服务商接口配置已变化，请重新提问。')); return publicTask(await load(id,owner)); }
+      }
+      else if (task.service === "official") { if (!official || official.connection.model !== task.model || official.connection.provider !== task.provider || digest(official.endpoint) !== task.endpointHash) reject("MODEL_NOT_CONFIGURED", "官方模型配置已变化，请取消并重新创建任务。"); connection = official.connection; }
       else if (returning) connection = { provider: task.provider as Connection["provider"], model: task.model, apiKey: "relay-result-only" };
       else {
         const value = input.connection;
@@ -206,12 +245,17 @@ export function aiService(db: Database, repo: Repository, complete = userComplet
         connection = value as Connection; validateConnection(connection);
         if (connection.model !== task.model || connection.provider !== task.provider) reject("REQUEST_CONFLICT", "续跑必须使用原服务商和模型。");
       }
-      if (!returning) await atomic(db, async tx => {
+      try { if (!returning) await atomic(db, async tx => {
         const ref = taskRef(tx, id), row = transactionRow((await ref.get()).data) as Task;
         if (row.state !== "ready" || row.inFlight !== null || row.step !== task.step) reject("TASK_BUSY", "已有一批在处理或进度已变化，请刷新任务状态，勿重复提交。");
         if (Date.parse(row.expireAt) <= now()) reject("RESULT_EXPIRED", "任务已到期，请重新选择资料。");
+        if (row.providerProfile) await profiles!.guard(tx, owner, row.providerProfile, row.model);
         await ref.update({ state: "running", inFlight: row.step, startedAt: iso(), ...(relay ? { relayLease: relay.leaseId } : {}), message: "正在处理本批资料。" });
-      });
+      }); } catch (error) {
+        if (!task.providerProfile || !(error instanceof AppError) || !['PROVIDER_PROFILE_CHANGED','PROVIDER_KEY_UNAVAILABLE','PROVIDER_STORAGE_UNAVAILABLE'].includes(error.code)) throw error;
+        await stopInvalidProfile(task, error);
+        return publicTask(await load(id, owner));
+      }
       let submitted = false;
       try {
         const final = task.step === task.batches.length;
@@ -222,7 +266,10 @@ export function aiService(db: Database, repo: Repository, complete = userComplet
         const batchContent = task.testOnly ? "请确认能正常响应。" : content;
         const maxTokens = task.testOnly ? 64 : final ? FINAL_OUTPUT_TOKENS : BATCH_OUTPUT_TOKENS;
         if (!returning && task.service === "official") await platformBudget(guide.length + batchContent.length, maxTokens);
-        if (relay?.phase === "prepare") return { kind: "batch", service: task.service, provider: connection.provider, model: connection.model, endpoint: task.service === "official" ? official!.endpoint : undefined, guide, content: batchContent, maxTokens } satisfies RelayBatch;
+        if (relay?.phase === "prepare") {
+          if (connection.provider === 'custom') reject('RELAY_FORBIDDEN', '个人保存配置仅在网站服务端执行。');
+          return { kind: "batch", service: task.service, provider: connection.provider, model: connection.model, endpoint: task.service === "official" ? official!.endpoint : undefined, guide, content: batchContent, maxTokens } satisfies RelayBatch;
+        }
         submitted = true;
         if (relay?.phase === "fail") throw Object.assign(new Error("模型未完成本批。"), { code: relay.errorCode });
         const response = relay?.phase === "complete" ? relay.output! : await complete(connection, guide, batchContent, maxTokens, task.service === "official" ? official!.endpoint : undefined);
@@ -241,6 +288,7 @@ export function aiService(db: Database, repo: Repository, complete = userComplet
           await atomic(db, async tx => {
             const ref = taskRef(tx, id), row = transactionRow((await ref.get()).data) as Task;
             if (row.state === "cancelled" || row.inFlight !== task.step || row.step !== task.step) return;
+            if (row.providerProfile) await profiles!.guard(tx, owner, row.providerProfile, row.model);
             await ref.update({ state: "ready", step: task.step + 1, batches, notes, inFlight: null, message: "本批已完成，可以继续或暂停。" });
           });
           const latest = await readDoc(db, TASKS, id) as Task;
@@ -249,7 +297,7 @@ export function aiService(db: Database, repo: Repository, complete = userComplet
         return publicTask(await load(id, owner));
       } catch (error) {
         const code = (error as { code?: string })?.code || "MODEL_UNCERTAIN";
-        const uncertain = submitted && !["KEY_REJECTED", "BALANCE_REQUIRED", "PROVIDER_LIMIT", "MODEL_OR_CONTEXT_INVALID", "MODEL_UNSUPPORTED", "OUTPUT_TRUNCATED", "PROVIDER_CONTENT_FILTER", "PROVIDER_INTERRUPTED", "MODEL_FORMAT_INVALID", "REFERENCE_INVALID", "AI_POLICY_BLOCKED", "MATERIAL_CHANGED", "RESULT_EXPIRED", "NOT_FOUND", "STALE_SCOPE", "CONTEXT_TOO_LONG", "RESPONSE_TOO_LARGE"].includes(code);
+        const uncertain = submitted && !["PROVIDER_PROFILE_CHANGED", "PROVIDER_KEY_UNAVAILABLE", "PROVIDER_STORAGE_UNAVAILABLE", "KEY_REJECTED", "BALANCE_REQUIRED", "PROVIDER_LIMIT", "MODEL_OR_CONTEXT_INVALID", "MODEL_UNSUPPORTED", "OUTPUT_TRUNCATED", "PROVIDER_CONTENT_FILTER", "PROVIDER_INTERRUPTED", "MODEL_FORMAT_INVALID", "REFERENCE_INVALID", "AI_POLICY_BLOCKED", "MATERIAL_CHANGED", "RESULT_EXPIRED", "NOT_FOUND", "STALE_SCOPE", "CONTEXT_TOO_LONG", "RESPONSE_TOO_LARGE"].includes(code);
         const message = uncertain ? "本批处理状态不明，已暂停且不会自动重发。请核查服务商用量，官方预占暂保留。" : error instanceof AppError ? error.message : Object.prototype.hasOwnProperty.call(failureMessages, code) ? failureMessages[code]! : "模型未完成本批，请检查 Key、余额、模型或资料范围。";
         const failureCode = Object.prototype.hasOwnProperty.call(failureMessages, code) ? code : undefined;
         if (uncertain) await atomic(db, async tx => { const ref = taskRef(tx, id), row = transactionRow((await ref.get()).data) as Task; if (row.inFlight === task.step && row.step === task.step && !["complete", "failed", "cancelled"].includes(row.state)) await ref.update({ state: "uncertain", message }); });

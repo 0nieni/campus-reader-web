@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { mount, flushPromises } from '@vue/test-utils';
 import AssistantPanel from '../src/components/AssistantPanel.vue';
-import type { AiChatTurn, AiConversation, Notice } from '@campus/contracts';
+import type { AiChatTurn, AiConversation, AiProviderState, AuthSession, Notice } from '@campus/contracts';
 import type { Transport } from '../src/lib/transport';
 import { ClientError } from '../src/lib/errors';
 import * as markdown from '../src/lib/markdown';
@@ -13,6 +13,7 @@ function fakeTransport(override?: (action: string, input: any) => unknown): Tran
     const result = override?.(action, input); if (result !== undefined) return result;
     if (action === 'ai.status') return { quota: { day: '2026-10-19', timezone: 'Asia/Shanghai', limit: 3, used: 0, held: 0, remaining: 3, resetsAt: '' }, officialConfigured: true, officialModel: 'chat', providers: [] };
     if (action === 'ai.profile.get') return { schoolId: input.schoolId, interests: ['招聘'], goals: '', learningEnabled: false, version: 2 };
+    if (action === 'ai.providers.list') return { storageConfigured: true, version: 0, profiles: [], selection: null };
     if (action === 'ai.recommend') return { items: [{ ...notice, originalUrl: 'https://example.edu/notice', reason: '与你关注的招聘相关', readState: 'title_only', checkedAt: null, allowAi: true }], search: { state: 'idle', message: '尚未搜索' }, coverage: '当前已收录公告' };
     if (action === 'ai.chat.latest') return { conversation: null };
     if (action === 'ai.chat.create') return conversation();
@@ -256,4 +257,100 @@ it('a revoked-source failed turn with held quota can cancel and then resolve the
   expect(fake.call).toHaveBeenCalledWith('ai.chat.resolve', { conversationId: 'chat-1', turnId: 'turn-1', charged: false });
   await w.get('#assistant-question').setValue('换一个问题'); expect(w.get('[data-test="send"]').attributes('disabled')).toBeUndefined();
   expect(vi.mocked(fake.call).mock.calls.some(([action]) => ['ai.chat.send', 'ai.chat.step'].includes(action))).toBe(false);
+});
+
+const savedState: AiProviderState = { storageConfigured: true, version: 4, profiles: [{ id: 'personal-1', name: '我的阅读接口', protocol: 'openai-chat', baseUrl: 'https://example.com/v1', models: ['personal-model', 'second-model'], defaultModel: 'personal-model', version: 2, keySaved: true, updatedAt: new Date().toISOString() }], selection: { profile: { id: 'personal-1', version: 2 }, model: 'personal-model' } };
+it('an uncertain personal call can explicitly end after checking usage without replaying the request', async () => {
+  const unknown = { ...turn, state: 'uncertain' as const, quotaHeld: false, service: 'byok' as const, providerProfile: { id: 'personal-1', version: 2 } };
+  const fake = fakeTransport(action => action === 'ai.providers.list' ? structuredClone(savedState) : action === 'ai.chat.latest' ? { conversation: conversation([unknown]) } : action === 'ai.chat.cancel' ? { ...unknown, state: 'cancelled' } : undefined);
+  const w = open(fake); await flushPromises(); expect(w.text()).toContain('请先到服务商控制台核查用量');
+  expect(w.get('[data-test="cancel"]').text()).toContain('已核查用量，结束本轮');
+  await w.get('[data-test="cancel"]').trigger('click'); await flushPromises();
+  expect(fake.call).toHaveBeenCalledWith('ai.chat.cancel', { conversationId: 'chat-1', turnId: turn.id });
+  await w.get('#assistant-question').setValue('新的问题'); expect(w.get('[data-test="send"]').attributes('disabled')).toBeUndefined();
+  expect(vi.mocked(fake.call).mock.calls.some(([action]) => ['ai.chat.send', 'ai.chat.step'].includes(action))).toBe(false);
+});
+it('choosing official AI clears the persisted personal selection without making a model call', async () => {
+  const fake = fakeTransport(action => action === 'ai.providers.list' ? structuredClone(savedState) : action === 'ai.providers.select' ? { ...structuredClone(savedState), version: 5, selection: null } : undefined);
+  const w = open(fake); await flushPromises(); await w.get('input[value="official"]').setValue(); await flushPromises();
+  expect(fake.call).toHaveBeenCalledWith('ai.providers.select', { id: null, version: 4 });
+  expect((w.get('input[value="official"]').element as HTMLInputElement).checked).toBe(true);
+  expect(vi.mocked(fake.call).mock.calls.some(([action]) => ['ai.chat.send', 'ai.chat.step'].includes(action))).toBe(false);
+});
+it('restores the personal selection and sends only its reference while saved-provider steps need no key', async () => {
+  const personal = { ...turn, service: 'byok' as const, provider: 'openai-chat', model: 'personal-model', providerProfile: { id: 'personal-1', version: 2 }, quotaHeld: false };
+  const fake = fakeTransport((action, input) => action === 'ai.providers.list' ? structuredClone(savedState) : action === 'ai.chat.send' ? { ...personal, question: input.question } : action === 'ai.chat.step' ? { ...personal, state: 'complete', step: 2, result: '个人接口回答' } : undefined);
+  const w = open(fake); await flushPromises();
+  expect((w.get('input[value="byok"]').element as HTMLInputElement).checked).toBe(true);
+  await w.get('#assistant-question').setValue('请说明资料'); await w.get('form.assistant-composer').trigger('submit'); await flushPromises();
+  expect(fake.call).toHaveBeenCalledWith('ai.chat.send', expect.objectContaining({ service: 'byok', providerProfile: { id: 'personal-1', version: 2 }, model: 'personal-model' }));
+  const sendInput = vi.mocked(fake.call).mock.calls.find(([action]) => action === 'ai.chat.send')![1];
+  expect(sendInput).not.toHaveProperty('apiKey'); expect(sendInput).not.toHaveProperty('provider'); expect(sendInput).not.toHaveProperty('baseUrl');
+  expect(fake.call).toHaveBeenCalledWith('ai.chat.step', { conversationId: 'chat-1', turnId: turn.id, step: 0 });
+  expect(w.text()).toContain('个人接口回答');
+});
+it('restoring a saved-provider turn leaves the next personal selection intact and resumes without temporary credentials', async () => {
+  const prior = { ...turn, service: 'byok' as const, provider: 'anthropic', model: 'old-model', providerProfile: { id: 'old-profile', version: 1 }, quotaHeld: false };
+  const fake = fakeTransport(action => action === 'ai.providers.list' ? structuredClone(savedState) : action === 'ai.chat.latest' ? { conversation: conversation([prior]) } : action === 'ai.chat.step' ? { ...prior, state: 'complete', step: 2, result: '旧轮完成' } : undefined);
+  const w = open(fake); await flushPromises();
+  expect(w.text()).toContain('已选个人模型：personal-model');
+  expect(w.text()).not.toContain('重新填写 Key');
+  await w.findAll('button').find(button => button.text() === '继续回答')!.trigger('click'); await flushPromises();
+  expect(fake.call).toHaveBeenCalledWith('ai.chat.step', { conversationId: 'chat-1', turnId: turn.id, step: 0 });
+  expect(w.text()).toContain('已选个人模型：personal-model');
+});
+it('changing the personal selection while creation is pending affects only a later send', async () => {
+  let finish!: (value: AiConversation) => void;
+  const pending = new Promise<AiConversation>(resolve => { finish = resolve; });
+  const fake = fakeTransport((action, input) => {
+    if (action === 'ai.providers.list') return structuredClone(savedState);
+    if (action === 'ai.providers.select') return { ...structuredClone(savedState), version: 5, selection: { profile: { id: 'personal-1', version: 2 }, model: input.model } };
+    if (action === 'ai.chat.create') return pending;
+    if (action === 'ai.chat.send') return { ...turn, state: 'complete', service: 'byok', provider: 'openai-chat', model: input.model, providerProfile: input.providerProfile, quotaHeld: false, result: '个人结果' };
+  });
+  const w = open(fake); await flushPromises(); await w.get('#assistant-question').setValue('第一个问题'); await w.get('form.assistant-composer').trigger('submit'); await flushPromises();
+  await w.get('#provider-model-personal-1').setValue('second-model'); await w.get('[data-test="select-provider"]').trigger('click'); await flushPromises();
+  finish(conversation()); await flushPromises();
+  const first = vi.mocked(fake.call).mock.calls.find(([action]) => action === 'ai.chat.send')![1]; expect(first).toMatchObject({ model: 'personal-model', providerProfile: { id: 'personal-1', version: 2 } });
+  await w.get('#assistant-question').setValue('第二个问题'); await w.get('form.assistant-composer').trigger('submit'); await flushPromises();
+  const sends = vi.mocked(fake.call).mock.calls.filter(([action]) => action === 'ai.chat.send'); expect(sends[1]![1]).toMatchObject({ model: 'second-model' });
+});
+it('changing the personal selection does not replace an in-flight temporary connection between batches', async () => {
+  let finish!: (value: AiChatTurn) => void;
+  const pending = new Promise<AiChatTurn>(resolve => { finish = resolve; });
+  const temporary = { ...turn, service: 'byok' as const, model: 'temporary-model', quotaHeld: false };
+  const fake = fakeTransport((action, input) => {
+    if (action === 'ai.providers.list') return structuredClone(savedState);
+    if (action === 'ai.providers.select') return { ...structuredClone(savedState), version: 5 };
+    if (action === 'ai.chat.send') return temporary;
+    if (action === 'ai.chat.step') return input.step === 0 ? pending : { ...temporary, state: 'complete', step: 2, result: '临时接口完成' };
+  });
+  const w = open(fake); await flushPromises(); await w.get('[data-test="use-temporary-api"]').trigger('click'); await w.get('#assistant-model').setValue('temporary-model'); await w.get('#assistant-key').setValue('only-in-memory');
+  await w.get('#assistant-question').setValue('本次问题'); await w.get('form.assistant-composer').trigger('submit'); await flushPromises();
+  await w.get('[data-test="select-provider"]').trigger('click'); await flushPromises(); expect((w.get('#assistant-key').element as HTMLInputElement).value).toBe('');
+  finish({ ...temporary, step: 1 }); await flushPromises();
+  const steps = vi.mocked(fake.call).mock.calls.filter(([action]) => action === 'ai.chat.step'); expect(steps).toHaveLength(2);
+  expect(steps[1]![1]).toMatchObject({ connection: { provider: 'deepseek', model: 'temporary-model', apiKey: 'only-in-memory' } });
+});
+it('changes the idempotency key after choosing a different saved profile version', async () => {
+  let selectedVersion = 2;
+  const fake = fakeTransport((action, input) => {
+    if (action === 'ai.providers.list') return structuredClone(savedState);
+    if (action === 'ai.providers.select') { selectedVersion++; return { ...structuredClone(savedState), version: 5, profiles: [{ ...savedState.profiles[0]!, version: selectedVersion }], selection: { profile: { id: 'personal-1', version: selectedVersion }, model: input.model } }; }
+    if (action === 'ai.chat.send') throw new Error('lost response');
+  });
+  const w = open(fake); await flushPromises(); await w.get('#assistant-question').setValue('同一问题'); await w.get('form.assistant-composer').trigger('submit'); await flushPromises();
+  await w.get('[data-test="select-provider"]').trigger('click'); await flushPromises(); await w.get('form.assistant-composer').trigger('submit'); await flushPromises();
+  const sends = vi.mocked(fake.call).mock.calls.filter(([action]) => action === 'ai.chat.send'); expect((sends[0]![1] as any).requestId).not.toBe((sends[1]![1] as any).requestId);
+});
+it('account changes discard unsaved provider keys and old configuration responses', async () => {
+  let sessionListener!: (session: AuthSession | null) => void, finish!: (value: AiProviderState) => void, reads = 0;
+  const pending = new Promise<AiProviderState>(resolve => { finish = resolve; });
+  const fake = fakeTransport(action => action === 'ai.providers.list' ? ++reads === 1 ? { ...structuredClone(savedState), selection: null } : reads === 2 ? pending : { storageConfigured: true, version: 0, profiles: [], selection: null } : undefined);
+  fake.onSessionChange = vi.fn(listener => { sessionListener = listener; return vi.fn(); });
+  const w = open(fake); await flushPromises(); await w.get('[data-test="add-provider"]').trigger('click'); await w.get('#provider-api-key').setValue('old-account-secret');
+  sessionListener({ uid: 'new-account', username: null }); await flushPromises(); expect(w.find('#provider-api-key').exists()).toBe(false);
+  sessionListener({ uid: 'third-account', username: null }); await flushPromises();
+  finish({ ...structuredClone(savedState), profiles: [{ ...savedState.profiles[0]!, name: '旧账号配置' }] }); await flushPromises();
+  expect(w.text()).not.toContain('旧账号配置'); expect(w.html()).not.toContain('old-account-secret');
 });

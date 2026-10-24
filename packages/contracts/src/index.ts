@@ -49,6 +49,8 @@ export interface Favorite { itemId: string; schoolId: string; schoolName: string
 export interface WebsiteSourceInput {name:string;entryUrl:string;type:'html_list'|'html_detail'|'rss'|'json_api';categories:string[];intervalMinutes:number;selectors:Record<string,string>;allowAi:boolean;authorized:boolean}
 export interface WebsiteSource extends WebsiteSourceInput {id:string;enabled:boolean;lastSuccessAt:string|null;message:string;count:number}
 export interface AiConnection { provider: "deepseek" | "openai"; model: string; apiKey: string }
+export type { AiProviderProtocol, AiProviderRef, AiSavedProvider, AiProviderSelection, AiProviderState, AiProviderSave } from './ai-providers';
+import type { AiProviderActions, AiProviderRef } from './ai-providers';
 export interface AiQuota { day: string; timezone: "Asia/Shanghai"; limit: number; used: number; held: number; remaining: number; resetsAt: string }
 export interface ReadingDocument { reference: string; itemId: string; schoolId: string | null; title: string; originalUrl: string | null; version: string; markdown: string }
 export interface ReadingPackage { docs: ReadingDocument[]; guide: string; manifest: Record<string, unknown>; batches: number; maxCalls: number; fingerprint: string }
@@ -57,10 +59,11 @@ export interface ReadingTask {
   task: "summary" | "outline" | "answer"; state: "ready" | "running" | "complete" | "failed" | "uncertain" | "cancelled";
   step: number; totalSteps: number; title: string; result: string | null; message: string; failureCode?: string;
   expireAt: string; createdAt: string; quotaHeld: boolean;
+  providerProfile?: AiProviderRef;
 }
 export interface AiStartInput {
   schoolId: string; itemIds: string[]; requestId: string; service: "official" | "byok";
-  provider?: "deepseek" | "openai"; model?: string; task: "summary" | "outline" | "answer"; question?: string; fingerprint?: string;
+  provider?: "deepseek" | "openai"; model?: string; providerProfile?: AiProviderRef; task: "summary" | "outline" | "answer"; question?: string; fingerprint?: string;
 }
 export type { AiPreferences, RecommendedNotice, AiRecommendations, ChatReference, AiChatTurn, AiConversation } from './assistant';
 import type { AssistantActions } from './assistant';
@@ -75,7 +78,7 @@ export interface ReminderNotification { id:string; kind:'deadline'|'new_notice';
 export interface ReminderEmailState {configured:boolean;address:string|null;verified:boolean;enabled:boolean;suspended:boolean;usedToday:number;dailyLimit:number}
 export interface ReminderState { reminders:Reminder[]; watches:NoticeWatch[]; notifications:ReminderNotification[]; unread:number; checkedAt:string; more:boolean; pushConfigured:boolean; publicKey:string|null;deliveryMode?:'minute'|'daily';queueConfigured?:boolean;deviceCount?:number;scheduler?:'aliyun-fc'|'qstash';schedulerHealth?:'unconfigured'|'waiting'|'active'|'stale'|'failed';schedulerCheckedAt?:string|null;email?:ReminderEmailState }
 export interface BrowserPushSubscription { endpoint:string; keys:{p256dh:string;auth:string} }
-export interface GatewayActions extends AssistantActions {
+export interface GatewayActions extends AssistantActions, AiProviderActions {
   'reminders.state':{input:Record<string,never>;output:ReminderState};
   'reminders.add':{input:{schoolId:string;itemIds:string[]};output:ReminderState};
   'reminders.save':{input:ReminderInput;output:ReminderState};

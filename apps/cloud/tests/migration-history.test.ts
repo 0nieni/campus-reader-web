@@ -22,6 +22,7 @@ test('production and the existing PR14 preview retain their applied migration hi
     assert.deepEqual(await readFile(join(root, 'migrations', file)), await readFile(join(root, 'pr14-migrations', file)), `Applied migration copies must have the same checksum: ${file}`);
   }
   assert.deepEqual(await readFile(join(root, 'migrations/20261022000100_ai_conversations.sql')), await readFile(join(root, 'pr14-migrations/20261019000100_ai_conversations.sql')));
+  assert.deepEqual(await readFile(join(root, 'migrations/20261024000300_ai_provider_profiles.sql')), await readFile(join(root, 'pr14-migrations/20261024000300_ai_provider_profiles.sql')));
   const schemas: unknown[] = [];
   for (const history of [
     { name: 'production', directory: 'migrations', initial: [...common, ...reminders] },
@@ -49,6 +50,7 @@ test('production and the existing PR14 preview retain their applied migration hi
       const constraints = await pool.query("SELECT conname,pg_get_constraintdef(oid) AS definition FROM pg_constraint WHERE conrelid IN (SELECT oid FROM pg_class WHERE relname LIKE 'campus_%') ORDER BY conname");
       assert.ok(tables.rows.some((row: { table_name: string }) => row.table_name === 'campus_reminder_accounts'));
       assert.ok(tables.rows.some((row: { table_name: string }) => row.table_name === 'campus_reminder_channel_receipts'));
+      assert.ok(tables.rows.some((row: { table_name: string }) => row.table_name === 'campus_ai_provider_profiles'));
       schemas.push({ tables: tables.rows, indexes: indexes.rows, constraints: constraints.rows });
     } finally {
       await pool.end(); await server.stop();

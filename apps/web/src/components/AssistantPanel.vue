@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
-import type { AiChatTurn, AiConversation, AiConnection, AiPreferences, AiRecommendations, GatewayActions, Notice, RecommendedNotice } from '@campus/contracts';
+import type { AiChatTurn, AiConversation, AiConnection, AiPreferences, AiProviderSelection, AiRecommendations, GatewayActions, Notice, RecommendedNotice } from '@campus/contracts';
+import AiProviderSettings from './AiProviderSettings.vue';
 import type { Transport } from '../lib/transport';
 import { ClientError, safeError } from '../lib/errors';
 import { downloadFile, renderMarkdown } from '../lib/markdown';
@@ -10,15 +11,24 @@ const status = ref<GatewayActions['ai.status']['output'] | null>(null);
 const preferences = ref<AiPreferences | null>(null), recommendations = ref<AiRecommendations | null>(null), chat = ref<AiConversation | null>(null);
 const interests = ref(''), goals = ref(''), learningEnabled = ref(false), query = ref(''), question = ref('');
 const service = ref<'official' | 'byok'>('official'), provider = ref<AiConnection['provider']>('deepseek'), model = ref(''), apiKey = ref('');
+const profileSelection = ref<AiProviderSelection | null>(null), apiMode = ref<'saved' | 'temporary'>('temporary'), settingsEpoch = ref(0);
+const providerSettings = ref<InstanceType<typeof AiProviderSettings> | null>(null), providerBusy = ref(false), providerStorageConfigured = ref(false);
 const localSources = ref<Notice[]>([]), dismissed = ref<RecommendedNotice | null>(null), error = ref(''), note = ref('');
 const busy = ref(false), loading = ref(false), cancelling = ref(false), resolutions = ref<Record<string, string>>({});
 const stateNames = { ready: '等待继续', running: '正在回答', complete: '已完成', failed: '未完成', uncertain: '状态待核查', cancelled: '已取消' };
 const readNames = { body: '已读正文', title_only: '仅标题', snippet_only: '仅摘要', unavailable: '正文不可用' };
-let active = true, epoch = 0, stopped = true, createRequestId = '', sendRequestId = '', sendSignature = '';
+let active = true, epoch = 0, stopped = true, createRequestId = '', sendRequestId = '', sendSignature = '', unsubscribe: (() => void) | undefined;
 const selected = computed(() => [...new Map([...props.selection, ...localSources.value].map(item => [item.id, item])).values()]);
 const unresolved = computed(() => chat.value?.turns.some(turn => ['ready', 'running', 'uncertain'].includes(turn.state) || turn.quotaHeld));
 const canExport = computed(() => Boolean(chat.value?.turns.some(turn => turn.result) && !busy.value && !loading.value));
-const canSend = computed(() => Boolean(props.schoolId && !loading.value && !busy.value && !unresolved.value && question.value.trim() && question.value.length <= 1500 && selected.value.length <= 8 && (service.value === 'official' ? status.value?.officialConfigured && (status.value?.quota.remaining || 0) > 0 : model.value.trim() && apiKey.value)));
+const canSend = computed(() => Boolean(props.schoolId && !loading.value && !busy.value && !providerBusy.value && !unresolved.value && question.value.trim() && question.value.length <= 1500 && selected.value.length <= 8 && (service.value === 'official' ? status.value?.officialConfigured && (status.value?.quota.remaining || 0) > 0 : apiMode.value === 'saved' ? providerStorageConfigured.value && profileSelection.value : model.value.trim() && apiKey.value)));
+function selectProfile(value: AiProviderSelection | null, activate: boolean) {
+  profileSelection.value = value ? { profile: { ...value.profile }, model: value.model } : null;
+  if (value && activate) { service.value = 'byok'; apiMode.value = 'saved'; apiKey.value = ''; }
+}
+function useTemporary() { service.value = 'byok'; apiMode.value = 'temporary'; }
+async function useOfficial() { if (providerSettings.value && !await providerSettings.value.chooseOfficial()) service.value = 'byok'; }
+function temporaryConnection(): AiConnection { return { provider: provider.value, model: model.value.trim(), apiKey: apiKey.value }; }
 function current(ticket: number) { return active && ticket === epoch; }
 function safeLink(value: string | null) { try { const url = new URL(value || ''); return ['https:', 'http:'].includes(url.protocol) && !url.username && !url.password ? url.href : undefined; } catch { return undefined; } }
 function sourceTime(value: string | null) { return value && Number.isFinite(Date.parse(value)) ? new Date(value).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) : '未提供'; }
@@ -27,9 +37,9 @@ function applyChat(value: AiConversation | null) {
   if (value && (value.schoolId !== props.schoolId || Date.parse(value.expireAt) <= Date.now())) { chat.value = null; note.value = '对话已满 24 小时，请开始新对话。'; return; }
   chat.value = value;
   const pending = value?.turns.find(turn => ['ready', 'running'].includes(turn.state));
-  if (pending?.service === 'byok' && ['deepseek', 'openai'].includes(pending.provider)) {
+  if (pending?.service === 'byok' && !pending.providerProfile && ['deepseek', 'openai'].includes(pending.provider)) {
     if (provider.value !== pending.provider || model.value.trim() !== pending.model) apiKey.value = '';
-    service.value = 'byok'; provider.value = pending.provider as AiConnection['provider']; model.value = pending.model;
+    service.value = 'byok'; apiMode.value = 'temporary'; provider.value = pending.provider as AiConnection['provider']; model.value = pending.model;
     if (!apiKey.value) note.value = '继续 API 回答前，请在使用设置中重新填写 Key。';
   }
 }
@@ -132,15 +142,15 @@ async function recover(ticket: number, conversationId: string) {
   try { const value = await props.transport.call('ai.chat.get', { conversationId }); if (current(ticket)) applyChat(value); }
   catch (caught) { if (current(ticket)) error.value = safeError(caught); }
 }
-async function stepTurn(ticket: number, turnId: string) {
+async function stepTurn(ticket: number, turnId: string, connection = temporaryConnection()) {
   if (!current(ticket) || !chat.value) return;
   const conversationId = chat.value.id;
   for (let count = 0; count < 64 && current(ticket) && !stopped; count++) {
     const turn = chat.value?.turns.find(value => value.id === turnId);
     if (!turn || turn.state !== 'ready') break;
-    if (turn.service === 'byok' && (!apiKey.value || !model.value.trim() || provider.value !== turn.provider || model.value.trim() !== turn.model)) { error.value = '继续回答前，请填写该任务使用的服务商、模型和 API Key。'; break; }
+    if (turn.service === 'byok' && !turn.providerProfile && (!connection.apiKey || !connection.model || connection.provider !== turn.provider || connection.model !== turn.model)) { error.value = '继续回答前，请填写该任务使用的服务商、模型和 API Key。'; break; }
     try {
-      const value = await props.transport.call('ai.chat.step', { conversationId, turnId, step: turn.step, ...(turn.service === 'byok' ? { connection: { provider: provider.value, model: model.value.trim(), apiKey: apiKey.value } } : {}) });
+      const value = await props.transport.call('ai.chat.step', { conversationId, turnId, step: turn.step, ...(turn.service === 'byok' && !turn.providerProfile ? { connection } : {}) });
       if (!current(ticket) || stopped) return;
       replaceTurn(value);
       if (value.state === 'ready' && value.step <= turn.step) { stopped = true; note.value = '本批状态尚未推进，请刷新对话状态后再继续。'; break; }
@@ -160,7 +170,8 @@ async function send() {
   if (!canSend.value) return;
   await mutation(async ticket => {
     const text = question.value.trim(), itemIds = selected.value.map(item => item.id);
-    const signature = JSON.stringify([props.schoolId, text, itemIds, service.value, provider.value, model.value.trim()]);
+    const chosenService = service.value, saved = apiMode.value === 'saved' && profileSelection.value ? { profile: { ...profileSelection.value.profile }, model: profileSelection.value.model } : null, connection = temporaryConnection();
+    const signature = JSON.stringify([props.schoolId, text, itemIds, chosenService, chosenService === 'byok' ? saved ? [saved.profile.id, saved.profile.version, saved.model] : [connection.provider, connection.model] : null]);
     if (signature !== sendSignature) { sendRequestId = crypto.randomUUID(); sendSignature = signature; }
     if (!chat.value) {
       createRequestId ||= crypto.randomUUID();
@@ -171,12 +182,12 @@ async function send() {
     }
     const conversationId = chat.value.id;
     try {
-      const value = await props.transport.call('ai.chat.send', { conversationId, requestId: sendRequestId, question: text, ...(itemIds.length ? { itemIds } : {}), service: service.value, ...(service.value === 'byok' ? { provider: provider.value, model: model.value.trim() } : {}) });
+      const value = await props.transport.call('ai.chat.send', { conversationId, requestId: sendRequestId, question: text, ...(itemIds.length ? { itemIds } : {}), service: chosenService, ...(chosenService === 'byok' ? saved ? { providerProfile: saved.profile, model: saved.model } : { provider: connection.provider, model: connection.model } : {}) });
       if (!current(ticket)) return;
       replaceTurn(value);
       releaseSearchSelection(value);
       question.value = ''; sendRequestId = ''; sendSignature = ''; stopped = false;
-      await stepTurn(ticket, value.id);
+      await stepTurn(ticket, value.id, connection);
     } catch (caught) {
       if (!current(ticket)) return;
       stopped = true; error.value = safeError(caught); await recover(ticket, conversationId);
@@ -230,14 +241,25 @@ function exportConversation() {
   note.value = '已导出当前对话。下载文件不会随云端到期自动删除。';
 }
 function reset() {
-  epoch++; stopped = true; busy.value = false; loading.value = false; cancelling.value = false; status.value = null; preferences.value = null; recommendations.value = null; chat.value = null; localSources.value = []; dismissed.value = null; interests.value = ''; goals.value = ''; learningEnabled.value = false; apiKey.value = ''; model.value = ''; question.value = ''; query.value = ''; error.value = ''; note.value = ''; resolutions.value = {}; createRequestId = ''; sendRequestId = ''; sendSignature = '';
+  providerBusy.value = false; providerStorageConfigured.value = false;
+  epoch++; settingsEpoch.value++; stopped = true; busy.value = false; loading.value = false; cancelling.value = false; status.value = null; preferences.value = null; recommendations.value = null; chat.value = null; localSources.value = []; dismissed.value = null; interests.value = ''; goals.value = ''; learningEnabled.value = false; apiKey.value = ''; model.value = ''; profileSelection.value = null; apiMode.value = 'temporary'; service.value = 'official'; provider.value = 'deepseek'; question.value = ''; query.value = ''; error.value = ''; note.value = ''; resolutions.value = {}; createRequestId = ''; sendRequestId = ''; sendSignature = '';
 }
 watch(() => props.schoolId, () => { reset(); void load(); });
+watch(() => props.transport, () => { unsubscribe?.(); reset(); subscribeSession(); void load(); });
+function subscribeSession() {
+  let uid: string | null | undefined;
+  unsubscribe = props.transport.onSessionChange(session => {
+    const next = session?.uid ?? null;
+    if (uid !== undefined && uid === next) return;
+    uid = next; reset();
+    if (next) void load();
+  });
+}
 const timer = setInterval(() => {
   if (chat.value && Date.parse(chat.value.expireAt) <= Date.now()) { epoch++; stopped = true; busy.value = false; loading.value = false; cancelling.value = false; chat.value = null; apiKey.value = ''; createRequestId = ''; sendRequestId = ''; sendSignature = ''; note.value = '个人对话已满 24 小时，已从当前页面移除。'; }
 }, 1000);
-onMounted(load);
-onUnmounted(() => { active = false; reset(); clearInterval(timer); });
+onMounted(() => { subscribeSession(); void load(); });
+onUnmounted(() => { active = false; unsubscribe?.(); reset(); clearInterval(timer); });
 </script>
 
 <template>
@@ -254,7 +276,8 @@ onUnmounted(() => { active = false; reset(); clearInterval(timer); });
               <p v-if="turn.search" class="turn-search-status" role="status">{{ turn.search.message }}</p>
               <p class="turn-meta">{{ turn.service === 'official' ? '官方 AI' : '我的 API' }} · {{ turn.model }}<template v-if="turn.totalSteps"> · {{ Math.min(turn.step, turn.totalSteps) }}/{{ turn.totalSteps }} 批</template></p>
               <ul v-if="turn.references.length" class="answer-references"><li v-for="source in turn.references" :key="source.reference"><a v-if="safeLink(source.originalUrl)" :href="safeLink(source.originalUrl)" target="_blank" rel="noopener noreferrer">[{{ source.reference }}] {{ source.title }}</a><span v-else>[{{ source.reference }}] {{ source.title }}（原文链接不可用）</span></li></ul>
-              <div class="turn-actions"><button v-if="turn.state === 'ready' && !busy" class="secondary" :disabled="loading" @click="resume(turn)">继续回答</button><button v-if="['ready', 'running'].includes(turn.state) || (turn.quotaHeld &amp;&amp; !['uncertain', 'cancelled'].includes(turn.state))" data-test="cancel" class="text-button" :disabled="cancelling" @click="cancel(turn)">取消回答</button><button v-if="turn.quotaHeld || ['ready', 'running', 'uncertain', 'cancelled'].includes(turn.state)" class="text-button" :disabled="busy || loading" @click="refreshChat">刷新对话状态</button></div>
+              <div class="turn-actions"><button v-if="turn.state === 'ready' && !busy" class="secondary" :disabled="loading" @click="resume(turn)">继续回答</button><button v-if="['ready', 'running'].includes(turn.state) || (turn.state === 'uncertain' &amp;&amp; !turn.quotaHeld) || (turn.quotaHeld &amp;&amp; !['uncertain', 'cancelled'].includes(turn.state))" data-test="cancel" class="text-button" :disabled="cancelling" @click="cancel(turn)">{{ turn.state === 'uncertain' ? '已核查用量，结束本轮' : '取消回答' }}</button><button v-if="turn.quotaHeld || ['ready', 'running', 'uncertain', 'cancelled'].includes(turn.state)" class="text-button" :disabled="busy || loading" @click="refreshChat">刷新对话状态</button></div>
+              <p v-if="turn.state === 'uncertain' &amp;&amp; !turn.quotaHeld" class="assistant-note">请先到服务商控制台核查用量，再结束本轮。本轮不会自动重发，已提交的请求可能仍计费。</p>
               <div v-if="['uncertain', 'cancelled'].includes(turn.state) && turn.quotaHeld" class="quota-resolution"><p>请在服务商控制台核查是否处理，再结算预占。此操作不会重发问题。</p><label :for="`resolve-${turn.id}`">核查结果</label><select :id="`resolve-${turn.id}`" v-model="resolutions[turn.id]" :disabled="busy"><option value="">请选择</option><option value="charged">已处理，计入一次额度</option><option value="not_charged">确认未处理，释放预占</option></select><button class="secondary" :disabled="busy || !resolutions[turn.id]" @click="resolve(turn)">确认结算</button></div>
             </div>
           </article>
@@ -263,7 +286,16 @@ onUnmounted(() => { active = false; reset(); clearInterval(timer); });
         <form class="assistant-composer" @submit.prevent="send"><label class="visually-hidden" for="assistant-question">问题</label><textarea id="assistant-question" v-model="question" maxlength="1500" rows="3" :disabled="busy || loading || !schoolId" placeholder="问问报名材料，也可以说“再找找本校比赛”…" @keydown.ctrl.enter.prevent="send" @keydown.meta.enter.prevent="send" /><div class="composer-bottom"><span>{{ question.length }}/1500 <small>Ctrl / ⌘ + Enter 发送</small></span><button type="submit" data-test="send" class="primary" :disabled="!canSend">{{ busy ? '正在处理…' : '发送' }}</button></div></form>
         <p v-if="!schoolId" class="assistant-note">先选择一所学校，再和阅读搭子聊天。</p><p v-else-if="status && service === 'official' && !status.officialConfigured" class="assistant-note">官方模型尚未配置，可在使用设置中填写自己的 API。</p><p v-else-if="status && service === 'official' && status.quota.remaining <= 0" class="assistant-note">今日官方额度已用完或预占，北京时间零点恢复。也可使用自己的 API。</p>
         <p v-if="error" class="error-message" role="alert">{{ error }}</p><p v-if="note" class="assistant-note" role="status">{{ note }}</p><p v-if="chat" class="expiry-note">对话于 {{ new Date(chat.expireAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) }}（北京时间）到期。回答依据已提供的资料，重要日期请核对原文。</p>
-        <details class="assistant-settings"><summary>回答服务设置</summary><fieldset :disabled="busy || loading"><legend>回答服务</legend><label><input v-model="service" type="radio" value="official" /> 官方 AI</label><label><input v-model="service" type="radio" value="byok" /> 我的 API</label></fieldset><div v-if="service === 'byok'" class="byok-fields"><label for="assistant-provider">服务商</label><select id="assistant-provider" v-model="provider" :disabled="busy"><option value="deepseek">DeepSeek</option><option value="openai">OpenAI</option></select><label for="assistant-model">模型 ID</label><input id="assistant-model" v-model="model" maxlength="100" :disabled="busy" autocomplete="off" /><label for="assistant-key">API Key</label><input id="assistant-key" v-model="apiKey" type="password" maxlength="512" :disabled="busy" autocomplete="off" spellcheck="false" /><button type="button" class="text-button" @click="apiKey = ''; stopped = true">清除 Key 并暂停</button><p>Key 仅保留在本页内存，只随处理批次发送。离开、刷新或切换学校后需重填；用量由服务商计费。</p></div></details>
+        <details class="assistant-settings"><summary>服务模型调整</summary>
+          <fieldset :disabled="loading || providerBusy"><legend>回答服务（用于之后的新问题）</legend><label><input v-model="service" type="radio" value="official" @change="useOfficial" /> 官方 AI</label><label><input v-model="service" type="radio" value="byok" /> 我的 API</label></fieldset>
+          <p v-if="service === 'byok' && apiMode === 'saved' && profileSelection" class="assistant-note">已选个人模型：{{ profileSelection.model }}。用量由所选服务商计费。</p>
+          <p v-if="service === 'byok' && apiMode === 'saved' && !profileSelection" class="assistant-note">请选择一个个人配置，或明确使用下方的临时 API。</p>
+          <AiProviderSettings :key="settingsEpoch" ref="providerSettings" :transport="transport" :active="service === 'byok' && apiMode === 'saved'" @selected="selectProfile" @changed="providerStorageConfigured = $event.storageConfigured" @busy="providerBusy = $event" />
+          <details class="temporary-settings" :open="service === 'byok' && apiMode === 'temporary'"><summary>临时 API（仅本页）</summary>
+            <div v-if="service === 'byok'" class="byok-fields"><label for="assistant-provider">服务商</label><select id="assistant-provider" v-model="provider" :disabled="busy" @change="useTemporary"><option value="deepseek">DeepSeek</option><option value="openai">OpenAI</option></select><label for="assistant-model">模型 ID</label><input id="assistant-model" v-model="model" maxlength="100" :disabled="busy" autocomplete="off" @input="useTemporary" /><label for="assistant-key">API Key</label><input id="assistant-key" v-model="apiKey" type="password" maxlength="512" :disabled="busy" autocomplete="off" spellcheck="false" @input="useTemporary" /><button type="button" class="text-button" @click="apiKey = ''; stopped = true">清除 Key 并暂停</button><p>Key 仅保留在本页内存，只随处理批次发送。离开、刷新或切换学校后需重填；用量由服务商计费。</p></div>
+            <button type="button" data-test="use-temporary-api" class="text-button" :disabled="loading" @click="useTemporary">使用临时 API</button>
+          </details>
+        </details>
       </div>
       <aside class="assistant-rail" aria-label="公告与阅读偏好">
         <section class="source-section"><h2>值得留意的公告</h2><p class="rail-caption">{{ recommendations?.coverage || '从本校已收录的公开公告中发现资料' }}</p><form class="source-search" @submit.prevent="search"><label class="visually-hidden" for="assistant-search">搜索公告</label><input id="assistant-search" v-model="query" maxlength="200" :disabled="busy || loading" placeholder="输入想找的校园消息" /><button type="submit" data-test="search" class="secondary" :disabled="busy || loading || !schoolId">搜索</button></form><p v-if="recommendations?.search.message" class="search-status" role="status">{{ recommendations.search.message }}</p><p v-if="!loading && !recommendations?.items.length" class="rail-caption">暂无匹配的公告，可修改关键词后主动搜索。</p>
@@ -288,7 +320,7 @@ onUnmounted(() => { active = false; reset(); clearInterval(timer); });
 .context-strip { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 11px; margin: 12px 0; color: #627188; }.source-chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; padding: 4px 9px; border: 1px solid #d8e4f6; border-radius: 4px; background: #f5f8ff; color: #235ed7; font-size: 12px; }.source-chip span { margin-left: 7px; }
 .assistant-composer { border: 1px solid #b9cce9; border-radius: 8px; padding: 12px 14px; box-shadow: 0 3px 10px #17376605; }.assistant-composer:focus-within { border-color: #235ed7; box-shadow: 0 0 0 2px #235ed712; }.assistant-composer textarea { width: 100%; padding: 0; border: 0; resize: vertical; min-height: 76px; font: inherit; line-height: 1.7; color: #173766; background: transparent; }.assistant-composer textarea:focus { outline: none; }.composer-bottom { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 7px; }.composer-bottom > span { font-size: 11px; color: #627188; }.composer-bottom small { margin-left: 7px; font-size: 10px; }.composer-bottom .primary { padding: 7px 23px; border-radius: 4px; font-size: 13px; }
 .turn-search-status { font-size: 12px; line-height: 1.7; color: #627188; margin-top: 10px; }
-.assistant-note { font-size: 12px; margin-top: 10px; }.expiry-note { font-size: 11px; margin-top: 15px; }.assistant-settings { font-size: 12px; margin-top: 18px; color: #627188; padding-bottom: 24px; }.assistant-settings summary, .preferences-section summary { cursor: pointer; }.assistant-settings fieldset { border: 0; padding: 12px 0; display: flex; gap: 18px; }.assistant-settings legend { padding: 8px 0 0; }.byok-fields { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 10px; align-items: center; padding: 8px 0 14px; }.byok-fields p, .byok-fields button { grid-column: 1 / -1; }.byok-fields button { justify-self: start; }.byok-fields input, .byok-fields select, .preferences-section input:not([type=checkbox]), .preferences-section textarea, .source-search input, .quota-resolution select { width: 100%; min-width: 0; border: 1px solid #d4dfef; border-radius: 4px; padding: 8px 10px; font: inherit; color: #173766; background: #fff; }
+.assistant-note { font-size: 12px; margin-top: 10px; }.expiry-note { font-size: 11px; margin-top: 15px; }.assistant-settings { font-size: 14px; margin-top: 18px; color: #627188; padding-bottom: 24px; }.assistant-settings > summary { font-size: 15px; }.assistant-settings .assistant-note { font-size: 13px; }.assistant-settings summary, .preferences-section summary { cursor: pointer; }.assistant-settings fieldset { border: 0; padding: 12px 0; display: flex; gap: 18px; }.assistant-settings legend { padding: 8px 0 0; }.byok-fields { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 10px; align-items: center; padding: 8px 0 14px; }.byok-fields p, .byok-fields button { grid-column: 1 / -1; }.byok-fields button { justify-self: start; }.byok-fields input, .byok-fields select, .preferences-section input:not([type=checkbox]), .preferences-section textarea, .source-search input, .quota-resolution select { width: 100%; min-width: 0; border: 1px solid #d4dfef; border-radius: 4px; padding: 8px 10px; font: inherit; color: #173766; background: #fff; }
 .assistant-rail { min-width: 0; border-left: 1px solid #e0e7f1; padding: 25px 0 25px 26px; }.assistant-rail h2 { font-size: 17px; }.rail-caption { font-size: 12px; line-height: 1.8; margin: 8px 0 14px; }.source-search { display: flex; gap: 7px; }.source-search input { font-size: 12px; }.source-search button { white-space: nowrap; padding: 6px 10px; }.search-status { font-size: 11px; margin: 9px 0; }.recommendation { padding: 18px 0; border-bottom: 1px solid #e7edf6; }.source-meta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; font-size: 11px; color: #78849a; }.recommendation h3 { font-size: 15px; font-weight: 600; line-height: 1.7; margin-top: 7px; }.recommendation h3 a { color: #173766; text-decoration: none; }.recommendation h3 a:hover { text-decoration: underline; }.source-dates { display: grid; gap: 2px; margin-top: 7px; font-size: 10px; color: #78849a; }.source-summary { font-size: 12px; margin-top: 8px; line-height: 1.85; }.source-reason { font-size: 11px; color: #496c9e; margin-top: 9px; border-left: 2px solid #d4e1f7; padding-left: 8px; }.source-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; margin-top: 10px; }.source-actions .text-button { font-size: 11px; padding: 2px 0; }.source-actions .dismiss-button { color: #78849a; }.dismissed-note { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; font-size: 11px; color: #627188; }.preferences-section { margin-top: 25px; font-size: 12px; }.preferences-section summary { color: #173766; font-weight: 600; }.preferences-section > label:not(.learning-toggle) { display: block; margin: 14px 0 6px; }.preferences-section textarea { resize: vertical; }.learning-toggle { display: flex; align-items: start; gap: 7px; margin-top: 14px; color: #627188; }.learning-toggle input { margin-top: 4px; }.preference-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 15px; }.preference-actions button { font-size: 11px; }.muted { color: #627188; }.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 textarea:focus-visible { outline: 3px solid #89b0ff; outline-offset: 2px; }.assistant-composer textarea:focus-visible { outline: none; }
 @media (max-width: 1100px) { .assistant-layout { grid-template-columns: minmax(0, 1fr) 260px; gap: 22px; }.assistant-rail { padding-left: 20px; }.quota-line small { display: block; } }
