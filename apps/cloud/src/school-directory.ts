@@ -6,7 +6,7 @@ import { readSchoolPage, extractNotices, extractArticle, PARSER_VERSION, type Pa
 import {schoolSources,publicSourceId} from './school-sources';
 import { AppError } from './errors';
 
-export function schoolDirectory(pool: SqlPool, repo: Repository, reader: PageReader = readSchoolPage, now = Date.now, options:{trackActivity?:boolean}={}) {
+export function schoolDirectory(pool: SqlPool, repo: Repository, reader: PageReader = readSchoolPage, now = Date.now, options:{trackActivity?:boolean;archive?:import('./material-archive').MaterialArchive}={}) {
   async function configuration(id:string) {
     const school=await repo.school(id);
     if(!school?.homepage)throw new AppError('SOURCE_UNAVAILABLE','此学校尚未配置公开公告入口。');
@@ -67,6 +67,9 @@ export function schoolDirectory(pool: SqlPool, repo: Repository, reader: PageRea
     return result;
   }
   async function material(row: ItemRow): Promise<ItemRow> {
+    if(options.archive&&row.sourceId?.startsWith('directory_')){
+      const source=await materialSource(row);if(source)return options.archive.collect(row,source,reader,{deadline:now()+18000});
+    }
     if(row.contentText?.trim()||!row.sourceId?.startsWith('directory_'))return row;
     const id=row.schoolIds?.[0];
     if(!id||row.scope!=='school'||row.ownerOpenid||!row.originalUrl)return row;
@@ -79,5 +82,6 @@ export function schoolDirectory(pool: SqlPool, repo: Repository, reader: PageRea
     await pool.query("UPDATE campus_documents SET body=body || $2::jsonb WHERE collection='items' AND id=$1",[row._id,JSON.stringify(patch)]);
     return {...row,...patch};
   }
-  return {refresh,material};
+  async function materialSource(row:ItemRow){const id=row.schoolIds?.[0];if(!id)return null;return(await configuration(id)).sources.find(s=>publicSourceId(id,s.key)===row.sourceId)||null;}
+  return {refresh,material,materialSource};
 }

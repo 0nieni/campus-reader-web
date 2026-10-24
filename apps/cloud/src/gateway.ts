@@ -280,7 +280,8 @@ export function createGateway(
         defaultCategories: originalCategories(row),
         categoriesCustomized: row.personalCategories !== undefined,
         originalUrl: originalUrl(row),
-        attachmentNote: (materialNote ? materialNote + ' ' : '') + "本阶段未读取附件正文，请以公告原文和附件为准。",
+        attachmentNote: (materialNote ? materialNote + ' ' : '') + (row.materialArchive?.attachmentNote || "本次未读取附件正文，请以公告原文和附件为准。"),
+        ...(row.materialArchive?{materialArchive:row.materialArchive}:{}),
         ...(features?.bookmarks ? { bookmarked: await features.bookmarks.has(identity.dataOwnerId, schoolId, row._id) } : {}),
       };
       return { ok: true, data: detail };

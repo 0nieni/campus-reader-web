@@ -6,9 +6,11 @@ import {authorizeSchool,identifier} from './access';
 import {AppError} from './errors';
 import {extractArticle,readSchoolPage,type PageReader} from './school-pages';
 import {hash,sourceInput,parserSource,parseWebsite,robotsAllowed,websiteUrl} from './website-parser';
+import {downloadMaterial} from './material-download';
+import type {MaterialArchive} from './material-archive';
 const iso=(at:number)=>new Date(at).toISOString();
 const sleep=(ms:number)=>new Promise<void>(resolve=>setTimeout(resolve,ms));
-export function websiteSources(pool:SqlPool,repo:Repository,reader:PageReader=readSchoolPage,now=Date.now,pause=sleep) {
+export function websiteSources(pool:SqlPool,repo:Repository,reader:PageReader=readSchoolPage,now=Date.now,pause=sleep,archive?:MaterialArchive) {
   const record=async(id:string,owner:string,schoolId:string)=>{
     const row=(await pool.query("SELECT body FROM campus_documents WHERE collection='sources' AND id=$1 AND body->>'ownerOpenid'=$2 AND body->'schoolIds' ? $3 AND body->>'importKind'='website' AND body->>'deleted' IS DISTINCT FROM 'true'",[id,owner,schoolId])).rows[0]?.body;
     if(!row)throw new AppError('NOT_FOUND','来源不存在或不属于当前账号和学校。');return row;
@@ -20,17 +22,18 @@ export function websiteSources(pool:SqlPool,repo:Repository,reader:PageReader=re
       WHERE collection='user_profiles' AND id=$1 AND (body->>'websiteFetchDay' IS DISTINCT FROM $2 OR coalesce((body->>'websiteFetchCount')::int,0)<60) RETURNING id`,[owner,day]);
     if(!claimed.rows.length)throw new AppError('SOURCE_DAILY_LIMIT','今天的来源请求（含正文读取）已达60次，请明天再试；不影响已保存公告和阅读额度。');
   }
-  async function polite(url:string,source:ReturnType<typeof parserSource>) {
+  async function reserve(url:string) {
     const key='__website_host_'+hash(new URL(url).hostname);
     for(let attempt=0;attempt<2;attempt++){
       const result=await pool.query(`INSERT INTO campus_documents(collection,id,body) VALUES('school_sync',$1,$2::jsonb)
         ON CONFLICT(collection,id) DO UPDATE SET body=campus_documents.body || EXCLUDED.body WHERE coalesce(campus_documents.body->>'nextAt','')<=$3 RETURNING id`,[key,JSON.stringify({nextAt:iso(now()+1500)}),iso(now())]);
-      if(result.rows.length)return reader(url,source);
+      if(result.rows.length)return;
       if(!attempt)await pause(1550);
     }
     throw new AppError('SOURCE_BUSY','该网站正在采集，请稍后重试。');
   }
-  async function page(url:string,config:WebsiteSourceInput,id:string) {
+  async function polite(url:string,source:ReturnType<typeof parserSource>){await reserve(url);return reader(url,source);}
+  async function permitted(url:string,config:WebsiteSourceInput,id:string) {
     const source=parserSource(config,id),origin=new URL(config.entryUrl).origin,key='__website_robots_'+hash(origin);
     let cached=(await pool.query("SELECT body FROM campus_documents WHERE collection='school_sync' AND id=$1",[key])).rows[0]?.body;
     if(!cached||cached.expireAt<=iso(now())){
@@ -43,9 +46,17 @@ export function websiteSources(pool:SqlPool,repo:Repository,reader:PageReader=re
     }
     source.allowedPath=target=>robotsAllowed(cached.text,target);
     if(!source.allowedPath(url))throw new AppError('SOURCE_ROBOTS_BLOCKED','该公告路径不允许自动采集，请使用原站。');
-    return polite(url,source);
+    return source;
+  }
+  async function page(url:string,config:WebsiteSourceInput,id:string) {return polite(url,await permitted(url,config,id));}
+  async function materialSource(row:ItemRow){
+    if(!row.ownerOpenid||!row.schoolIds?.[0]||!row.sourceId)throw new AppError('NOT_FOUND','来源不存在。');
+    const recordSource=await record(row.sourceId,row.ownerOpenid,row.schoolIds[0]);
+    if(recordSource.enabled===false)throw new AppError('NOT_FOUND','来源已停用。');
+    return{...parserSource(recordSource.config,recordSource._id),id:row.schoolIds[0]};
   }
   async function material(row:ItemRow):Promise<ItemRow> {
+    if(archive&&row.importKind==='website')return archivedMaterial(row,{deadline:now()+18000});
     if(row.importKind!=='website'||row.contentText?.trim())return row;
     if(!row.ownerOpenid||!row.schoolIds?.[0]||!row.sourceId||!row.originalUrl)return row;
     const source=await record(row.sourceId,row.ownerOpenid,row.schoolIds[0]);
@@ -55,8 +66,25 @@ export function websiteSources(pool:SqlPool,repo:Repository,reader:PageReader=re
     await pool.query("UPDATE campus_documents SET body=body || $3::jsonb WHERE collection='items' AND id=$1 AND body->>'ownerOpenid'=$2",[row._id,row.ownerOpenid,JSON.stringify(patch)]);
     return{...row,...patch};
   }
+  async function archivedMaterial(row:ItemRow,settings:{force?:boolean;deadline?:number}={}){
+    if(!archive) return material(row);
+    const config=await record(row.sourceId!,row.ownerOpenid!,row.schoolIds![0]!),source=await materialSource(row);
+    if(!settings.force&&row.inlineMaterial&&row.contentText&&row.materialExpiresAt&&Date.parse(row.materialExpiresAt)>now()){await archive.validate(row,source);return row;}
+    try{return await archive.collect(row,source,async url=>{await budget(row.ownerOpenid!);return page(websiteUrl(url),config.config,config._id);},{...settings,force:settings.force||row.inlineMaterial===true,download:async url=>{await budget(row.ownerOpenid!);const policy=await permitted(url,config.config,config._id);await reserve(url);return downloadMaterial(url,policy);}});}
+    catch(error){
+      // RSS/JSON can supply an authorized body even when its linked HTML is unavailable.
+      // Keep that original capability with a fixed TTL; never bypass denial/robots.
+      if(row.inlineMaterial&&row.contentText&&row.materialExpiresAt&&Date.parse(row.materialExpiresAt)>now()&&error instanceof AppError&&['NO_MATERIAL','SOURCE_UNAVAILABLE','SOURCE_NOT_FOUND'].includes(error.code)){
+        await archive.validate(row,source);return row;
+      }
+      throw error;
+    }
+  }
   async function handle(action:string,input:Record<string,unknown>,identity:IdentityContext) {
     const owner=identity.dataOwnerId,schoolId=identifier(input.schoolId);await authorizeSchool(repo,owner,schoolId);
+    return operation(action,input,owner,schoolId);
+  }
+  async function operation(action:string,input:Record<string,unknown>,owner:string,schoolId:string) {
     if(action==='sources.list'){
       const rows=await pool.query("SELECT body FROM campus_documents WHERE collection='sources' AND body->>'ownerOpenid'=$1 AND body->'schoolIds' ? $2 AND body->>'importKind'='website' AND body->>'deleted' IS DISTINCT FROM 'true' ORDER BY id LIMIT 21",[owner,schoolId]);
       return{sources:rows.rows.map(row=>dto(row.body))};
@@ -100,13 +128,13 @@ export function websiteSources(pool:SqlPool,repo:Repository,reader:PageReader=re
       await budget(owner);
       const rows=parseWebsite(await page(source.config.entryUrl,source.config,id),source.config,id);
       if(action==='sources.test')return{count:rows.length,titles:rows.slice(0,5).map(row=>row.title),message:'连接与列表解析成功，尚未导入；正文在打开详情或预览AI资料时读取。'};
-      const entries=rows.filter(row=>!row.publishedAt||Date.parse(row.publishedAt)>=now()-365*86400000).map(row=>({_id:'webnotice_'+hash(id+'\n'+row.url),title:row.title,originalUrl:row.url,canonicalUrl:row.url,publishedAt:row.publishedAt,contentText:row.contentText||'',scope:'private',ownerOpenid:owner,schoolIds:[schoolId],importKind:'website',sourceId:id,sourceName:source.name,status:'published',categories:source.config.categories,aiProcessing:source.aiProcessing,createdAt:iso(now()),discoveredAt:iso(now())}));
+      const entries=rows.filter(row=>!row.publishedAt||Date.parse(row.publishedAt)>=now()-365*86400000).map(row=>({_id:'webnotice_'+hash(id+'\n'+row.url),title:row.title,originalUrl:row.url,canonicalUrl:row.url,publishedAt:row.publishedAt,contentText:row.contentText||'',...(row.contentText?{inlineContentHash:hash(row.contentText),inlineMaterial:true,materialExpiresAt:iso(now()+365*86400000)}:{}),scope:'private',ownerOpenid:owner,schoolIds:[schoolId],importKind:'website',sourceId:id,sourceName:source.name,status:'published',categories:source.config.categories,aiProcessing:source.aiProcessing,createdAt:iso(now()),discoveredAt:iso(now())}));
       // Serialize writes with source deletion/config changes after network I/O.
       const client=await pool.connect();try{await client.query('BEGIN');
         const latest=(await client.query("SELECT body FROM campus_documents WHERE collection='sources' AND id=$1 FOR UPDATE",[id])).rows[0]?.body;
         if(latest?.deleted||latest?.enabled===false||JSON.stringify(latest?.config)!==JSON.stringify(source.config))throw new AppError('STALE_SOURCE','来源已修改或删除，请重新打开来源管理。');
         if(entries.length)await client.query(`INSERT INTO campus_documents(collection,id,body) SELECT 'items',entry->>'_id',entry FROM jsonb_array_elements($1::jsonb) entry
-          ON CONFLICT(collection,id) DO UPDATE SET body=campus_documents.body || (EXCLUDED.body - 'contentText' - 'createdAt' - 'discoveredAt') || CASE WHEN length(EXCLUDED.body->>'contentText')>0 THEN jsonb_build_object('contentText',EXCLUDED.body->>'contentText') ELSE '{}'::jsonb END`,[JSON.stringify(entries)]);
+          ON CONFLICT(collection,id) DO UPDATE SET body=campus_documents.body || (EXCLUDED.body - ARRAY['contentText','createdAt','discoveredAt','inlineContentHash','inlineMaterial','materialExpiresAt']::text[]) || CASE WHEN length(EXCLUDED.body->>'contentText')>0 AND (campus_documents.body->>'inlineContentHash' IS DISTINCT FROM EXCLUDED.body->>'inlineContentHash' OR coalesce(campus_documents.body->>'materialExpiresAt','')<=$2) THEN jsonb_build_object('contentText',EXCLUDED.body->>'contentText','inlineContentHash',EXCLUDED.body->>'inlineContentHash','inlineMaterial',true,'materialPending',false,'materialArchive',NULL,'materialExpiresAt',EXCLUDED.body->>'materialExpiresAt','updatedAt',$2::text) ELSE '{}'::jsonb END`,[JSON.stringify(entries),iso(now())]);
         await client.query("UPDATE campus_documents SET body=body || $2::jsonb WHERE collection='sources' AND id=$1",[id,JSON.stringify({lastSuccessAt:iso(now()),nextRefreshAt:iso(now()+source.config.intervalMinutes*60000),count:entries.length,message:`本次读取${entries.length}条公告；未生成摘要，不扣AI次数。`})]);
         await client.query('COMMIT');return{count:entries.length,message:`已导入${entries.length}条公告，可返回公告列表查看并选择AI阅读。`};
       }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
@@ -114,5 +142,5 @@ export function websiteSources(pool:SqlPool,repo:Repository,reader:PageReader=re
       await pool.query("UPDATE campus_documents SET body=body || $3::jsonb WHERE collection='sources' AND id=$1 AND body->>'ownerOpenid'=$2",[id,owner,JSON.stringify({message:error instanceof AppError?error.message:'本次未采集成功，已有公告保留。'})]);throw error;
     }finally{await pool.query("UPDATE campus_documents SET body=body || $2::jsonb WHERE collection='sources' AND id=$1",[id,JSON.stringify({requestAfter:iso(now()+1500)})]);}
   }
-  return{handle,material};
+  return{handle,material,materialSource,archivedMaterial,refreshSource:(id:string,owner:string,schoolId:string)=>operation('sources.refresh',{sourceId:id},owner,schoolId)};
 }

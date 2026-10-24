@@ -33,13 +33,13 @@ export async function readingPackage(db: Database, repo: Repository, owner: stri
     if (forModel) await checkPolicy(row);
     const reference = `R${docs.length + 1}`, url = originalUrl(row);
     const metadata = { school_id: row.scope === "global" ? null : schoolId, item_id: itemId, title: row.title || "未命名公告", source_name: row.sourceName || "未提供", original_url: url, published_at: row.publishedAt || null, version: row.updatedAt || row.createdAt || null };
-    const markdown = `---\n${Object.entries(metadata).map(([key, value]) => `${key}: ${JSON.stringify(value)}`).join("\n")}\nreference: ${reference}\n---\n\n# ${row.title || "未命名公告"}\n\n${row.contentText}\n\n## 附件状态\n本次未提供附件正文，不代表原公告没有附件。`;
+    const markdown = `---\n${Object.entries(metadata).map(([key, value]) => `${key}: ${JSON.stringify(value)}`).join("\n")}\nreference: ${reference}\n---\n\n# ${row.title || "未命名公告"}\n\n${row.contentText}\n\n## 附件状态\n${row.materialArchive?.attachmentNote||'本次未提供附件正文，不代表原公告没有附件。'}`;
     docs.push({ reference, itemId, schoolId: metadata.school_id, title: metadata.title, originalUrl: url, version: digest([metadata, row.contentText, row.aiProcessing]), markdown });
   }
   const chars = docs.reduce((sum, doc) => sum + doc.markdown.length, 0);
   if (chars > 60000) reject("CONTEXT_TOO_LONG", "资料超过 6 万字符，请减少篇数后分次阅读。本次未发送模型。");
   return { docs, guide: READING_GUIDE, fingerprint: digest([GUIDE_VERSION, docs.map(doc => [doc.itemId, doc.version])]), batches: splitDocuments(docs).length + 1, maxCalls: splitDocuments(docs).length * 2 + 1,
-    manifest: { schema_version: "campus-markdown-v1", guide_version: GUIDE_VERSION, school_id: schoolId, documents: docs.map(({ markdown, ...meta }) => meta), context_chars: chars, generated_at: new Date().toISOString(), attachments: "not_read" } };
+    manifest: { schema_version: "campus-markdown-v1", guide_version: GUIDE_VERSION, school_id: schoolId, documents: docs.map(({ markdown, ...meta }) => meta), context_chars: chars, generated_at: new Date().toISOString(), attachments: materials.some(row=>row.materialArchive)?materials.map(row=>({itemId:row._id,files:row.materialArchive?.files||[],note:row.materialArchive?.attachmentNote||'未读取附件'})):"not_read" } };
 }
 export interface Batch { kind: "source" | "merge"; content: string }
 export function splitDocuments(docs: ReadingDocument[]): Batch[] {

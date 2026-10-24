@@ -505,6 +505,17 @@ function schoolChanged(event: Event) {
             {{ store.detail.text || "尚未提供正文，请查看公告原文。" }}
           </div>
           <p class="attachment-note">{{ store.detail.attachmentNote }}</p>
+          <section v-if="store.detail.materialArchive" class="material-files" aria-label="已保存的资料">
+            <h2>资料库</h2>
+            <p class="small muted">最早到期：{{ displayTime(store.detail.materialArchive.expiresAt) }} · 北京时间。到期后按来源许可重新采集。</p>
+            <ul>
+              <li v-for="file in store.detail.materialArchive.files" :key="file.id">
+                <a v-if="file.available && store.workspace.school" :href="`/.netlify/functions/material-file?schoolId=${encodeURIComponent(store.workspace.school.id)}&itemId=${encodeURIComponent(store.detail.id)}&fileId=${encodeURIComponent(file.id)}`">{{ file.filename }} ↓</a>
+                <span v-else>{{ file.filename }}</span>
+                <p class="small muted">{{ file.message }}<template v-if="file.expiresAt"> · 保存至 {{ displayTime(file.expiresAt) }}</template></p>
+              </li>
+            </ul>
+          </section>
         </article>
         <div v-else class="reader-empty">
           <svg viewBox="0 0 64 64" aria-hidden="true">
