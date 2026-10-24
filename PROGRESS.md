@@ -307,3 +307,9 @@ Ruling：记忆作为用户档案JSON字段，不新增表/迁移；写入只发
 - 最终npm ci、指南检查/typecheck、全量497项（web186/cloud311，0失败）、build及netlify:build通过。重装依赖最初因本次Vite验收进程持有rolldown原生文件而EPERM，停止已核实的本次QA进程后重试成功；无依赖/锁文件更改，仍有既有6项漏洞及4条未批准脚本提示。日志output-source-improvements-*.log。Netlify仅产出网页/8函数/原迁移，无上传、真实模型调用或生产测试夹具。
 - Playwright本地模拟整页在1440/375验证批量数量/隐藏/恢复、主页管理提示、主动查看隐藏来源、搜索/清除、登录类诊断/分钟时间、个人采集统计/冷却及移动布局，无pageerror或横向溢出；截图与脚本为output/playwright/source-improvements*。真实Identity账号、远端持久化和真实源站联调pending，不等同上线。
 - neat-freak收尾：代码/合同/README/来源说明changed-and-verified，规则verified-current，个人Codex记忆not-applicable，生产发布out-of-scope；交付目录同步、备份和QA证据保留，不清场。未提交、推送、合并或部署。
+
+### 来源中心分支同步与交接（2026-10-24）
+
+用户授权提交并推送AI_module。功能提交b8925e2ab4eddc88a3de237b2b57a40aa6e81915已正常推送，git ls-remote核验远端SHA与本地一致；推送前重新运行全量497项测试（web186/cloud311，0失败）。27份源码、测试与文档纳入功能提交，output验收夹具、截图及日志未加入Git。此前本节中的“未提交/推送”是开发阶段历史状态，以本条交付记录为准。
+
+远端fetch前无新增提交，正常快进推送，无强推或main合并。直连GitHub的Windows TLS握手失败后，核对本机127.0.0.1:7897代理确实监听，只用单次Git参数恢复连接，未关闭证书校验、未改全局配置。README与来源说明同步当前分支状态，真实Identity多账号、真实模型/源站及线上部署效果仍pending；没有手动部署。队友可拉取AI_module，接口与使用边界见docs/website-source-import.md。保留复核检出和本地证据，不清场。
