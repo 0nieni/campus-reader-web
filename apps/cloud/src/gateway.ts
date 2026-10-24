@@ -25,7 +25,7 @@ const fields: Record<string, string[]> = {
   'ai.recommend': ['schoolId','query','search'],
   'ai.chat.create': ['schoolId','requestId'],
   'ai.chat.get': ['conversationId'],
-  'ai.chat.send': ['conversationId','requestId','question','itemIds','service','provider','model'],
+  'ai.chat.send': ['conversationId','requestId','question','itemIds','service','provider','model','webSearch'],
   'ai.chat.step': ['conversationId','turnId','step','connection'],
   'ai.chat.cancel': ['conversationId','turnId'],
   'ai.chat.resolve': ['conversationId','turnId','charged'],

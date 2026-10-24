@@ -11,7 +11,7 @@ import { chatSearchQuery } from './chat-intent';
 
 const COLLECTION = 'web_ai_conversations';
 const unreadableMaterial = new Set(['NO_MATERIAL', 'SOURCE_UNAVAILABLE', 'SOURCE_LOGIN_REQUIRED', 'SOURCE_RESTRICTED', 'SOURCE_NOT_FOUND', 'SOURCE_ROBOTS_BLOCKED', 'SOURCE_BUSY', 'SOURCE_DAILY_LIMIT']);
-type SavedTurn = { id: string; question: string; fingerprint: string; taskId: string | null; materialIds: string[]; references: AiChatTurn['references']; reply?: string; error?: string; history: string; evidence?: import('./chat-context').HistoryEvidence[]; search?: AiRecommendations['search']; preparing?: boolean; preparationStartedAt?: number; cancelled?: boolean; service: 'official' | 'byok'; provider?: string; model?: string };
+type SavedTurn = { id: string; question: string; fingerprint: string; taskId: string | null; materialIds: string[]; references: AiChatTurn['references']; reply?: string; error?: string; history: string; evidence?: import('./chat-context').HistoryEvidence[]; search?: AiRecommendations['search']; webSearch?: boolean; preparing?: boolean; preparationStartedAt?: number; cancelled?: boolean; service: 'official' | 'byok'; provider?: string; model?: string };
 type Conversation = { _id: string; owner: string; schoolId: string; createdAt: string; expireAt: string; turns: SavedTurn[]; pendingTurn: string | null; purged?: boolean };
 type Ai = ReturnType<typeof aiService>;
 export function assistantChat(db: Database, repo: Repository, ai: Ai, recommend: (owner: string, schoolId: string, query?: string) => Promise<AiRecommendations>, now = Date.now, discover?: (schoolId: string, query: string, identity: IdentityContext) => Promise<AiRecommendations>) {
@@ -19,7 +19,7 @@ export function assistantChat(db: Database, repo: Repository, ai: Ai, recommend:
   async function purge(row: Conversation) {
     for (const turn of row.turns || []) if (turn.taskId) {
       const task = await readDoc(db, 'web_ai_tasks', turn.taskId);
-      if (task?.owner === row.owner) await db.collection('web_ai_tasks').doc(turn.taskId).update({ expireAt: new Date(now()).toISOString(), docs: db.command.remove(), notes: db.command.remove(), batches: db.command.remove(), question: db.command.remove(), result: db.command.remove(), chat: db.command.remove(), purged: true });
+      if (task?.owner === row.owner) await db.collection('web_ai_tasks').doc(turn.taskId).update({ expireAt: new Date(now()).toISOString(), docs: db.command.remove(), notes: db.command.remove(), batches: db.command.remove(), question: db.command.remove(), result: db.command.remove(), chat: db.command.remove(), webEvidence: db.command.remove(), webSearch: db.command.remove(), purged: true });
     }
     await db.collection(COLLECTION).doc(row._id).update({ turns: db.command.remove(), pendingTurn: null, purged: true });
   }
@@ -49,7 +49,7 @@ export function assistantChat(db: Database, repo: Repository, ai: Ai, recommend:
       // Legacy execution or a lost response can finish before the chat lock is
       // released. Reads reconcile only settled tasks and never replay a call.
       await releasePending(row, turn, task);
-      return { ...baseTurn(turn), state: task.state, result: task.result, message: task.message, step: task.step, totalSteps: task.totalSteps, quotaHeld: task.quotaHeld, service: task.service, provider: task.provider, model: task.model };
+      return { ...baseTurn(turn), state: task.state, result: task.result, message: task.message, step: task.step, totalSteps: task.totalSteps, quotaHeld: task.quotaHeld, service: task.service, provider: task.provider, model: task.model, ...(task.webSearch ? {webSearch:task.webSearch} : {}) };
     } catch (error) {
       if (!(error instanceof AppError)) throw error;
       if (!['NOT_FOUND', 'MATERIAL_CHANGED', 'AI_POLICY_BLOCKED', 'RESULT_EXPIRED', 'NO_MATERIAL'].includes(error.code)) throw error;
@@ -105,15 +105,16 @@ export function assistantChat(db: Database, repo: Repository, ai: Ai, recommend:
         if (typeof input.question !== 'string' || !input.question.trim() || input.question.length > 1500) reject('VALIDATION_FAILED', '请输入 1～1500 字的问题。');
         const question = input.question.trim();
         if (input.service !== undefined && !['official', 'byok'].includes(String(input.service))) reject('VALIDATION_FAILED', '使用方式无效。');
+        if(input.webSearch!==undefined&&typeof input.webSearch!=='boolean')reject('VALIDATION_FAILED','联网搜索开关无效。');
         if (input.itemIds !== undefined && (!Array.isArray(input.itemIds) || input.itemIds.length > 8)) reject('VALIDATION_FAILED', '一次最多使用八篇公告。');
         const explicitIds = Array.isArray(input.itemIds) ? [...new Set(input.itemIds.map(identifier))] : [];
-        const fingerprint = digest([question, explicitIds, input.service || 'official', input.provider || null, input.model || null]);
+        const fingerprint = digest([question, explicitIds, input.service || 'official', input.provider || null, input.model || null, ...(input.webSearch ? [true] : [])]);
         let turn = row.turns.find(t => t.id === id);
         if (turn && turn.fingerprint !== fingerprint) reject('REQUEST_CONFLICT', '同一请求编号不能更换问题、资料或模型。');
         if (turn?.error || turn?.reply || turn?.preparing || turn?.cancelled) return publicTurn(row, turn);
         if (turn?.taskId && await readDoc(db, 'web_ai_tasks', turn.taskId)) return publicTurn(row, turn);
         if (!turn) {
-          const pending: SavedTurn = { id, question, fingerprint, taskId: null, materialIds: [], references: [], history: '', preparing: true, preparationStartedAt: now(), service: input.service === 'byok' ? 'byok' : 'official', ...(input.provider ? { provider: String(input.provider) } : {}), ...(input.model ? { model: String(input.model) } : {}) };
+          const pending: SavedTurn = { id, question, fingerprint, taskId: null, materialIds: [], references: [], history: '', preparing: true, preparationStartedAt: now(), ...(input.webSearch?{webSearch:true}:{}), service: input.service === 'byok' ? 'byok' : 'official', ...(input.provider ? { provider: String(input.provider) } : {}), ...(input.model ? { model: String(input.model) } : {}) };
           let acquired = false;
           await atomic(db, async tx => {
             const ref = tx.collection(COLLECTION).doc(row._id), current = transactionRow((await ref.get()).data) as Conversation;
@@ -128,10 +129,10 @@ export function assistantChat(db: Database, repo: Repository, ai: Ai, recommend:
           });
           if (!acquired) return publicTurn(row, turn!);
           try {
-            const searchQuery = discover ? chatSearchQuery(question) : null;
+            const searchQuery = discover && !input.webSearch ? chatSearchQuery(question) : null;
             const discovery = searchQuery ? await discover!(row.schoolId, searchQuery, identity) : null;
             let ids = discovery ? discovery.items.filter(item => item.allowAi).map(item => item.id).slice(0, 5) : explicitIds;
-            if (!ids.length && !discovery) {
+            if (!ids.length && !discovery && !input.webSearch) {
               const last = [...row.turns].reverse().find(t => t.materialIds.length && !t.error);
               const isFollowup = /^(那|它|这个|这条|这项|什么时候|截止|需要|怎么|能否|可以|还有|报名|材料|费用|地点|你刚才|刚才|之前|第二|第一个|接下来)/.test(question);
               ids = last && isFollowup ? last.materialIds : (await recommend(owner, row.schoolId, question)).items.filter(n => n.allowAi).map(n => n.id).slice(0, 5);
@@ -157,6 +158,7 @@ export function assistantChat(db: Database, repo: Repository, ai: Ai, recommend:
               discovery.search = { ...discovery.search, message: `${discovery.search.message} 本次检索未取得可用于回答的新正文，继续使用已有公告；搜索摘要不作为正文依据。` };
             }
             if (readable.length && !missingExplicit) pack = await readingPackage(db, repo, owner, row.schoolId, readable);
+            const modelTurn=Boolean(pack||input.webSearch&&!missingExplicit);
             const profile = await readDoc(db, 'user_profiles', owner);
             const prefs = profile?.aiAssistant?.[row.schoolId]?.preferences;
             const exchanges: ContextExchange[] = [];
@@ -168,8 +170,8 @@ export function assistantChat(db: Database, repo: Repository, ai: Ai, recommend:
               exchanges.push({ question: prior.question, answer: visible.result, evidence });
             }
             const { history, evidence } = buildChatContext(row.schoolId, prefs, exchanges, pack?.docs.map(doc => doc.title) || [], discovery?.search);
-            const taskId = pack ? digest([owner, digest(['chat-turn', row._id, id])]) : null;
-            turn = { id, question, fingerprint, taskId, materialIds: pack?.docs.map(d => d.itemId) || [], references: pack?.docs.map(d => ({ reference: d.reference, itemId: d.itemId, title: d.title, originalUrl: d.originalUrl })) || [], history, evidence, ...(discovery ? { search: discovery.search } : {}), service: input.service === 'byok' ? 'byok' : 'official', ...(input.provider ? { provider: String(input.provider) } : {}), ...(input.model ? { model: String(input.model) } : {}), ...(!pack ? { reply: missingExplicit ? '所选公告有正文暂时不可读取，请查看原文或调整选择后再提问。此提示未调用模型，不扣官方次数。' : '当前没有可供 AI 阅读的公告正文。请先选择本校公告，或使用联网搜索查找公开公告，再继续提问。此提示未调用模型，不扣官方次数。' } : {}) };
+            const taskId = modelTurn ? digest([owner, digest(['chat-turn', row._id, id])]) : null;
+            turn = { id, question, fingerprint, taskId, materialIds: pack?.docs.map(d => d.itemId) || [], references: pack?.docs.map(d => ({ reference: d.reference, itemId: d.itemId, title: d.title, originalUrl: d.originalUrl })) || [], history, evidence, ...(input.webSearch?{webSearch:true}:{}), ...(discovery ? { search: discovery.search } : {}), service: input.service === 'byok' ? 'byok' : 'official', ...(input.provider ? { provider: String(input.provider) } : {}), ...(input.model ? { model: String(input.model) } : {}), ...(!modelTurn ? { reply: missingExplicit ? '所选公告有正文暂时不可读取，请查看原文或调整选择后再提问。此提示未调用模型，不扣官方次数。' : '当前没有可供 AI 阅读的公告正文。请先选择本校公告，或开启联网搜索后继续提问。此提示未调用模型，不扣官方次数。' } : {}) };
             const saved = turn;
             await authorizeSchool(repo, owner, row.schoolId);
             await atomic(db, async tx => {
@@ -177,7 +179,7 @@ export function assistantChat(db: Database, repo: Repository, ai: Ai, recommend:
               if (current.purged || Date.parse(current.expireAt) <= now()) reject('RESULT_EXPIRED', '对话已到期或清除。');
               const existing = current.turns.find(t => t.id === id);
               if (!existing?.preparing || current.pendingTurn !== id) { turn = existing || { ...pending, preparing: false, cancelled: true }; return; }
-              await ref.update({ turns: current.turns.map(value => value.id === id ? saved : value), pendingTurn: pack ? id : null });
+              await ref.update({ turns: current.turns.map(value => value.id === id ? saved : value), pendingTurn: modelTurn ? id : null });
             });
           } catch (error) {
             await atomic(db, async tx => {
@@ -190,7 +192,7 @@ export function assistantChat(db: Database, repo: Repository, ai: Ai, recommend:
         if (!turn!.taskId) return publicTurn(row, turn!);
         let task: ReadingTask;
         try {
-          task = await ai.handle('ai.start', { schoolId: row.schoolId, itemIds: turn!.materialIds, requestId: digest(['chat-turn', row._id, id]), service: turn!.service, provider: turn!.provider, model: turn!.model, task: 'answer', question: turn!.question, chat: { history: turn!.history, evidence: turn!.evidence, expireAt: row.expireAt } }, identity) as ReadingTask;
+          task = await ai.handle('ai.start', { schoolId: row.schoolId, itemIds: turn!.materialIds, requestId: digest(['chat-turn', row._id, id]), service: turn!.service, provider: turn!.provider, model: turn!.model, task: 'answer', question: turn!.question, chat: { history: turn!.history, evidence: turn!.evidence, expireAt: row.expireAt, ...(turn!.webSearch?{webSearch:true}:{}) } }, identity) as ReadingTask;
         } catch (error) {
           // Preserve idempotency and a safe explanation; do not leave the conversation locked.
           const message = error instanceof AppError ? error.message : '本轮准备未完成，请查询对话状态。';

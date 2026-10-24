@@ -12,6 +12,8 @@ import { verifiedRelay, type RelayBatch } from "./relay-protocol";
 import { diagnoseOfficial, failureMessages } from "./model-diagnostics";
 import { CHAT_READING_GUIDE, CHAT_GUIDE_VERSION } from './chat-guide';
 import type { ChatContext } from './chat-context';
+import {webReading, supportsWebSearch, verifyWebReferences} from './web-reading';
+import {reserveSearch} from './search-budget';
 
 const TASKS = "web_ai_tasks", ACCOUNTS = "web_ai_accounts";
 export const beijingDay = (now = Date.now()) => new Date(now + 8 * 3600000).toISOString().slice(0, 10);
@@ -21,7 +23,7 @@ export const dailyLimit = () => number("AI_DAILY_LIMIT", 3, 3);
 interface Task extends Omit<ReadingTask, "state" | "totalSteps" | "title"> {
   state: ReadingTask["state"] | "new"; owner: string; fingerprint: string; accountId: string;
   docs: ReadingDocument[]; versions: string; batches: Batch[]; notes: string[]; question: string; inFlight: number | null; startedAt: string | null; testOnly?: boolean; endpointHash?: string; relayLease?: string;
-  chat?: ChatContext;
+  chat?: ChatContext; webEvidence?: ReadingDocument[]; purged?: boolean;
 }
 export function officialConfig(): { connection: Connection; endpoint: string } | null {
   const base = process.env.AI_CHAT_BASE_URL, apiKey = process.env.AI_CHAT_API_KEY, model = process.env.AI_CHAT_MODEL;
@@ -35,9 +37,9 @@ export function officialConfig(): { connection: Connection; endpoint: string } |
     return { connection, endpoint };
   } catch { return null; }
 }
-export function aiService(db: Database, repo: Repository, complete = userCompletion, now: () => number = Date.now, diagnose = diagnoseOfficial) {
+export function aiService(db: Database, repo: Repository, complete = userCompletion, now: () => number = Date.now, diagnose = diagnoseOfficial, webComplete = webReading) {
   const iso = () => new Date(now()).toISOString();
-  const purge = async (id: string) => db.collection(TASKS).doc(id).update({ docs: db.command.remove(), notes: db.command.remove(), batches: db.command.remove(), question: db.command.remove(), result: db.command.remove(), chat: db.command.remove(), purged: true });
+  const purge = async (id: string) => db.collection(TASKS).doc(id).update({ docs: db.command.remove(), notes: db.command.remove(), batches: db.command.remove(), question: db.command.remove(), result: db.command.remove(), chat: db.command.remove(), webEvidence: db.command.remove(), webSearch: db.command.remove(), purged: true });
   const taskRef = (tx: Parameters<Parameters<typeof atomic>[1]>[0], id: string) => tx.collection(TASKS).doc(id);
   async function quota(owner: string): Promise<AiQuota> {
     const day = beijingDay(now()), row = await readDoc(db, ACCOUNTS, digest([owner, day]));
@@ -51,7 +53,7 @@ export function aiService(db: Database, repo: Repository, complete = userComplet
     if (!verify) return row;
     await authorizeSchool(repo, owner, row.schoolId);
     if (row.testOnly || row.state === "new") return row;
-    const current = await readingPackage(db, repo, owner, row.schoolId, row.docs.map(doc => doc.itemId));
+    const current = row.chat?.webSearch && !row.docs.length ? {fingerprint:digest(['web-empty',row.schoolId])} : await readingPackage(db, repo, owner, row.schoolId, row.docs.map(doc => doc.itemId));
     if (current.fingerprint !== row.versions) reject("MATERIAL_CHANGED", "资料或处理权限已变化，旧任务停止读取，请重新预览。");
     const historical = row.chat?.evidence || [];
     for (const saved of historical) {
@@ -64,8 +66,8 @@ export function aiService(db: Database, repo: Repository, complete = userComplet
   function publicTask(row: Task): ReadingTask {
     return { id: row.id, schoolId: row.schoolId, service: row.service, provider: row.provider, model: row.model, task: row.task,
       state: row.state === "new" ? "failed" : row.state, step: row.step, totalSteps: row.batches.length + 1,
-      title: row.state === "new" ? "未开始的阅读任务" : row.testOnly ? "API 连接测试" : row.docs.map(doc => doc.title).join("；"), result: row.state === "complete" ? row.result : null,
-      message: row.state === "new" ? "任务尚未取得额度或未完成创建，请检查额度后重新发起。" : row.message, ...(row.failureCode ? { failureCode: row.failureCode } : {}), expireAt: row.expireAt, createdAt: row.createdAt, quotaHeld: row.quotaHeld };
+      title: row.state === "new" ? "未开始的阅读任务" : row.testOnly ? "API 连接测试" : row.docs.length ? row.docs.map(doc => doc.title).join("；") : "公开互联网阅读", result: row.state === "complete" ? row.result : null,
+      message: row.state === "new" ? "任务尚未取得额度或未完成创建，请检查额度后重新发起。" : row.message, ...(row.failureCode ? { failureCode: row.failureCode } : {}), expireAt: row.expireAt, createdAt: row.createdAt, quotaHeld: row.quotaHeld, ...(row.webSearch ? {webSearch:row.webSearch} : {}) };
   }
   async function finish(id: string, patch: Partial<Task>, success: boolean, expectedStep?: number) {
     await atomic(db, async tx => {
@@ -109,7 +111,8 @@ export function aiService(db: Database, repo: Repository, complete = userComplet
         const q = await quota(owner);
         await readDoc(db, TASKS, "schema-probe");
         await cleanup(owner);
-        return { quota: q, officialConfigured: Boolean(officialConfig()), officialModel: officialConfig()?.connection.model || null, providers: Object.entries(PROVIDERS).map(([id, provider]) => ({ id, ...provider })) };
+        const config=officialConfig();
+        return { quota: q, officialConfigured: Boolean(config), officialModel: config?.connection.model || null, webSearchConfigured: process.env.AI_EXECUTION_MODE!=='netlify' && Boolean(config&&supportsWebSearch(config.connection,config.endpoint)), providers: Object.entries(PROVIDERS).map(([id, provider]) => ({ id, ...provider })) };
       }
       if (action === "ai.preview" || action === "ai.export") return readingPackage(db, repo, owner, identifier(input.schoolId), input.itemIds, action !== "ai.export");
       if (action === "ai.list") {
@@ -132,16 +135,17 @@ export function aiService(db: Database, repo: Repository, complete = userComplet
         if (requestId.length < 12 || requestId.length > 100 || !["official", "byok"].includes(input.service as string) || !["summary", "outline", "answer"].includes(input.task as string) || typeof (input.question ?? "") !== "string" || String(input.question || "").length > 1500) reject("VALIDATION_FAILED", "阅读任务参数无效，问题最多 1500 字。");
         if (input.task === "answer" && !String(input.question || "").trim()) reject("VALIDATION_FAILED", "请输入需要回答的问题。");
         await authorizeSchool(repo, owner, schoolId);
-        const pack = testing ? { docs: [] as ReadingDocument[], fingerprint: "connection-test" } : await readingPackage(db, repo, owner, schoolId, input.itemIds);
+        const chat = input.chat as Task['chat'];
+        const pack = testing ? { docs: [] as ReadingDocument[], fingerprint: "connection-test" } : chat?.webSearch && Array.isArray(input.itemIds) && !input.itemIds.length ? {docs:[] as ReadingDocument[],fingerprint:digest(['web-empty',schoolId])} : await readingPackage(db, repo, owner, schoolId, input.itemIds);
         if (!testing && input.fingerprint !== undefined && input.fingerprint !== pack.fingerprint) reject("MATERIAL_CHANGED", "资料自预览后已有变化，请重新预览再开始。");
         const official = officialConfig();
         if (input.service === "official" && !official) reject("MODEL_NOT_CONFIGURED", "官方模型尚未配置，可配置云端模型或使用我的 API。");
         const connection = input.service === "official" ? official!.connection : { provider: input.provider, model: input.model, apiKey: "validation-only" } as Connection;
         validateConnection(connection);
+        if(chat?.webSearch && (process.env.AI_EXECUTION_MODE==='netlify'||!supportsWebSearch(connection,input.service==='official'?official!.endpoint:undefined)))reject('WEB_SEARCH_UNSUPPORTED','联网搜索需要 Netlify 直接执行的 DeepSeek 官方接口，请关闭联网或选择 DeepSeek。');
         const id = digest([owner, requestId]), day = beijingDay(now()), accountId = digest([owner, day]);
         const endpointHash = input.service === "official" ? digest(official!.endpoint) : "";
         // chat is an internal service argument; the public ai.start gateway never accepts it.
-        const chat = input.chat as Task['chat'];
         if (chat && (typeof chat.history !== 'string' || chat.history.length > 3500 || !Number.isFinite(Date.parse(chat.expireAt)) || Date.parse(chat.expireAt) <= now() || Date.parse(chat.expireAt) > now() + 86400000)) reject('VALIDATION_FAILED', '对话上下文或有效期无效。');
         const fingerprint = digest([schoolId, pack.fingerprint, chat ? CHAT_GUIDE_VERSION : GUIDE_VERSION, EXECUTION_VERSION, input.service, connection.provider, connection.model, endpointHash, input.task, String(input.question || "").trim(), chat || null]);
         const task = { id, owner, schoolId, service: input.service, provider: connection.provider, model: connection.model, task: input.task, question: String(input.question || "").trim(), fingerprint, versions: pack.fingerprint, accountId, docs: pack.docs, batches: splitDocuments(pack.docs), notes: [], step: 0, state: "new", inFlight: null, startedAt: null, result: null, message: "资料已准备，等待开始。", quotaHeld: false, createdAt: iso(), expireAt: chat?.expireAt || new Date(now() + 86400000).toISOString(), testOnly: testing, ...(chat ? { chat } : {}) };
@@ -169,8 +173,9 @@ export function aiService(db: Database, repo: Repository, complete = userComplet
         return { ...publicTask(await load(id, owner, false)), title: "已结算的阅读任务", result: null };
       }
       if (action === "ai.task") {
-        if (task.state === "running" && Date.parse(task.startedAt || "") + 40000 < now()) {
-          await atomic(db, async tx => { const ref = taskRef(tx, id), row = transactionRow((await ref.get()).data) as Task; if (row.state === "running" && Date.parse(row.startedAt || "") + 40000 < now()) await ref.update({ state: "uncertain", message: "上一批状态不明，已暂停，未自动重发或释放预占。请核查服务商用量。" }); });
+        const staleAfter=task.chat?.webSearch?90000:40000;
+        if (task.state === "running" && Date.parse(task.startedAt || "") + staleAfter < now()) {
+          await atomic(db, async tx => { const ref = taskRef(tx, id), row = transactionRow((await ref.get()).data) as Task; if (row.state === "running" && Date.parse(row.startedAt || "") + staleAfter < now()) await ref.update({ state: "uncertain", message: "上一批状态不明，已暂停，未自动重发或释放预占。请核查服务商用量。" }); });
           task = await load(id, owner);
         }
         return publicTask(task);
@@ -221,12 +226,29 @@ export function aiService(db: Database, repo: Repository, complete = userComplet
         const guide = task.testOnly ? "这是 API 连接测试，只需回答：连接成功。" : final ? task.chat ? CHAT_READING_GUIDE : READING_GUIDE : BATCH_READING_GUIDE;
         const batchContent = task.testOnly ? "请确认能正常响应。" : content;
         const maxTokens = task.testOnly ? 64 : final ? FINAL_OUTPUT_TOKENS : BATCH_OUTPUT_TOKENS;
-        if (!returning && task.service === "official") await platformBudget(guide.length + batchContent.length, maxTokens);
+        const webFinal=Boolean(final&&task.chat?.webSearch);
+        if (!returning && task.service === "official" && !webFinal) await platformBudget(guide.length + batchContent.length, maxTokens);
         if (relay?.phase === "prepare") return { kind: "batch", service: task.service, provider: connection.provider, model: connection.model, endpoint: task.service === "official" ? official!.endpoint : undefined, guide, content: batchContent, maxTokens } satisfies RelayBatch;
         submitted = true;
         if (relay?.phase === "fail") throw Object.assign(new Error("模型未完成本批。"), { code: relay.errorCode });
-        const response = relay?.phase === "complete" ? relay.output! : await complete(connection, guide, batchContent, maxTokens, task.service === "official" ? official!.endpoint : undefined);
-        const output = task.testOnly ? response : verifyReferences(response, task.docs);
+        let webDocs:ReadingDocument[]=[];
+        const assertActive=async()=>{
+          const current=await load(id,owner);
+          if(current.state!=='running'||current.step!==task.step||current.inFlight!==task.step)reject('TASK_CANCELLED','本轮已停止，不再发起后续联网或模型调用。');
+        };
+        const response = webFinal ? (await webComplete({connection,endpoint:task.service==='official'?official!.endpoint:undefined,question:task.question,guide,content:batchContent,docs:task.docs,maxTokens,assertActive,
+          beforeModel:async(chars,tokens)=>{if(task.service==='official')await platformBudget(chars,tokens);},
+          beforeSearch:()=>reserveSearch(db,owner,now()),
+          saveEvidence:async(state,docs)=>{
+            await assertActive();
+            await atomic(db,async tx=>{
+              const ref=taskRef(tx,id),row=transactionRow((await ref.get()).data) as Task;
+              if(row.state!=='running'||row.inFlight!==task.step||row.purged||Date.parse(row.expireAt)<=now())reject('TASK_CANCELLED','本轮已停止，检索结果不再保存。');
+              await ref.update({webSearch:state,webEvidence:docs});
+            });webDocs=docs;
+          }
+        })).text : relay?.phase === "complete" ? relay.output! : await complete(connection, guide, batchContent, maxTokens, task.service === "official" ? official!.endpoint : undefined);
+        const output = task.testOnly ? response : webFinal ? verifyWebReferences(response,[...task.docs,...webDocs]) : verifyReferences(response, task.docs);
         await load(id, owner); // Expiry, policy, source versions and current school rechecked before accepting output.
         const current = await readDoc(db, TASKS, id) as Task;
         if (current.state === "cancelled") { await finish(id, { state: "cancelled", message: "任务已取消，本批未发布为结果。" }, false, task.step); return publicTask(await load(id, owner)); }
@@ -249,7 +271,7 @@ export function aiService(db: Database, repo: Repository, complete = userComplet
         return publicTask(await load(id, owner));
       } catch (error) {
         const code = (error as { code?: string })?.code || "MODEL_UNCERTAIN";
-        const uncertain = submitted && !["KEY_REJECTED", "BALANCE_REQUIRED", "PROVIDER_LIMIT", "MODEL_OR_CONTEXT_INVALID", "MODEL_UNSUPPORTED", "OUTPUT_TRUNCATED", "PROVIDER_CONTENT_FILTER", "PROVIDER_INTERRUPTED", "MODEL_FORMAT_INVALID", "REFERENCE_INVALID", "AI_POLICY_BLOCKED", "MATERIAL_CHANGED", "RESULT_EXPIRED", "NOT_FOUND", "STALE_SCOPE", "CONTEXT_TOO_LONG", "RESPONSE_TOO_LARGE"].includes(code);
+        const uncertain = submitted && !["KEY_REJECTED", "BALANCE_REQUIRED", "PROVIDER_LIMIT", "MODEL_OR_CONTEXT_INVALID", "MODEL_UNSUPPORTED", "OUTPUT_TRUNCATED", "PROVIDER_CONTENT_FILTER", "PROVIDER_INTERRUPTED", "MODEL_FORMAT_INVALID", "REFERENCE_INVALID", "AI_POLICY_BLOCKED", "MATERIAL_CHANGED", "RESULT_EXPIRED", "NOT_FOUND", "STALE_SCOPE", "CONTEXT_TOO_LONG", "RESPONSE_TOO_LARGE", "TASK_CANCELLED", "WEB_SEARCH_UNSUPPORTED", "PLATFORM_BUDGET_EXHAUSTED"].includes(code);
         const message = uncertain ? "本批处理状态不明，已暂停且不会自动重发。请核查服务商用量，官方预占暂保留。" : error instanceof AppError ? error.message : Object.prototype.hasOwnProperty.call(failureMessages, code) ? failureMessages[code]! : "模型未完成本批，请检查 Key、余额、模型或资料范围。";
         const failureCode = Object.prototype.hasOwnProperty.call(failureMessages, code) ? code : undefined;
         if (uncertain) await atomic(db, async tx => { const ref = taskRef(tx, id), row = transactionRow((await ref.get()).data) as Task; if (row.inFlight === task.step && row.step === task.step && !["complete", "failed", "cancelled"].includes(row.state)) await ref.update({ state: "uncertain", message }); });

@@ -28,6 +28,33 @@ function fakeTransport(override?: (action: string, input: any) => unknown): Tran
 const mounted: ReturnType<typeof mount>[] = [];
 function open(fake: Transport, selection: Notice[] = []) { const w = mount(AssistantPanel, { props: { transport: fake, schoolId: 'bjtu', selection } }); mounted.push(w); return w; }
 afterEach(() => { mounted.splice(0).forEach(w => w.unmount()); vi.useRealTimers(); vi.restoreAllMocks(); });
+it('web search is opt-in, frozen in the send request and unavailable for unsupported services', async () => {
+  const fake = fakeTransport(action => action === 'ai.status' ? { quota: { remaining: 3, used: 0, held: 0, limit: 3 }, officialConfigured: true, officialModel: 'chat', webSearchConfigured: true, providers: [] } : undefined);
+  const w = open(fake); await flushPromises();
+  expect((w.get('[data-test=web-search-toggle]').element as HTMLInputElement).checked).toBe(false);
+  await w.get('[data-test=web-search-toggle]').setValue(true);
+  expect(w.text()).toContain('搜索和抓取单独计量');
+  await w.get('textarea#assistant-question').setValue('搜索公开资料');
+  await w.get('form.assistant-composer').trigger('submit'); await flushPromises();
+  expect(fake.call).toHaveBeenCalledWith('ai.chat.send', expect.objectContaining({ webSearch: true, question: '搜索公开资料' }));
+  await w.get('input[type=radio][value=byok]').setValue();
+  await w.get('#assistant-provider').setValue('openai'); await flushPromises();
+  expect((w.get('[data-test=web-search-toggle]').element as HTMLInputElement).disabled).toBe(true);
+  expect((w.get('[data-test=web-search-toggle]').element as HTMLInputElement).checked).toBe(false);
+});
+it('actual web sources and their reading state survive reload and unsafe URLs cannot become links', async () => {
+  const result: AiChatTurn = { ...turn, state: 'complete', quotaHeld: false, result: '本轮资料不足', webSearch: { state: 'complete', message: '只读取了一条正文', query: 'test', sources: [
+    { reference: 'R2', title: '公开资料', url: 'https://public.example/article', readState: 'body', checkedAt: new Date().toISOString(), publishedAt: null },
+    { reference: null, title: '摘要线索', url: 'https://public.example/other', readState: 'snippet_only', checkedAt: new Date().toISOString(), publishedAt: null },
+    { reference: null, title: '无效链接', url: 'javascript:alert(1)', readState: 'unavailable', checkedAt: new Date().toISOString(), publishedAt: null },
+  ] } };
+  const fake = fakeTransport(action => action === 'ai.chat.latest' ? { conversation: conversation([result]) } : undefined);
+  const w = open(fake); await flushPromises();
+  const sources = w.get('[data-test=web-sources]');
+  expect(sources.text()).toContain('只读取了一条正文'); expect(sources.text()).toContain('仅摘要'); expect(sources.text()).toContain('正文不可用');
+  expect(sources.findAll('a')).toHaveLength(2); expect(sources.findAll('a')[0].attributes('href')).toBe('https://public.example/article');
+  expect(sources.text()).toContain('[R2]');
+});
 it('opening loads factual context but never starts a conversation, searches or calls a model', async () => {
   const fake = fakeTransport(); const w = open(fake); await flushPromises();
   expect(w.text()).toContain('校园招聘报名'); expect(w.text()).toContain('仅标题'); expect(w.text()).toContain('与你关注的招聘相关');

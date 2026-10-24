@@ -56,13 +56,13 @@ export interface ReadingTask {
   id: string; schoolId: string; service: "official" | "byok"; provider: string; model: string;
   task: "summary" | "outline" | "answer"; state: "ready" | "running" | "complete" | "failed" | "uncertain" | "cancelled";
   step: number; totalSteps: number; title: string; result: string | null; message: string; failureCode?: string;
-  expireAt: string; createdAt: string; quotaHeld: boolean;
+  expireAt: string; createdAt: string; quotaHeld: boolean; webSearch?: import('./assistant').AiWebSearchState;
 }
 export interface AiStartInput {
   schoolId: string; itemIds: string[]; requestId: string; service: "official" | "byok";
   provider?: "deepseek" | "openai"; model?: string; task: "summary" | "outline" | "answer"; question?: string; fingerprint?: string;
 }
-export type { AiPreferences, RecommendedNotice, AiRecommendations, ChatReference, AiChatTurn, AiConversation } from './assistant';
+export type { AiPreferences, RecommendedNotice, AiRecommendations, ChatReference, AiChatTurn, AiConversation, AiWebSource, AiWebSearchState } from './assistant';
 import type { AssistantActions } from './assistant';
 export interface ReminderChannels {browser:boolean;email:boolean}
 export interface ReminderInput { id?:string; schoolId:string; itemId:string; label:string; dueAt:string; days:number[];channels?:ReminderChannels }
@@ -116,7 +116,7 @@ export interface GatewayActions extends AssistantActions {
   "feed.labels.set": {input:{schoolId:string;itemId:string;categories:string[]|null};output:{categories:string[];customized:boolean}};
   "favorites.list": { input: { schoolId?: string; cursor?: string }; output: { items: Favorite[]; nextCursor: string | null } };
   "favorites.set": { input: { schoolId: string; itemId: string; saved: boolean }; output: { saved: boolean } };
-  "ai.status": { input: Record<string, never>; output: { quota: AiQuota; officialConfigured: boolean; officialModel: string | null; providers: Array<{ id: string; name: string; endpoint: string }> } };
+  "ai.status": { input: Record<string, never>; output: { quota: AiQuota; officialConfigured: boolean; officialModel: string | null; webSearchConfigured?: boolean; providers: Array<{ id: string; name: string; endpoint: string }> } };
   "ai.diagnose": { input: Record<string, never>; output: { code: string; message: string } };
   "ai.preview": { input: { schoolId: string; itemIds: string[] }; output: ReadingPackage };
   "ai.export": { input: { schoolId: string; itemIds: string[] }; output: ReadingPackage };

@@ -4,7 +4,7 @@ import { atomic, transactionRow } from './storage';
 /** Reuses the daily cleanup wake; bounds profile work and rotates by last sweep. */
 export async function cleanupAssistantData(pool: SqlPool, now = Date.now()) {
   const at = new Date(now).toISOString();
-  await pool.query(`UPDATE campus_documents SET body=(body - ARRAY['docs','notes','batches','question','result','chat']::text[]) || '{"purged":true}'::jsonb
+  await pool.query(`UPDATE campus_documents SET body=(body - ARRAY['docs','notes','batches','question','result','chat','webEvidence','webSearch']::text[]) || '{"purged":true}'::jsonb
     WHERE collection='web_ai_tasks' AND body->>'expireAt'<=$1 AND body->>'purged' IS DISTINCT FROM 'true'`, [at]);
   await pool.query(`UPDATE campus_documents SET body=(body - ARRAY['turns','pendingTurn']::text[]) || '{"purged":true}'::jsonb
     WHERE collection='web_ai_conversations' AND body->>'expireAt'<=$1 AND body->>'purged' IS DISTINCT FROM 'true'`, [at]);

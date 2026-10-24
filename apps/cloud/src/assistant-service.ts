@@ -7,11 +7,12 @@ import { assistantProfile } from './assistant-profile';
 import { assistantChat } from './assistant-chat';
 import { searchAnnouncements } from './announcement-search';
 import { approvedSchoolUrl, extractArticle, readSchoolPage, type PageReader } from './school-pages';
-import { beijingDay, type aiService } from './ai-service';
+import type { aiService } from './ai-service';
 import { digest } from './reading-package';
 import { AppError, reject } from './errors';
 import { isRetained, originalUrl, toNotice } from './gateway';
 import { isPrivate, itemVisible, sourceVisible, type Scope } from './scope';
+import {reserveSearch} from './search-budget';
 
 function canonicalUrl(value: unknown): string | null {
   if (typeof value !== 'string') return null;
@@ -43,13 +44,7 @@ export function assistantService(db: Database, repo: Repository, ai: ReturnType<
     }
   });
   async function searchBudget(owner: string) {
-    await seed(db, 'user_profiles', owner, {});
-    await atomic(db, async tx => {
-      const ref = tx.collection('user_profiles').doc(owner), row = transactionRow((await ref.get()).data);
-      const prior = row.aiSearchBudget?.day === beijingDay(now()) ? row.aiSearchBudget : { day: beijingDay(now()), count: 0, lastAt: 0 };
-      if (prior.count >= 20 || now() - prior.lastAt < 15000) reject('SEARCH_LIMIT', '联网搜索请至少间隔 15 秒，每人每天最多 20 次；已有公告仍可使用。');
-      await ref.update({ aiSearchBudget: { day: prior.day, count: prior.count + 1, lastAt: now() } });
-    });
+    await reserveSearch(db,owner,now());
   }
   async function recommendations(input: Record<string, unknown>, identity: IdentityContext): Promise<AiRecommendations> {
     const owner = identity.dataOwnerId, schoolId = identifier(input.schoolId), school = await authorizeSchool(repo, owner, schoolId);

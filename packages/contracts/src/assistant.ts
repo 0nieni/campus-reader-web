@@ -4,7 +4,9 @@ export interface AiPreferences { schoolId: string; interests: string[]; goals: s
 export interface RecommendedNotice extends Notice { originalUrl: string | null; reason: string; readState: 'body' | 'title_only' | 'snippet_only' | 'unavailable'; checkedAt: string | null; allowAi: boolean }
 export interface AiRecommendations { items: RecommendedNotice[]; search: { state: 'idle' | 'unconfigured' | 'complete' | 'failed'; message: string }; coverage: string }
 export interface ChatReference { reference: string; itemId: string; title: string; originalUrl: string | null }
-export interface AiChatTurn { id: string; question: string; taskId: string | null; state: ReadingTask['state']; result: string | null; message: string; references: ChatReference[]; step: number; totalSteps: number; quotaHeld: boolean; service: 'official' | 'byok'; provider: string; model: string; search?: AiRecommendations['search'] }
+export interface AiWebSource { reference: string | null; title: string; url: string; readState: 'body' | 'snippet_only' | 'unavailable'; checkedAt: string; publishedAt: string | null }
+export interface AiWebSearchState { state: 'not_needed' | 'complete' | 'failed' | 'unconfigured'; message: string; query: string | null; sources: AiWebSource[] }
+export interface AiChatTurn { id: string; question: string; taskId: string | null; state: ReadingTask['state']; result: string | null; message: string; references: ChatReference[]; step: number; totalSteps: number; quotaHeld: boolean; service: 'official' | 'byok'; provider: string; model: string; search?: AiRecommendations['search']; webSearch?: AiWebSearchState }
 export interface AiConversation { id: string; schoolId: string; createdAt: string; expireAt: string; turns: AiChatTurn[] }
 export interface AssistantActions {
   'ai.profile.get': { input: { schoolId: string }; output: AiPreferences };
@@ -15,7 +17,7 @@ export interface AssistantActions {
   'ai.recommend': { input: { schoolId: string; query?: string; search?: boolean }; output: AiRecommendations };
   'ai.chat.create': { input: { schoolId: string; requestId: string }; output: AiConversation };
   'ai.chat.get': { input: { conversationId: string }; output: AiConversation };
-  'ai.chat.send': { input: { conversationId: string; requestId: string; question: string; itemIds?: string[]; service?: 'official' | 'byok'; provider?: AiConnection['provider']; model?: string }; output: AiChatTurn };
+  'ai.chat.send': { input: { conversationId: string; requestId: string; question: string; itemIds?: string[]; service?: 'official' | 'byok'; provider?: AiConnection['provider']; model?: string; webSearch?: boolean }; output: AiChatTurn };
   'ai.chat.step': { input: { conversationId: string; turnId: string; step: number; connection?: AiConnection }; output: AiChatTurn };
   'ai.chat.cancel': { input: { conversationId: string; turnId: string }; output: AiChatTurn };
   'ai.chat.resolve': { input: { conversationId: string; turnId: string; charged: boolean }; output: AiChatTurn };
