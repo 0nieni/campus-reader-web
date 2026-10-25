@@ -23,9 +23,16 @@ const props = defineProps<{
 }>();
 const store = workspaceStore(props.transport || cloudTransport)();
 const transport = props.transport || cloudTransport;
+let sourceFeatureSession=0;
+watch(()=>store.auth?.uid,()=>{sourceFeatureSession++;},{flush:'sync'});
 const featureTransport: Transport = { ...transport, call: (async (action, input) => {
-  try { return await transport.call(action, input); }
-  catch (caught) { if (caught instanceof ClientError && ["UNAUTHENTICATED", "FORBIDDEN"].includes(caught.code)) store.clear(); throw caught; }
+  const ticket=sourceFeatureSession;
+  try {
+    const result=await transport.call(action,input);
+    if(['sources.feedVisibility','sources.feedVisibilityAll'].includes(action)&&ticket===sourceFeatureSession)await store.sourcesChanged((input as {schoolId:string}).schoolId);
+    return result;
+  }
+  catch (caught) { if (ticket===sourceFeatureSession&&caught instanceof ClientError && ["UNAUTHENTICATED", "FORBIDDEN"].includes(caught.code)) store.clear(); throw caught; }
 }) as Transport["call"] };
 const view = ref<"feed" | "favorites" | "ai" | "sources" | "reminders">("feed"), selection = ref<Notice[]>([]), bookmarkBusy = ref(false);
 const unreadReminders=ref(0),reminderRevision=ref(0);
@@ -51,7 +58,27 @@ function chooseNotice(item: Notice) {
   else if (selection.value.length < 8) selection.value.push(item);
   else store.error = "一次最多选择 8 篇公告。";
 }
-function navigate(target: "feed" | "favorites" | "ai" | "sources" | "reminders") { store.closeNotice(); view.value = target; }
+let sourceNavigationEpoch=0;
+watch(()=>store.auth?.uid,()=>{sourceNavigationEpoch++;},{flush:'sync'});
+function navigate(target: "feed" | "favorites" | "ai" | "sources" | "reminders") { sourceNavigationEpoch++;store.closeNotice(); view.value = target; }
+async function openSourceSchool(schoolId:string,source?:{id:string;name:string}) {
+  const uid=store.auth?.uid,ticket=sourceNavigationEpoch;
+  if(store.workspace?.school?.id!==schoolId)await store.selectSchool(schoolId);
+  if(!uid||store.auth?.uid!==uid||ticket!==sourceNavigationEpoch)return;
+  if(store.workspace?.school?.id!==schoolId)throw new ClientError('SCHOOL_SWITCH_FAILED',store.error||'切换学校失败，请稍后重试。');
+  if(source||store.filters.sourceId){
+    const {sourceId,...rest}=store.filters;sourceFilterName.value=source?.name||'';
+    await store.applyFilters(source?{...rest,sourceId:source.id}:rest);
+    if(store.auth?.uid!==uid||ticket!==sourceNavigationEpoch)return;
+  }
+  selection.value=[];navigate('feed');
+}
+function sourceCenterChanged(kind?:'visibility') {
+  // Visibility mutations invalidate their own school's cache in the stable
+  // transport above, including when the source page has already unmounted.
+  if(kind==='visibility')return;
+  selection.value=[];void store.sourcesChanged();
+}
 async function openReminder(event:ReminderNotification){
   const uid=store.auth?.uid;navigate('feed');
   if(store.workspace?.school?.id!==event.schoolId)await store.selectSchool(event.schoolId);
@@ -82,11 +109,13 @@ const copied = ref("");
 const inviteToken = ref(isNetlify ? new URLSearchParams(location.hash.slice(1)).get('invite_token') || '' : '');
 if (inviteToken.value) history.replaceState(null, '', location.pathname + location.search);
 const keyword = ref("");
+const sourceFilterName=ref('');
+watch(()=>store.workspace?.school?.id,()=>{sourceFilterName.value='';});
 const selectedCategories = ref<string[]>([...noticeCategories]);
 const period = ref<NonNullable<FeedFilters["period"]>>("all");
 const filterDetails = ref<HTMLDetailsElement | null>(null);
 const appliedPeriod = computed(() => ({ "7d": "最近 7 天", "30d": "最近 30 天", "90d": "最近 90 天", all: "" })[store.filters.period || "all"]);
-const isFiltered = computed(() => Boolean(store.filters.keyword || (store.filters.categories && store.filters.categories.length < noticeCategories.length) || (store.filters.period && store.filters.period !== "all")));
+const isFiltered = computed(() => Boolean(store.filters.sourceId||store.filters.keyword || (store.filters.categories && store.filters.categories.length < noticeCategories.length) || (store.filters.period && store.filters.period !== "all")));
 function categoryLabel(categories?: string[]) {
   return categories?.map(category => categoryNames[category] || category).join(" · ") || "";
 }
@@ -97,7 +126,7 @@ watch(() => store.auth?.uid, () => {
 });
 async function search() {
   if (filterDetails.value) filterDetails.value.open = false;
-  await store.applyFilters({ keyword: keyword.value.trim(), categories: selectedCategories.value, period: period.value });
+  await store.applyFilters({ ...store.filters,keyword: keyword.value.trim(), categories: selectedCategories.value, period: period.value });
 }
 async function filterCategories(value?:string[]) {
   if(value)selectedCategories.value=[...value];
@@ -109,6 +138,7 @@ async function resetFilters() {
   period.value = "all";
   await store.applyFilters({});
 }
+async function clearSourceFilter(){const {sourceId,...rest}=store.filters;sourceFilterName.value='';await store.applyFilters(rest);}
 const original = computed(() =>
   safeOriginal(store.detail?.originalUrl || null),
 );
@@ -359,6 +389,7 @@ function schoolChanged(event: Event) {
           </ul>
         </details>
         <p v-if="safeOriginal(store.workspace.school?.announcementUrl || null)" class="small"><a :href="safeOriginal(store.workspace.school?.announcementUrl || null)!" target="_blank" rel="noopener noreferrer">查看目录原始入口 ↗</a></p>
+        <div v-if="store.filters.sourceId" class="feed-update source-filter-banner" role="status"><span>仅查看：{{sourceFilterName||store.filters.sourceId}}。主页显示设置不变。</span><button class="text-button" @click="clearSourceFilter">查看全部来源</button></div>
         <form class="feed-filters" @submit.prevent="search">
           <label for="notice-keyword" class="filter-label">查找公告</label>
           <div class="search-row">
@@ -425,6 +456,7 @@ function schoolChanged(event: Event) {
                     : "学校偏好会保存到本人账号。"
               }}
             </p>
+            <div v-if="store.hiddenSourceCount&&store.workspace.capabilities.websiteSources" class="hidden-sources-hint"><p>有 {{store.hiddenSourceCount}} 个来源已关闭主页显示，可前往来源中心检查设置。</p><button class="text-button" @click="navigate('sources')">管理来源</button></div>
           </div>
           <article
             v-for="item in store.items"
@@ -530,7 +562,7 @@ function schoolChanged(event: Event) {
       </section>
       <BookmarksPanel v-if="view === 'favorites'" :transport="featureTransport" :school-id="store.workspace.school?.id || null" @open="openFavorite" />
       <ReminderCenter v-if="store.workspace.capabilities.reminders" v-show="view==='reminders'" :key="`reminders:${store.auth?.uid}`" :transport="featureTransport" :school-id="store.workspace.school?.id||null" :school-name="store.workspace.school?.name||''" :revision="reminderRevision" :visible="view==='reminders'" @unread="unreadReminders=$event" @changed="applyReminderState" @open="openReminder" @back="navigate('feed')" />
-      <WebsiteSourcesPanel v-if="view === 'sources'" :key="`${store.auth?.uid}:${store.workspace.school?.id}`" :transport="featureTransport" :school-id="store.workspace.school?.id || null" :school-name="store.workspace.school?.name || ''" @changed="selection=[];store.sourcesChanged()" @back="navigate('feed')" />
+      <WebsiteSourcesPanel v-if="view === 'sources'" :key="`${store.auth?.uid}:${store.workspace.school?.id}`" :transport="featureTransport" :school-id="store.workspace.school?.id || null" :school-name="store.workspace.school?.name || ''" :open-school="openSourceSchool" @changed="sourceCenterChanged" @back="navigate('feed')" />
       <AssistantPanel v-if="view === 'ai'" :key="`assistant:${store.auth?.uid}:${store.workspace.school?.id}`" :transport="featureTransport" :school-id="store.workspace.school?.id || null" :selection="selection" @remove="selection = selection.filter(item => item.id !== $event)" @back="navigate('feed')" />
     </main>
     <footer v-if="!store.workspace" class="page-footer">

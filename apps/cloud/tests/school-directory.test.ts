@@ -44,6 +44,25 @@ test('school migrations, cached public feeds and idempotent authenticated school
     let reads=0;
     const directory=schoolDirectory(sql,repo,async url=>{reads++;return {url,html:url===schoolSources({...school,status:'candidate'}).sources[0]!.announcementUrl?html:'<article><p>公开公告测试正文：关于学生竞赛报名的通知，请在规定时间内完成报名，详细安排以原文附件为准。</p></article>'};});
     repo.material=directory.material;
+    await t.test('source catalogue reads another school without fetching, selecting or writing and rejects untrusted identity',async()=>{
+      await repo.selectSchool('catalogue-member','bjtu');
+      const before=await sql.query('SELECT collection,id,body FROM campus_documents ORDER BY collection,id');
+      const gateway=createGateway(repo,{ownerUid:'catalogue-uid',dataOwnerId:'catalogue-member'},Date.now,{directory:{refresh:directory.refresh,sources:directory.sources,request:async()=>({})}});
+      const response=await gateway({action:'school.sources',input:{schoolId:'school_002'}},{uid:'catalogue-uid',isAnonymous:false});
+      assert.ok(response.ok);const data=response.data as any;
+      assert.equal(data.school.id,'school_002');assert.equal(data.sources.length,2);
+      assert.equal(data.sources[0].id,'directory_school_002__statistics');
+      assert.equal(data.sources[0].state,'unchecked');assert.equal(data.sources[0].checkedAt,null);
+      assert.equal(data.sources[0].count,null);assert.match(data.coverage,/校内公告/);
+      assert.equal('articleSelector' in data.sources[0],false);assert.equal('ownerOpenid' in data.sources[0],false);
+      assert.equal(reads,0);assert.equal(await repo.selectedSchool('catalogue-member'),'bjtu');
+      assert.deepEqual((await sql.query('SELECT collection,id,body FROM campus_documents ORDER BY collection,id')).rows,before.rows);
+      await sql.query("INSERT INTO campus_documents(collection,id,body) VALUES('schools','empty-school',$1::jsonb)",[JSON.stringify({_id:'empty-school',name:'待配置学校',status:'not_connected',homepage:'https://empty.example.edu.cn/'})]);
+      const empty=await directory.sources('empty-school');assert.deepEqual(empty.sources,[]);assert.equal(empty.school.homepage,'https://empty.example.edu.cn/');assert.equal(reads,0);
+      const anonymous=await gateway({action:'school.sources',input:{schoolId:'bjtu'}},{uid:'catalogue-uid',isAnonymous:true});assert.equal(anonymous.ok,false);
+      const unknown=await gateway({action:'school.sources',input:{schoolId:'missing'}},{uid:'catalogue-uid',isAnonymous:false});assert.equal(unknown.ok,false);
+      const forged=await gateway({action:'school.sources',input:{schoolId:'bjtu',ownerOpenid:'other'}},{uid:'catalogue-uid',isAnonymous:false});assert.equal(forged.ok,false);
+    });
     await t.test('school refresh caches a scoped feed; article bodies are fetched lazily and cached',async()=>{
       assert.equal((await directory.refresh(school.id)).count,3);await directory.refresh(school.id);assert.equal(reads,1);
       await repo.selectSchool('member',school.id);
@@ -64,17 +83,22 @@ test('school migrations, cached public feeds and idempotent authenticated school
       let fetches=0;
       const partial=schoolDirectory(sql,repo,async(url,s)=>{fetches++;if(url.includes('pcs.'))throw new Error('private diagnostic');return {url,html:`<ul><li><time>2026-10-17</time><a href='/info/1202/4144.htm'>公开统计竞赛报名通知</a></li></ul>`};});
       const result=await partial.refresh('school_002');assert.equal(result.state,'ready');assert.equal(result.count,1);assert.equal(result.sources?.length,2);assert.equal(result.sources?.[1]?.state,'unavailable');assert.ok(!JSON.stringify(result).includes('private diagnostic'));assert.match(result.coverage!,/校内公告/);
+      assert.deepEqual((result as any).stats,{newCount:1,existingCount:0,failedSources:1,skippedCount:0});
+      assert.equal((result.sources?.[1] as any).errorCode,'SOURCE_UNAVAILABLE');
+      const catalogue=await partial.sources('school_002');assert.deepEqual(catalogue.sources.map(s=>s.state),['ready','unavailable']);assert.equal(catalogue.sources[0]!.count,1);assert.equal(catalogue.sources[0]!.checkedAt,result.checkedAt);
       await partial.refresh('school_002');assert.equal(fetches,2);
       const rows=await sql.query("SELECT id,body FROM campus_documents WHERE collection='items' AND body->>'sourceId'='directory_school_002__statistics'");
       const row=rows.rows[0]!;const created=row.body.createdAt;
       await sql.query("UPDATE campus_documents SET body=body || '{\"contentText\":\"保留的公开正文\"}'::jsonb WHERE collection='items' AND id=$1",[row.id]);
       await repo.setLabels!('member',row.id,['academic']);
       await sql.query("UPDATE campus_documents SET body=body || '{\"version\":\"old-parser\"}'::jsonb WHERE collection='school_sync' AND id='school_002'");
+      assert.ok((await partial.sources('school_002')).sources.every(s=>s.state==='unchecked'&&s.checkedAt===null&&s.count===null));assert.equal(fetches,2);
       await partial.refresh('school_002');assert.equal(fetches,4);
       const preserved=(await repo.item(row.id))!;assert.equal(preserved.contentText,'保留的公开正文');assert.equal(preserved.createdAt,created);assert.deepEqual((await repo.personalize!(preserved,'member')).personalCategories,['academic']);
       // Even a different version must not steal an unexpired active lease.
       await sql.query("UPDATE campus_documents SET body=body || '{\"version\":\"old-parser\",\"state\":\"checking\"}'::jsonb WHERE collection='school_sync' AND id='school_002'");
       assert.equal((await partial.refresh('school_002')).state,'checking');assert.equal(fetches,4);
+      assert.ok((await partial.sources('school_002')).sources.every(s=>s.state==='unchecked'));
     });
     await t.test('repeated/concurrent applications notify once and daily limits cannot overwrite favorites or change recipient data',async()=>{
       const delivered: URLSearchParams[]=[];

@@ -42,7 +42,7 @@ export default createSiteApi({
     const runtime=reminderRuntime(pool,getContext().deploy.context==='production'),workspace=siteWorkspace(user,Netlify.env.get('NETLIFY_OWNER_EMAIL'));
     const reminderAction=(event as {action?:unknown})?.action;
     if(typeof reminderAction==='string'&&reminderAction.startsWith('reminders.'))await runtime.aliyun.email.bind(workspace.dataOwnerId,user.id,user.email);
-    const gateway = createGateway(repo, workspace, Date.now, { reminders:reminderService(pool,runtime), websites, bookmarks: bookmarksService(db, repo), ai: { handle: (action,input,identity) => assistant.supports(action) ? assistant.handle(action,input,identity) : ai.handle(action,input,identity) }, directory:{refresh:directory.refresh,request:(name,identity)=>{
+    const gateway = createGateway(repo, workspace, Date.now, { reminders:reminderService(pool,runtime), websites, bookmarks: bookmarksService(db, repo), ai: { handle: (action,input,identity) => assistant.supports(action) ? assistant.handle(action,input,identity) : ai.handle(action,input,identity) }, directory:{refresh:directory.refresh,sources:directory.sources,request:(name,identity)=>{
       if (getContext().deploy.context !== 'production') throw new AppError('PRODUCTION_REQUIRED','请在正式网站提交学校添加申请；预览环境不发送通知。');
       return request(name,identity.dataOwnerId,user.email);
     }} });
