@@ -354,3 +354,7 @@ Ruling：记忆作为用户档案JSON字段，不新增表/迁移；写入只发
 - 接口回归覆盖凭据/配置、URL与DNS、最终学校范围、目标错误页、额度、鉴权、区域、限流、大小、格式和流式超时；本机 SQL 集成覆盖公告、实际 PDF 附件提取、Blobs 替身、权限撤销、固定期限和 JSON 原始正文。先复现缺少适配模块的失败，再实现并通过。
 - npm ci、typecheck、521 项测试（web 186 / cloud 335）、普通构建、11 函数 Netlify 完整构建通过；没有新增依赖或改写数据库迁移。未来部署需服务端 LEXMOUNT_API_KEY 与 LEXMOUNT_PROJECT_ID，可选官方区域地址及引擎；本机技能已登录不代表 Netlify 已配置。
 - 实现与配置说明见 docs/lexmount-collection.md，计划见 docs/plans/2026-10-25-lexmount-collection.md。验证后的代码准备提交并推送指定新分支，不创建上线 PR，不合并 main，不主动触发正式发布。
+
+### Lexmount 分支保存完成
+
+实现提交 e3fb21406af48b4f637c7dd785ac6633e4c0df9d 已推送至 origin/lexmount的应用，远端引用与本地 SHA 一致。521 项测试和完整构建的证据针对该实现；此后仅补充交付记录，不改变代码。没有创建 PR、合入 main、配置生产 Lexmount 凭据或主动发布。

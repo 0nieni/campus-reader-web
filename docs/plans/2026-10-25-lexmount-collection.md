@@ -8,7 +8,7 @@
 - [x] robots、RSS/JSON 原始数据及二进制文件保持各自协议读取规则；网页获取接入 Lexmount，已保存文本和 365 天清理不变。
 - [x] 02:45 后台任务使用相同采集适配器。02:17 清理只做现有 AI/提醒清理，原公开列表预热由 02:45 任务覆盖，避免在 30 秒清理任务中重复启动渲染采集。AI 搜索提供商及其临时证据链、提醒调度不改。
 - [x] 增加接口与本机 SQL 集成回归，完成 npm ci、typecheck、全部测试、普通构建和 Netlify 完整构建。
-- [ ] 更新说明与进度，明确真实技能调用、本机模拟服务集成和未发布的区别；提交并推送指定新分支，不改生产环境变量。
+- [x] 更新说明与进度，明确真实技能调用、本机模拟服务集成和未发布的区别；提交并推送指定新分支，不改生产环境变量。
 
 官方接口参考：[Dump DOM](https://browser.lexmount.cn/docs/webfetch/reference/dump-dom)、[错误处理](https://browser.lexmount.cn/docs/webfetch/reference/common-errors)。本机技能检查已报告 `ok: true`，credentials / agent_skill 均通过。
 
@@ -17,3 +17,7 @@
 技能实际采集北京大学教务部公开公告页成功，HTTP 200，lightmount_dcl，19175 字符；本地回放到新适配器和原解析器识别 15 条公告，没有写入生产。新增接口/本机 SQL 测试验证入库、附件、权限、缓存、原始协议和超时/额度错误。
 
 npm ci、typecheck、521 项测试（web 186 / cloud 335）、普通构建、11 函数 Netlify 完整构建通过。没有修改 SQL 迁移、提醒实现或 AI 搜索链。远端保存为最后交付步骤，完成后单独记录；不合并、不发布、不修改生产凭据。
+
+## 远端保存
+
+实现提交 e3fb21406af48b4f637c7dd785ac6633e4c0df9d 已推送到 GitHub 的“lexmount的应用”分支，git ls-remote 返回的远端 SHA 与本地一致。没有创建 PR、合并 main、修改生产凭据或主动发布。此交付记录随后作为同分支文档提交同步。
