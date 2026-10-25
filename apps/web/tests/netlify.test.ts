@@ -1,5 +1,5 @@
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
-vi.mock('@netlify/identity', () => ({ hydrateSession: vi.fn(async () => null), onAuthChange: vi.fn(() => () => {}) }));
+vi.mock('@netlify/identity', () => ({ confirmEmail:vi.fn(async()=>({id:'verified'})),hydrateSession: vi.fn(async () => null), onAuthChange: vi.fn(() => () => {}) }));
 const fetcher = vi.fn();
 beforeEach(() => { vi.resetModules(); vi.stubGlobal('fetch', fetcher); fetcher.mockReset(); });
 afterEach(() => { vi.unstubAllGlobals(); });
@@ -20,4 +20,12 @@ it('expired sessions clear subscribers before an application error is returned',
   fetcher.mockResolvedValue({ json: async () => ({ ok: false, code: 'UNAUTHENTICATED', message: '请登录' }) });
   const { netlifyTransport } = await import('../src/lib/netlify'), changed = vi.fn(), stop = netlifyTransport.onSessionChange(changed);
   await expect(netlifyTransport.call('session.get', {})).rejects.toMatchObject({ code: 'UNAUTHENTICATED' }); expect(changed).toHaveBeenCalledWith(null); stop();
+});
+it('signup uses the same-origin auth endpoint and confirmation validates a server session',async()=>{
+  const {netlifyTransport}=await import('../src/lib/netlify');
+  fetcher.mockResolvedValueOnce({json:async()=>({ok:true,data:{verificationRequired:true}})});
+  await netlifyTransport.signUp!(' new@example.test ','synthetic-password');
+  expect(fetcher).toHaveBeenLastCalledWith('/.netlify/functions/auth?op=signup',expect.objectContaining({credentials:'same-origin',redirect:'error',body:JSON.stringify({email:'new@example.test',password:'synthetic-password'})}));
+  fetcher.mockResolvedValueOnce({json:async()=>({ok:true,data:{uid:'verified',username:'new@example.test'}})});
+  const value=await netlifyTransport.confirmEmail!('synthetic-token');expect(value.uid).toBe('verified');expect(fetcher).toHaveBeenLastCalledWith('/.netlify/functions/auth',expect.objectContaining({method:'GET',credentials:'same-origin'}));
 });

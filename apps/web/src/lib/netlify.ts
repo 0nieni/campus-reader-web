@@ -2,7 +2,7 @@ import type { AuthSession, GatewayResult } from '@campus/contracts';
 import type { Transport } from './transport';
 import {disablePush} from './browser-push';
 import { ClientError } from './errors';
-import { hydrateSession, onAuthChange } from '@netlify/identity';
+import { confirmEmail, hydrateSession, onAuthChange } from '@netlify/identity';
 const listeners = new Set<(session: AuthSession | null) => void>();
 function notify(session: AuthSession | null) { for (const listener of listeners) listener(session); }
 async function request<T>(url: string, body?: unknown): Promise<T> {
@@ -25,6 +25,14 @@ async function request<T>(url: string, body?: unknown): Promise<T> {
 export const netlifyTransport: Transport = {
   async restore() { await hydrateSession(); return request<AuthSession | null>('/.netlify/functions/auth'); },
   async signIn(email, password) { const value = await request<AuthSession>('/.netlify/functions/auth?op=login', { email: email.trim(), password }); await hydrateSession(); notify(value); return value; },
+  signUp: (email, password) => request('/.netlify/functions/auth?op=signup', { email: email.trim(), password }),
+  async confirmEmail(token) {
+    try { await confirmEmail(token); }
+    catch { throw new ClientError('CONFIRMATION_FAILED', '邮箱验证未完成，链接可能已过期或已使用。请返回登录；若仍未验证，请联系站点管理员重新发送确认邮件。'); }
+    const value = await request<AuthSession | null>('/.netlify/functions/auth');
+    if (!value) throw new ClientError('UNAUTHENTICATED', '邮箱已确认，请使用刚设置的密码登录。');
+    notify(value); return value;
+  },
   async signOut() { await Promise.race([disablePush(netlifyTransport).catch(()=>{}),new Promise(resolve=>setTimeout(resolve,2500))]); await request('/.netlify/functions/auth?op=logout', {}); notify(null); },
   onSessionChange(listener) {
     listeners.add(listener);

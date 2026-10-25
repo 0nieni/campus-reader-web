@@ -14,6 +14,9 @@ import { safeError, ClientError } from "./lib/errors";
 import InvitationPanel from './components/InvitationPanel.vue';
 import SchoolRequestForm from './components/SchoolRequestForm.vue';
 import NoticeLabelsEditor from './components/NoticeLabelsEditor.vue';
+import RegistrationForm from './components/RegistrationForm.vue';
+import EmailConfirmationPanel from './components/EmailConfirmationPanel.vue';
+import {useAppearance} from './lib/appearance';
 const ReminderCenter=defineAsyncComponent({loader:()=>import('./components/ReminderCenter.vue'),loadingComponent:featureLoading,errorComponent:featureFailed});
 import type {ReminderNotification,ReminderState} from '@campus/contracts';
 
@@ -23,6 +26,9 @@ const props = defineProps<{
 }>();
 const store = workspaceStore(props.transport || cloudTransport)();
 const transport = props.transport || cloudTransport;
+const {theme,toggle:toggleTheme}=useAppearance();
+const authMode=ref<'login'|'register'>('login');
+const canRegister=Boolean(transport.signUp);
 const featureTransport: Transport = { ...transport, call: (async (action, input) => {
   try { return await transport.call(action, input); }
   catch (caught) { if (caught instanceof ClientError && ["UNAUTHENTICATED", "FORBIDDEN"].includes(caught.code)) store.clear(); throw caught; }
@@ -80,7 +86,15 @@ const password = ref("");
 const copied = ref("");
 // Invite token stays in memory, never in API logs, Storage, or rendered text.
 const inviteToken = ref(isNetlify ? new URLSearchParams(location.hash.slice(1)).get('invite_token') || '' : '');
-if (inviteToken.value) history.replaceState(null, '', location.pathname + location.search);
+const confirmationToken=ref((isNetlify||transport.confirmEmail)?new URLSearchParams(location.hash.slice(1)).get('confirmation_token')||'':'');
+if (inviteToken.value||confirmationToken.value) history.replaceState(null, '', location.pathname + location.search);
+function receiveConfirmationLink(){
+  if(!transport.confirmEmail)return;
+  const token=new URLSearchParams(location.hash.slice(1)).get('confirmation_token');
+  if(!token)return;
+  password.value='';store.clear();confirmationToken.value=token;
+  history.replaceState(null,'',location.pathname+location.search);
+}
 const keyword = ref("");
 const selectedCategories = ref<string[]>([...noticeCategories]);
 const period = ref<NonNullable<FeedFilters["period"]>>("all");
@@ -120,11 +134,13 @@ const date = new Intl.DateTimeFormat("zh-CN", {
 }).format(new Date());
 let unwatch: (() => void) | undefined;
 onMounted(() => {
+  window.addEventListener('hashchange',receiveConfirmationLink);
   navigator.serviceWorker?.addEventListener('message',pushNavigation);
   unwatch = store.watchSession();
-  if (!issues.length) void store.connect();
+  if (!issues.length&&!inviteToken.value&&!confirmationToken.value) void store.connect();
 });
 onUnmounted(() => {
+  window.removeEventListener('hashchange',receiveConfirmationLink);
   navigator.serviceWorker?.removeEventListener('message',pushNavigation);
   unwatch?.();
   password.value = "";
@@ -135,6 +151,7 @@ async function login() {
   password.value = "";
   await store.signIn(username.value.trim(), value);
 }
+function changeAuthMode(mode:'login'|'register'){password.value='';store.error='';authMode.value=mode;}
 async function copyOriginal() {
   if (!original.value) return;
   try {
@@ -176,18 +193,18 @@ function schoolChanged(event: Event) {
         <span>校园阅览室<small>把校园信息，读得更清楚</small></span>
       </a>
       <div class="header-right">
+        <button type="button" class="theme-toggle" :aria-label="theme==='light'?'切换为深色模式':'切换为浅色模式'" @click="toggleTheme"><span aria-hidden="true">{{theme==='light'?'☾':'☀'}}</span><span>{{theme==='light'?'深色':'浅色'}}</span></button>
         <span class="today">{{ date }}</span
         ><span class="private-label">个人工作区</span>
       </div>
     </header>
 
-    <InvitationPanel v-if="inviteToken" :token="inviteToken" @complete="inviteToken = ''; store.connect()" />
+    <EmailConfirmationPanel v-if="confirmationToken" :key="confirmationToken" :token="confirmationToken" :transport="transport" @complete="confirmationToken='';store.connect()" @back="confirmationToken='';changeAuthMode('login')" />
+    <InvitationPanel v-else-if="inviteToken" :token="inviteToken" @complete="inviteToken = ''; store.connect()" />
     <main v-else-if="!store.workspace" class="entry">
       <section class="entry-intro" aria-labelledby="entry-title">
-        <span class="section-label"
-          ><span class="line" /> 校园公告与竞赛助手</span
-        >
-        <h1 id="entry-title">值得关注的消息，<br />留一处认真阅读。</h1>
+        <span class="section-label"><span class="line" /> 你的校园阅读空间</span>
+        <h1 id="entry-title">校园里的重要消息，<br /><em>在这里，读清楚。</em></h1>
         <p class="intro-copy">
           学校公告、竞赛活动和重要时间，汇集到你自己的阅览室。每一条信息，都能回到原始来源。
         </p>
@@ -201,14 +218,16 @@ function schoolChanged(event: Event) {
             ><span class="paper-stamp">保留原文<br />有据可查</span>
           </div>
         </div>
-        <p class="privacy-note">{{ isNetlify ? '受邀使用 · 各账号数据独立' : '仅本人访问 · 原有资料保留' }}</p>
+        <div class="entry-highlights"><span>原文有出处</span><span>收藏留线索</span><span>重要时间有安排</span></div>
+        <p class="privacy-note">{{ canRegister ? '邮箱验证后开始 · 各账号数据独立' : isNetlify ? '受邀使用 · 各账号数据独立' : '仅本人访问 · 原有资料保留' }}</p>
       </section>
 
       <section class="login-panel" aria-labelledby="login-title">
+        <div v-if="canRegister&&!store.auth" class="auth-tabs" aria-label="账号操作"><button type="button" :class="{active:authMode==='login'}" :aria-pressed="authMode==='login'" :disabled="store.loading" @click="changeAuthMode('login')">登录</button><button type="button" :class="{active:authMode==='register'}" :aria-pressed="authMode==='register'" :disabled="store.loading" @click="changeAuthMode('register')">注册</button></div>
         <span class="panel-kicker">开始阅读</span>
-        <h2 id="login-title">进入你的工作区</h2>
-        <p class="muted">{{ isNetlify ? '使用受邀邮箱登录你的独立工作区。' : '使用已配置的本人账号登录。' }}</p>
-        <p v-if="regionNeedsVerification && !issues.length" class="account-help">暂按 SDK 默认上海地域连接，尚未验证。若环境连接失败，请核实地域与访问来源。</p>
+        <h2 id="login-title">{{authMode==='register'?'创建你的阅览室':'欢迎回到阅览室'}}</h2>
+        <p class="muted">{{authMode==='register'?'用一个邮箱，留住值得关注的校园消息。':canRegister?'登录邮箱，继续阅读你的校园。':isNetlify?'使用受邀邮箱登录你的独立工作区。':'使用已配置的本人账号登录。'}}</p>
+        <p v-if="!props.transport && regionNeedsVerification && !issues.length" class="account-help">暂按 SDK 默认上海地域连接，尚未验证。若环境连接失败，请核实地域与访问来源。</p>
         <div v-if="store.auth" class="setup-note" role="status">
           <strong>云账号已登录，工作区仍待验证</strong>
           <p>登录账号 UID：<span class="identity-value">{{ store.auth.uid }}</span></p>
@@ -226,16 +245,18 @@ function schoolChanged(event: Event) {
             <p>完成后重启网页服务，再连接本人工作区。</p>
           </details>
         </div>
-        <form @submit.prevent="login">
-          <label for="username">{{ isNetlify ? '登录邮箱' : '用户名' }}</label
+        <RegistrationForm v-if="authMode==='register'&&canRegister&&!store.auth" :transport="transport" :disabled="issues.length>0||store.loading" @sent="username=$event" @back="changeAuthMode('login')" />
+        <form v-else @submit.prevent="login">
+          <label for="username">{{ canRegister || isNetlify ? '登录邮箱' : '用户名' }}</label
           ><input
             id="username"
+            :type="canRegister || isNetlify ? 'email' : 'text'"
             v-model="username"
             autocomplete="username"
             required
             maxlength="254"
             :disabled="issues.length > 0 || store.loading"
-            :placeholder="isNetlify ? '输入受邀邮箱' : '输入本人用户名'"
+            :placeholder="canRegister ? '输入登录邮箱' : isNetlify ? '输入受邀邮箱' : '输入本人用户名'"
           />
           <label for="password">密码</label
           ><input
@@ -260,8 +281,9 @@ function schoolChanged(event: Event) {
             }}<span aria-hidden="true">↗</span>
           </button>
         </form>
-        <p v-if="!issues.length" class="account-help">
-          {{ isNetlify ? '请先接受本站发送的账号邀请并设置密码；本站不开放注册。' : '没有账号或忘记密码，请在本人云开发控制台管理账号。这里不提供公开注册。' }}
+        <p v-if="!issues.length&&authMode==='login'" class="account-help">
+          <template v-if="canRegister">第一次来？<button type="button" class="text-button" :disabled="store.loading" @click="changeAuthMode('register')">注册新账号</button>，验证邮箱后即可使用。</template>
+          <template v-else>{{ isNetlify ? '请先接受本站发送的账号邀请并设置密码。' : '没有账号或忘记密码，请在本人云开发控制台管理账号。' }}</template>
         </p>
         <p class="login-footnote">
           登录后才会读取公告和个人资料。<br />连接失败会明确提示，不显示演示数据。
@@ -297,7 +319,7 @@ function schoolChanged(event: Event) {
         <div class="index-heading">
           <div>
             <span class="panel-kicker">校园消息</span>
-            <h1 id="notice-title">公告</h1>
+            <h1 id="notice-title">校园公告</h1><p class="index-lead">从一条消息，找到下一步。</p>
           </div>
           <button
             class="text-button"

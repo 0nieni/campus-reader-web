@@ -7,6 +7,8 @@ import type {
 export interface Transport {
   restore(): Promise<AuthSession | null>;
   signIn(username: string, password: string): Promise<AuthSession>;
+  signUp?(email: string, password: string): Promise<{ verificationRequired: true }>;
+  confirmEmail?(token: string): Promise<AuthSession>;
   signOut(): Promise<void>;
   onSessionChange(listener: (session: AuthSession | null) => void): () => void;
   call<A extends GatewayAction>(
