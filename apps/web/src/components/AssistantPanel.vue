@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
-import type { AiChatTurn, AiConversation, AiConnection, AiPreferences, AiProviderSelection, AiRecommendations, GatewayActions, Notice, RecommendedNotice } from '@campus/contracts';
+import type { AiChatTurn, AiConversation, AiConnection, AiMemoryItem, AiMemorySlot, AiMemoryState, AiPreferences, AiProviderSelection, AiRecommendations, GatewayActions, Notice, RecommendedNotice } from '@campus/contracts';
 import AiProviderSettings from './AiProviderSettings.vue';
 import type { Transport } from '../lib/transport';
 import { ClientError, safeError } from '../lib/errors';
@@ -9,6 +9,8 @@ const props = defineProps<{ transport: Transport; schoolId: string | null; selec
 const emit = defineEmits<{ remove: [id: string]; back: [] }>();
 const status = ref<GatewayActions['ai.status']['output'] | null>(null);
 const preferences = ref<AiPreferences | null>(null), recommendations = ref<AiRecommendations | null>(null), chat = ref<AiConversation | null>(null);
+const memory = ref<AiMemoryState | null>(null), memoryEnabled = ref(true);
+const memoryNames: Record<AiMemorySlot, string> = { major: '专业', year: '年级', interests: '兴趣', response_style: '回答偏好', goal: '近期目标', progress: '当前进展' };
 const interests = ref(''), goals = ref(''), learningEnabled = ref(false), query = ref(''), question = ref('');
 const service = ref<'official' | 'byok'>('official'), provider = ref<AiConnection['provider']>('deepseek'), model = ref(''), apiKey = ref('');
 const profileSelection = ref<AiProviderSelection | null>(null), apiMode = ref<'saved' | 'temporary'>('temporary'), settingsEpoch = ref(0);
@@ -21,7 +23,18 @@ let active = true, epoch = 0, stopped = true, createRequestId = '', sendRequestI
 const selected = computed(() => [...new Map([...props.selection, ...localSources.value].map(item => [item.id, item])).values()]);
 const unresolved = computed(() => chat.value?.turns.some(turn => ['ready', 'running', 'uncertain'].includes(turn.state) || turn.quotaHeld));
 const canExport = computed(() => Boolean(chat.value?.turns.some(turn => turn.result) && !busy.value && !loading.value));
-const canSend = computed(() => Boolean(props.schoolId && !loading.value && !busy.value && !providerBusy.value && !unresolved.value && question.value.trim() && question.value.length <= 1500 && selected.value.length <= 8 && (service.value === 'official' ? status.value?.officialConfigured && (status.value?.quota.remaining || 0) > 0 : apiMode.value === 'saved' ? providerStorageConfigured.value && profileSelection.value : model.value.trim() && apiKey.value)));
+const memoryCommand = computed(() => {
+  // This only opens the send control. The server decides whether to execute or clarify.
+  const text = question.value.trim().replace(/[。！!]+$/, '').replace(/^请/, '');
+  if (/[\n\r?？“”"'‘’「」『』，,；;]/.test(text) || /如果|假如|假设|假装|例如|举例|示例|朋友|同学|室友|别人|他人|公告|原文|不要|不许|别把|别忘|不能|不想|不希望|怎么|如何|有什么|是否|是不是|吗|呢|好不好|行不行|会怎样/.test(text)) return false;
+  return /^(?:忘掉|忘记|删除)我的(?:专业|年级|兴趣|回答偏好|目标|进展)$/.test(text)
+    || /^(?:忘掉|忘记|删除|清除)(?:我的)?目标\s*[\p{L}\p{N}][\p{L}\p{N} +#.-]{0,29}$/u.test(text)
+    || /^(?:清空|清除)(?:我的)?自动记忆$/.test(text)
+    || /^我现在不(?:再)?准备.{1,60}了$/.test(text)
+    || /^把目标.{0,60}改成.{1,60}$/.test(text)
+    || /^我的专业改成.{1,60}专业$/.test(text);
+});
+const canSend = computed(() => Boolean(props.schoolId && !loading.value && !busy.value && !providerBusy.value && !unresolved.value && question.value.trim() && question.value.length <= 1500 && (memoryCommand.value || selected.value.length <= 8 && (service.value === 'official' ? status.value?.officialConfigured && (status.value?.quota.remaining || 0) > 0 : apiMode.value === 'saved' ? providerStorageConfigured.value && profileSelection.value : model.value.trim() && apiKey.value))));
 function selectProfile(value: AiProviderSelection | null, activate: boolean) {
   profileSelection.value = value ? { profile: { ...value.profile }, model: value.model } : null;
   if (value && activate) { service.value = 'byok'; apiMode.value = 'saved'; apiKey.value = ''; }
@@ -33,6 +46,21 @@ function current(ticket: number) { return active && ticket === epoch; }
 function safeLink(value: string | null) { try { const url = new URL(value || ''); return ['https:', 'http:'].includes(url.protocol) && !url.username && !url.password ? url.href : undefined; } catch { return undefined; } }
 function sourceTime(value: string | null) { return value && Number.isFinite(Date.parse(value)) ? new Date(value).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) : '未提供'; }
 function applyPreferences(value: AiPreferences) { preferences.value = value; interests.value = value.interests.join('，'); goals.value = value.goals; learningEnabled.value = value.learningEnabled; }
+function applyMemory(value: AiMemoryState) {
+  if (value.schoolId !== props.schoolId) return;
+  memory.value = value; memoryEnabled.value = value.enabled;
+  expireMemory();
+}
+function expireMemory() {
+  if (!memory.value) return;
+  const items = memory.value.items.filter(item => !item.expiresAt || Date.parse(item.expiresAt) > Date.now());
+  if (items.length !== memory.value.items.length) memory.value = { ...memory.value, items };
+}
+function progressGoal(item: AiMemoryItem) {
+  const goalId = item.goalId || (item.id === 'progress' ? 'goal' : undefined);
+  const goal = goalId && memory.value?.items.find(value => value.slot === 'goal' && value.id === goalId);
+  return goal ? `所属目标：${goal.text}` : '未关联目标';
+}
 function applyChat(value: AiConversation | null) {
   if (value && (value.schoolId !== props.schoolId || Date.parse(value.expireAt) <= Date.now())) { chat.value = null; note.value = '对话已满 24 小时，请开始新对话。'; return; }
   chat.value = value;
@@ -60,13 +88,15 @@ async function load() {
   const results = await Promise.allSettled([
     props.transport.call('ai.status', {}), props.transport.call('ai.profile.get', { schoolId }),
     props.transport.call('ai.recommend', { schoolId }), props.transport.call('ai.chat.latest', { schoolId }),
+    props.transport.call('ai.memory.get', { schoolId }),
   ]);
   if (!current(ticket)) return;
-  const [quota, profile, recs, latest] = results;
+  const [quota, profile, recs, latest, memories] = results;
   if (quota.status === 'fulfilled') status.value = quota.value;
   if (profile.status === 'fulfilled') applyPreferences(profile.value);
   if (recs.status === 'fulfilled') recommendations.value = recs.value;
   if (latest.status === 'fulfilled') applyChat(latest.value.conversation);
+  if (memories.status === 'fulfilled') applyMemory(memories.value);
   const failure = results.find(result => result.status === 'rejected');
   if (failure?.status === 'rejected') error.value = safeError(failure.reason);
   loading.value = false;
@@ -81,6 +111,41 @@ async function mutation(work: (ticket: number) => Promise<void>) {
   const ticket = epoch; busy.value = true; error.value = ''; note.value = '';
   try { await work(ticket); } catch (caught) { if (current(ticket)) error.value = safeError(caught); }
   finally { if (current(ticket)) busy.value = false; }
+}
+async function refreshMemory(ticket: number, refreshReasons = false) {
+  if (!current(ticket) || !props.schoolId) return;
+  try { const value = await props.transport.call('ai.memory.get', { schoolId: props.schoolId }); if (current(ticket)) applyMemory(value); }
+  catch (caught) { if (current(ticket)) error.value = safeError(caught); }
+  if (refreshReasons && current(ticket)) {
+    try { await refreshRecommendations(ticket); }
+    catch (caught) { if (current(ticket)) error.value = safeError(caught); }
+  }
+}
+async function changeMemory(action: 'configure' | 'forget' | 'clear', id?: string) {
+  if (!memory.value) return;
+  const enabled = memoryEnabled.value;
+  await mutation(async ticket => {
+    const schoolId = props.schoolId!, version = memory.value!.version;
+    try {
+      const value = action === 'configure'
+        ? await props.transport.call('ai.memory.configure', { schoolId, enabled, version })
+        : action === 'forget'
+          ? await props.transport.call('ai.memory.forget', { schoolId, id: id!, version })
+          : await props.transport.call('ai.memory.clear', { schoolId, version });
+      if (!current(ticket)) return;
+      applyMemory(value);
+      note.value = action === 'configure' ? value.enabled ? '已开启自动记忆。' : '已关闭自动记忆。' : action === 'forget' ? '已删除这条自动记忆。' : '已清空自动记忆，手动偏好已保留。';
+    } catch (caught) {
+      if (!current(ticket)) return;
+      if (!(caught instanceof ClientError) || caught.code !== 'MEMORY_CONFLICT') throw caught;
+      const latest = await props.transport.call('ai.memory.get', { schoolId });
+      if (!current(ticket)) return;
+      applyMemory(latest); note.value = '记忆已在其他页面更新，已加载最新记忆，请核对后重新操作。';
+    } finally {
+      if (current(ticket) && memory.value) memoryEnabled.value = memory.value.enabled;
+    }
+    await refreshRecommendations(ticket);
+  });
 }
 async function savePreferences() {
   if (!preferences.value) return;
@@ -139,12 +204,13 @@ async function dismiss(item: RecommendedNotice, undo = false) {
 }
 async function recover(ticket: number, conversationId: string) {
   if (!current(ticket)) return;
-  try { const value = await props.transport.call('ai.chat.get', { conversationId }); if (current(ticket)) applyChat(value); }
+  try { const value = await props.transport.call('ai.chat.get', { conversationId }); if (current(ticket)) { applyChat(value); const last = value.turns.at(-1); await refreshMemory(ticket, last?.state === 'complete' && !last.taskId); } }
   catch (caught) { if (current(ticket)) error.value = safeError(caught); }
 }
 async function stepTurn(ticket: number, turnId: string, connection = temporaryConnection()) {
   if (!current(ticket) || !chat.value) return;
   const conversationId = chat.value.id;
+  let recovered = false;
   for (let count = 0; count < 64 && current(ticket) && !stopped; count++) {
     const turn = chat.value?.turns.find(value => value.id === turnId);
     if (!turn || turn.state !== 'ready') break;
@@ -159,18 +225,24 @@ async function stepTurn(ticket: number, turnId: string, connection = temporaryCo
       stopped = true;
       error.value = safeError(caught);
       await recover(ticket, conversationId);
+      recovered = true;
       if (!current(ticket)) return;
       note.value = '已查询对话状态。请核查后手动继续，未重复调用模型。';
       break;
     }
   }
-  if (current(ticket)) { stopped = true; await refreshQuota(ticket); }
+  if (current(ticket)) {
+    stopped = true;
+    const completed = chat.value?.turns.find(turn => turn.id === turnId);
+    if (!recovered && completed?.state === 'complete') await refreshMemory(ticket, !completed.taskId);
+    await refreshQuota(ticket);
+  }
 }
 async function send() {
   if (!canSend.value) return;
   await mutation(async ticket => {
-    const text = question.value.trim(), itemIds = selected.value.map(item => item.id);
-    const chosenService = service.value, saved = apiMode.value === 'saved' && profileSelection.value ? { profile: { ...profileSelection.value.profile }, model: profileSelection.value.model } : null, connection = temporaryConnection();
+    const text = question.value.trim(), itemIds = memoryCommand.value ? [] : selected.value.map(item => item.id);
+    const chosenService = memoryCommand.value ? 'official' : service.value, saved = !memoryCommand.value && apiMode.value === 'saved' && profileSelection.value ? { profile: { ...profileSelection.value.profile }, model: profileSelection.value.model } : null, connection = temporaryConnection();
     const signature = JSON.stringify([props.schoolId, text, itemIds, chosenService, chosenService === 'byok' ? saved ? [saved.profile.id, saved.profile.version, saved.model] : [connection.provider, connection.model] : null]);
     if (signature !== sendSignature) { sendRequestId = crypto.randomUUID(); sendSignature = signature; }
     if (!chat.value) {
@@ -242,7 +314,7 @@ function exportConversation() {
 }
 function reset() {
   providerBusy.value = false; providerStorageConfigured.value = false;
-  epoch++; settingsEpoch.value++; stopped = true; busy.value = false; loading.value = false; cancelling.value = false; status.value = null; preferences.value = null; recommendations.value = null; chat.value = null; localSources.value = []; dismissed.value = null; interests.value = ''; goals.value = ''; learningEnabled.value = false; apiKey.value = ''; model.value = ''; profileSelection.value = null; apiMode.value = 'temporary'; service.value = 'official'; provider.value = 'deepseek'; question.value = ''; query.value = ''; error.value = ''; note.value = ''; resolutions.value = {}; createRequestId = ''; sendRequestId = ''; sendSignature = '';
+  epoch++; settingsEpoch.value++; stopped = true; busy.value = false; loading.value = false; cancelling.value = false; status.value = null; preferences.value = null; memory.value = null; memoryEnabled.value = true; recommendations.value = null; chat.value = null; localSources.value = []; dismissed.value = null; interests.value = ''; goals.value = ''; learningEnabled.value = false; apiKey.value = ''; model.value = ''; profileSelection.value = null; apiMode.value = 'temporary'; service.value = 'official'; provider.value = 'deepseek'; question.value = ''; query.value = ''; error.value = ''; note.value = ''; resolutions.value = {}; createRequestId = ''; sendRequestId = ''; sendSignature = '';
 }
 watch(() => props.schoolId, () => { reset(); void load(); });
 watch(() => props.transport, () => { unsubscribe?.(); reset(); subscribeSession(); void load(); });
@@ -256,6 +328,7 @@ function subscribeSession() {
   });
 }
 const timer = setInterval(() => {
+  expireMemory();
   if (chat.value && Date.parse(chat.value.expireAt) <= Date.now()) { epoch++; stopped = true; busy.value = false; loading.value = false; cancelling.value = false; chat.value = null; apiKey.value = ''; createRequestId = ''; sendRequestId = ''; sendSignature = ''; note.value = '个人对话已满 24 小时，已从当前页面移除。'; }
 }, 1000);
 onMounted(() => { subscribeSession(); void load(); });
@@ -274,6 +347,7 @@ onUnmounted(() => { active = false; unsubscribe?.(); reset(); clearInterval(time
             <div class="question-bubble"><span class="speaker">你</span><p>{{ turn.question }}</p></div>
             <div class="answer-block"><span class="speaker">阅读搭子 <small>{{ stateNames[turn.state] }}</small></span><div v-if="turn.result" class="markdown-content" v-html="renderMarkdown(turn.result)" /><p v-else class="turn-message">{{ turn.message }}</p>
               <p v-if="turn.search" class="turn-search-status" role="status">{{ turn.search.message }}</p>
+              <p v-if="turn.memoryMessage" class="turn-memory-status" role="status">{{ turn.memoryMessage }}</p>
               <p class="turn-meta">{{ turn.service === 'official' ? '官方 AI' : '我的 API' }} · {{ turn.model }}<template v-if="turn.totalSteps"> · {{ Math.min(turn.step, turn.totalSteps) }}/{{ turn.totalSteps }} 批</template></p>
               <ul v-if="turn.references.length" class="answer-references"><li v-for="source in turn.references" :key="source.reference"><a v-if="safeLink(source.originalUrl)" :href="safeLink(source.originalUrl)" target="_blank" rel="noopener noreferrer">[{{ source.reference }}] {{ source.title }}</a><span v-else>[{{ source.reference }}] {{ source.title }}（原文链接不可用）</span></li></ul>
               <div class="turn-actions"><button v-if="turn.state === 'ready' && !busy" class="secondary" :disabled="loading" @click="resume(turn)">继续回答</button><button v-if="['ready', 'running'].includes(turn.state) || (turn.state === 'uncertain' &amp;&amp; !turn.quotaHeld) || (turn.quotaHeld &amp;&amp; !['uncertain', 'cancelled'].includes(turn.state))" data-test="cancel" class="text-button" :disabled="cancelling" @click="cancel(turn)">{{ turn.state === 'uncertain' ? '已核查用量，结束本轮' : '取消回答' }}</button><button v-if="turn.quotaHeld || ['ready', 'running', 'uncertain', 'cancelled'].includes(turn.state)" class="text-button" :disabled="busy || loading" @click="refreshChat">刷新对话状态</button></div>
@@ -283,7 +357,7 @@ onUnmounted(() => { active = false; unsubscribe?.(); reset(); clearInterval(time
           </article>
         </div>
         <div v-if="selected.length" class="context-strip" aria-label="本次引用资料"><span>本次资料 {{ selected.length }}/8</span><button v-for="item in selected" :key="item.id" class="source-chip" :disabled="busy || loading" :aria-label="`移除资料 ${item.title}`" @click="toggleSource(item)">{{ item.title }} <span aria-hidden="true">×</span></button></div>
-        <form class="assistant-composer" @submit.prevent="send"><label class="visually-hidden" for="assistant-question">问题</label><textarea id="assistant-question" v-model="question" maxlength="1500" rows="3" :disabled="busy || loading || !schoolId" placeholder="问问报名材料，也可以说“再找找本校比赛”…" @keydown.ctrl.enter.prevent="send" @keydown.meta.enter.prevent="send" /><div class="composer-bottom"><span>{{ question.length }}/1500 <small>Ctrl / ⌘ + Enter 发送</small></span><button type="submit" data-test="send" class="primary" :disabled="!canSend">{{ busy ? '正在处理…' : '发送' }}</button></div></form>
+        <form class="assistant-composer" @submit.prevent="send"><label class="visually-hidden" for="assistant-question">问题</label><textarea id="assistant-question" v-model="question" maxlength="1500" rows="3" :disabled="busy || loading || !schoolId" placeholder="问问报名材料，也可以说“联网搜索相关资料”…" @keydown.ctrl.enter.prevent="send" @keydown.meta.enter.prevent="send" /><div class="composer-bottom"><span>{{ question.length }}/1500 <small>Ctrl / ⌘ + Enter 发送</small></span><button type="submit" data-test="send" class="primary" :disabled="!canSend">{{ busy ? '正在处理…' : '发送' }}</button></div></form>
         <p v-if="!schoolId" class="assistant-note">先选择一所学校，再和阅读搭子聊天。</p><p v-else-if="status && service === 'official' && !status.officialConfigured" class="assistant-note">官方模型尚未配置，可在使用设置中填写自己的 API。</p><p v-else-if="status && service === 'official' && status.quota.remaining <= 0" class="assistant-note">今日官方额度已用完或预占，北京时间零点恢复。也可使用自己的 API。</p>
         <p v-if="error" class="error-message" role="alert">{{ error }}</p><p v-if="note" class="assistant-note" role="status">{{ note }}</p><p v-if="chat" class="expiry-note">对话于 {{ new Date(chat.expireAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) }}（北京时间）到期。回答依据已提供的资料，重要日期请核对原文。</p>
         <details class="assistant-settings"><summary>服务模型调整</summary>
@@ -298,10 +372,28 @@ onUnmounted(() => { active = false; unsubscribe?.(); reset(); clearInterval(time
         </details>
       </div>
       <aside class="assistant-rail" aria-label="公告与阅读偏好">
-        <section class="source-section"><h2>值得留意的公告</h2><p class="rail-caption">{{ recommendations?.coverage || '从本校已收录的公开公告中发现资料' }}</p><form class="source-search" @submit.prevent="search"><label class="visually-hidden" for="assistant-search">搜索公告</label><input id="assistant-search" v-model="query" maxlength="200" :disabled="busy || loading" placeholder="输入想找的校园消息" /><button type="submit" data-test="search" class="secondary" :disabled="busy || loading || !schoolId">搜索</button></form><p v-if="recommendations?.search.message" class="search-status" role="status">{{ recommendations.search.message }}</p><p v-if="!loading && !recommendations?.items.length" class="rail-caption">暂无匹配的公告，可修改关键词后主动搜索。</p>
+        <section class="source-section"><h2>公告与公开资料</h2><p class="rail-caption">{{ recommendations?.coverage || '从本校已收录的公开公告中发现资料' }}</p><form class="source-search" @submit.prevent="search"><label class="visually-hidden" for="assistant-search">搜索公开资料</label><input id="assistant-search" v-model="query" maxlength="200" :disabled="busy || loading" placeholder="搜索公告、教程或其他公开资料" /><button type="submit" data-test="search" class="secondary" :disabled="busy || loading || !schoolId">搜索</button></form><p v-if="recommendations?.search.message" class="search-status" role="status">{{ recommendations.search.message }}</p><p v-if="!loading && !recommendations?.items.length" class="rail-caption">暂无匹配的公告，可修改关键词后主动搜索。</p>
           <article v-for="item in recommendations?.items || []" :key="item.id" class="recommendation"><div class="source-meta"><span>{{ item.sourceName }}</span><span>{{ readNames[item.readState] }}</span></div><h3><a v-if="safeLink(item.originalUrl)" :href="safeLink(item.originalUrl)" target="_blank" rel="noopener noreferrer" @click="recordBehavior(item.id)">{{ item.title }}</a><span v-else>{{ item.title }}</span></h3><p class="source-dates"><span>发布时间：{{ sourceTime(item.publishedAt) }}</span><span>正文检查：{{ sourceTime(item.checkedAt) }}</span></p><p v-if="item.summary" class="source-summary">{{ item.summary }}</p><p class="source-reason">{{ item.reason }}</p><div class="source-actions"><button data-test="select-source" class="text-button" :disabled="busy || loading || !item.allowAi" :aria-pressed="isSelected(item.id)" @click="toggleSource(item)">{{ isSelected(item.id) ? '已选为资料' : item.allowAi ? '选为聊天资料' : '不允许 AI 阅读' }}</button><button data-test="dismiss-source" class="text-button dismiss-button" :disabled="busy || loading" @click="dismiss(item)">不感兴趣</button></div></article><div v-if="dismissed" class="dismissed-note"><span>已隐藏这条推荐</span><button data-test="undo-dismiss" class="text-button" :disabled="busy || loading" @click="dismiss(dismissed, true)">撤销</button></div>
         </section>
         <details class="preferences-section"><summary>我的阅读偏好</summary><p class="rail-caption">手动填写偏好。行为学习默认关闭。</p><label for="assistant-interests">关注话题，用逗号分隔</label><input id="assistant-interests" v-model="interests" maxlength="1000" :disabled="busy || loading || !preferences" placeholder="如 招聘，竞赛，学术活动" /><label for="assistant-goals">近期目标</label><textarea id="assistant-goals" v-model="goals" rows="2" maxlength="1000" :disabled="busy || loading || !preferences" /><label class="learning-toggle"><input v-model="learningEnabled" type="checkbox" :disabled="busy || loading || !preferences" /> 根据我主动阅读的公告学习偏好</label><div class="preference-actions"><button data-test="save-preferences" class="secondary" :disabled="busy || loading || !preferences" @click="savePreferences">保存偏好</button><button class="text-button" :disabled="busy || loading || !preferences" @click="clearBehavior">清除行为记录</button></div></details>
+        <details class="memory-section" data-test="memory-section">
+          <summary>AI记住的信息</summary>
+          <p class="rail-caption">默认自动保存你在对话中明确说出的信息，无需逐条确认。与行为学习独立，手动偏好和你当前的明确表达优先。</p>
+          <label class="learning-toggle"><input v-model="memoryEnabled" data-test="memory-enabled" type="checkbox" :disabled="busy || loading || !memory" @change="changeMemory('configure')" /> 自动记住我的信息</label>
+          <p class="rail-caption">年级 365 天、近期目标 180 天、进展 30 天后到期；专业、兴趣和回答偏好无固定到期，可随时删除。到期信息不再使用，记忆不作为公告事实来源。</p>
+          <p v-if="!memory" class="muted">{{ loading ? '正在读取记忆…' : '记忆尚未读取，请重新打开页面重试。' }}</p>
+          <p v-else-if="!memory.items.length" class="rail-caption">暂无自动记忆。</p>
+          <ul v-else class="memory-list">
+            <li v-for="item in memory.items" :key="item.id">
+              <strong>{{ memoryNames[item.slot] }}</strong><p>{{ item.text }}</p>
+              <small v-if="item.slot === 'progress'">{{ progressGoal(item) }}</small>
+              <small>{{ item.expiresAt ? `到期：${sourceTime(item.expiresAt)}（北京时间）` : '无固定到期，可随时删除' }}</small>
+              <button :data-test="`forget-memory-${item.id}`" class="text-button" :disabled="busy || loading" :aria-label="`删除${memoryNames[item.slot]}记忆`" @click="changeMemory('forget', item.id)">删除</button>
+            </li>
+          </ul>
+          <button data-test="clear-memory" class="text-button" :disabled="busy || loading || !memory?.items.length" @click="changeMemory('clear')">清空自动记忆</button>
+          <p class="rail-caption">清空只删除自动记忆，保留手动填写的阅读偏好。</p>
+        </details>
       </aside>
     </div>
   </section>
@@ -319,10 +411,11 @@ onUnmounted(() => { active = false; unsubscribe?.(); reset(); clearInterval(time
 .conversation-turn + .conversation-turn { margin-top: 32px; }.question-bubble { margin-left: 12%; padding: 13px 18px; background: #edf3ff; border-radius: 10px 10px 2px 10px; }.question-bubble p { color: #173766; white-space: pre-wrap; overflow-wrap: anywhere; }.speaker { display: block; font-size: 12px; font-weight: 600; margin-bottom: 7px; color: #627188; }.speaker small { margin-left: 8px; }.answer-block { padding: 22px 6px 0; }.turn-message { font-size: 14px; }.turn-meta { font-size: 11px; margin-top: 12px; }.answer-references { margin: 12px 0; padding-left: 20px; font-size: 12px; }.answer-references li { margin: 5px 0; }.turn-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 10px; }.quota-resolution { margin-top: 16px; padding: 14px; background: #f4f7fc; font-size: 12px; }.quota-resolution label { display: block; margin-top: 8px; }.quota-resolution select { max-width: 100%; margin: 6px 8px 6px 0; }
 .context-strip { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 11px; margin: 12px 0; color: #627188; }.source-chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; padding: 4px 9px; border: 1px solid #d8e4f6; border-radius: 4px; background: #f5f8ff; color: #235ed7; font-size: 12px; }.source-chip span { margin-left: 7px; }
 .assistant-composer { border: 1px solid #b9cce9; border-radius: 8px; padding: 12px 14px; box-shadow: 0 3px 10px #17376605; }.assistant-composer:focus-within { border-color: #235ed7; box-shadow: 0 0 0 2px #235ed712; }.assistant-composer textarea { width: 100%; padding: 0; border: 0; resize: vertical; min-height: 76px; font: inherit; line-height: 1.7; color: #173766; background: transparent; }.assistant-composer textarea:focus { outline: none; }.composer-bottom { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 7px; }.composer-bottom > span { font-size: 11px; color: #627188; }.composer-bottom small { margin-left: 7px; font-size: 10px; }.composer-bottom .primary { padding: 7px 23px; border-radius: 4px; font-size: 13px; }
-.turn-search-status { font-size: 12px; line-height: 1.7; color: #627188; margin-top: 10px; }
+.turn-search-status, .turn-memory-status { font-size: 12px; line-height: 1.7; color: #627188; margin-top: 10px; }
 .assistant-note { font-size: 12px; margin-top: 10px; }.expiry-note { font-size: 11px; margin-top: 15px; }.assistant-settings { font-size: 14px; margin-top: 18px; color: #627188; padding-bottom: 24px; }.assistant-settings > summary { font-size: 15px; }.assistant-settings .assistant-note { font-size: 13px; }.assistant-settings summary, .preferences-section summary { cursor: pointer; }.assistant-settings fieldset { border: 0; padding: 12px 0; display: flex; gap: 18px; }.assistant-settings legend { padding: 8px 0 0; }.byok-fields { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 10px; align-items: center; padding: 8px 0 14px; }.byok-fields p, .byok-fields button { grid-column: 1 / -1; }.byok-fields button { justify-self: start; }.byok-fields input, .byok-fields select, .preferences-section input:not([type=checkbox]), .preferences-section textarea, .source-search input, .quota-resolution select { width: 100%; min-width: 0; border: 1px solid #d4dfef; border-radius: 4px; padding: 8px 10px; font: inherit; color: #173766; background: #fff; }
 .assistant-rail { min-width: 0; border-left: 1px solid #e0e7f1; padding: 25px 0 25px 26px; }.assistant-rail h2 { font-size: 17px; }.rail-caption { font-size: 12px; line-height: 1.8; margin: 8px 0 14px; }.source-search { display: flex; gap: 7px; }.source-search input { font-size: 12px; }.source-search button { white-space: nowrap; padding: 6px 10px; }.search-status { font-size: 11px; margin: 9px 0; }.recommendation { padding: 18px 0; border-bottom: 1px solid #e7edf6; }.source-meta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; font-size: 11px; color: #78849a; }.recommendation h3 { font-size: 15px; font-weight: 600; line-height: 1.7; margin-top: 7px; }.recommendation h3 a { color: #173766; text-decoration: none; }.recommendation h3 a:hover { text-decoration: underline; }.source-dates { display: grid; gap: 2px; margin-top: 7px; font-size: 10px; color: #78849a; }.source-summary { font-size: 12px; margin-top: 8px; line-height: 1.85; }.source-reason { font-size: 11px; color: #496c9e; margin-top: 9px; border-left: 2px solid #d4e1f7; padding-left: 8px; }.source-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; margin-top: 10px; }.source-actions .text-button { font-size: 11px; padding: 2px 0; }.source-actions .dismiss-button { color: #78849a; }.dismissed-note { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; font-size: 11px; color: #627188; }.preferences-section { margin-top: 25px; font-size: 12px; }.preferences-section summary { color: #173766; font-weight: 600; }.preferences-section > label:not(.learning-toggle) { display: block; margin: 14px 0 6px; }.preferences-section textarea { resize: vertical; }.learning-toggle { display: flex; align-items: start; gap: 7px; margin-top: 14px; color: #627188; }.learning-toggle input { margin-top: 4px; }.preference-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 15px; }.preference-actions button { font-size: 11px; }.muted { color: #627188; }.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 textarea:focus-visible { outline: 3px solid #89b0ff; outline-offset: 2px; }.assistant-composer textarea:focus-visible { outline: none; }
+.memory-section { margin-top: 25px; font-size: 12px; }.memory-section summary { color: #173766; font-weight: 600; cursor: pointer; }.memory-list { list-style: none; padding: 0; margin: 12px 0; }.memory-list li { padding: 12px 0; border-bottom: 1px solid #e7edf6; overflow-wrap: anywhere; }.memory-list p { margin: 6px 0; line-height: 1.8; white-space: pre-wrap; }.memory-list small { display: block; color: #627188; line-height: 1.7; }.memory-list .text-button { margin-top: 6px; font-size: 11px; }
 @media (max-width: 1100px) { .assistant-layout { grid-template-columns: minmax(0, 1fr) 260px; gap: 22px; }.assistant-rail { padding-left: 20px; }.quota-line small { display: block; } }
 @media (max-width: 850px) { .assistant-layout { grid-template-columns: minmax(0, 1fr); gap: 10px; }.assistant-rail { border-left: 0; border-top: 1px solid #e0e7f1; padding: 24px 0; }.assistant-stream { max-height: 60dvh; min-height: 300px; }.assistant-welcome { margin: 20px auto; }.composer-bottom small { display: none; }.question-bubble { margin-left: 5%; }.assistant-heading h1 { font-size: 25px; } }
 </style>

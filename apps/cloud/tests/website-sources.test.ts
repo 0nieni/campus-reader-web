@@ -45,6 +45,7 @@ test('personal website lifecycle, isolation, concurrency, free-summary shutdown 
    assert.equal(reads,0);const preview=await websites.handle('sources.test',{schoolId:'bjtu',sourceId:a.id},owner) as any;assert.equal(preview.count,2);
    assert.equal((await sql.query("SELECT id FROM campus_documents WHERE collection='items' AND id LIKE 'webnotice_%'")).rows.length,0);
    time+=1600;const result=await websites.handle('sources.refresh',{schoolId:'bjtu',sourceId:a.id},owner) as any;assert.equal(result.count,1);
+   assert.deepEqual(result.stats,{newCount:1,existingCount:0,failedSources:0,skippedCount:1});
    const rows=await sql.query("SELECT id,body FROM campus_documents WHERE collection='items' AND body->>'sourceId'=$1",[a.id]);assert.equal(rows.rows.length,1);const row=rows.rows[0]!.body;assert.equal(row.summary,undefined);assert.equal(row.autoSummary,undefined);
    assert.equal((await sql.query("SELECT id FROM campus_documents WHERE collection IN ('web_ai_tasks','web_ai_accounts')")).rows.length,0);
    const count=reads;await assert.rejects(websites.handle('sources.refresh',{schoolId:'bjtu',sourceId:a.id},owner),{code:'SOURCE_INTERVAL'});assert.equal(reads,count);
@@ -54,6 +55,13 @@ test('personal website lifecycle, isolation, concurrency, free-summary shutdown 
    assert.ok(!(await repo.items(await repo.scope('school_001','owner'),0,1000,'2025-10-18')).some(row=>row.sourceId===a.id));
    assert.equal(toNotice({...row,_id:rows.rows[0]!.id,summary:{oneLine:'旧免费摘要'},autoSummary:{text:'旧自动摘要',basis:'body',version:'extractive-v1'}}).summary,null);
    const gateway=createGateway(repo,{ownerUid:owner.uid,dataOwnerId:owner.dataOwnerId});const old=await gateway({action:'school.summarize',input:{schoolId:'bjtu'}},{uid:owner.uid,isAnonymous:false});assert.equal(old.ok,false);
+  });
+  await t.test('repeat collection reports existing notices and exposes its next allowed collection time',async()=>{
+   time+=61*60000;
+   const result=await websites.handle('sources.refresh',{schoolId:'bjtu',sourceId:a.id},owner) as any;
+   assert.deepEqual(result.stats,{newCount:0,existingCount:1,failedSources:0,skippedCount:1});
+   const listed=await websites.handle('sources.list',{schoolId:'bjtu'},owner) as any;
+   assert.equal(listed.sources[0].nextRefreshAt,new Date(time+60*60000).toISOString());assert.equal(listed.sources[0].lastErrorCode,null);assert.deepEqual(listed.sources[0].lastCollection,result.stats);
   });
   await t.test('imported material requires the normal private AI policy and charges one of three only after completing a reading',async()=>{
    const row=(await sql.query("SELECT id FROM campus_documents WHERE collection='items' AND body->>'sourceId'=$1",[a.id])).rows[0]!;

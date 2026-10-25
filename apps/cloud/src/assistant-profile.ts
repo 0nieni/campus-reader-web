@@ -8,6 +8,7 @@ import { displayedCategories } from './notice-labels';
 import type { ItemRow, Repository } from './repository';
 import { isPrivate, itemVisible, sourceVisible, type Resource, type Scope } from './scope';
 import { atomic, readDoc, seed, transactionRow, type Database } from './storage';
+import { memoryService } from './assistant-memory';
 
 const DAY = 86400000;
 const BEHAVIOR_DAYS = 30;
@@ -141,13 +142,18 @@ export function assistantProfile(db: Database, repo: Repository, now = Date.now)
       }
     }
     const explicit = [...profile.preferences.interests, ...terms(profile.preferences.goals)];
+    const memory = await memoryService(db, repo, now).get(owner, schoolId);
+    const memoryText = memory.enabled ? memory.items.filter(item => ['interests', 'goal'].includes(item.slot) && !/不|避免|取消|拒绝/.test(item.text)).map(item => item.text).join('，') : '';
+    const topicWords = [...Object.values(categoryWords).flat(), '编程', '人工智能', '科研', '项目', '实习', '就业', '保研', '考研', '留学', '招聘', '志愿'];
+    const rememberedTerms = [...new Set([...terms(memoryText), ...topicWords.filter(word => memoryText.includes(word))])];
     const questionTerms = terms(question);
     const ranked = allowed.map(({ row, allowAi }) => {
       const hit = matching(row, explicit), questionHit = matching(row, questionTerms);
+      const memoryHit = matching(row, rememberedTerms);
       const behaviorHit = categories(row).some(category => learned.has(category));
       return {
-        row, allowAi, group: hit || questionHit ? 0 : behaviorHit ? 1 : 2,
-        reason: hit ? `命中你填写的“${hit}”关注点` : questionHit ? `与本次问题中的“${questionHit}”相关` : behaviorHit ? '与近 30 天的近期阅读或收藏类别相关' : '按发布时间展示',
+        row, allowAi, group: hit || questionHit ? 0 : memoryHit ? 1 : behaviorHit ? 2 : 3,
+        reason: hit ? `命中你填写的“${hit}”关注点` : questionHit ? `与本次问题中的“${questionHit}”相关` : memoryHit ? `与你自动记忆中的“${memoryHit}”关注点相关` : behaviorHit ? '与近 30 天的近期阅读或收藏类别相关' : '按发布时间展示',
       };
     }).sort((a, b) => a.group - b.group || (Date.parse(checkedDate(b.row.publishedAt) || '') || 0) - (Date.parse(checkedDate(a.row.publishedAt) || '') || 0) || a.row._id.localeCompare(b.row._id));
     const selected = ranked.slice(0, 5);
