@@ -14,6 +14,10 @@ export interface ItemRow extends Resource {
   autoSummary?: {text:string;basis:'body'|'title';version:string;checkedAt?:string};
   originalUrl?: string;
   contentText?: string;
+  materialExpiresAt?: string;
+  inlineMaterial?: boolean;
+  materialPending?: boolean;
+  materialArchive?: import('./material-archive').MaterialArchiveView;
   aiProcessing?: string;
   updatedAt?: string;
   personalCategories?: string[];

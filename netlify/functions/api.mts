@@ -10,11 +10,10 @@ import { bookmarksService } from '../../apps/cloud/src/bookmarks';
 import { aiService } from '../../apps/cloud/src/ai-service';
 import { assistantService } from '../../apps/cloud/src/assistant-service';
 import { siteWorkspace } from '../../apps/cloud/src/site-access';
-import { schoolDirectory } from '../../apps/cloud/src/school-directory';
 import { schoolRequests } from '../../apps/cloud/src/school-requests';
-import {websiteSources} from '../../apps/cloud/src/website-sources';
 import {reminderService} from '../../apps/cloud/src/reminders';
 import {reminderRuntime} from '../../apps/cloud/src/netlify-reminder-runtime';
+import {materialRuntime} from '../../apps/cloud/src/material-runtime';
 declare const Netlify: { env: { get(name: string): string | undefined } };
 let pool: SqlPool | undefined;
 export default createSiteApi({
@@ -31,9 +30,8 @@ export default createSiteApi({
     process.env.AI_PROVIDER = 'openai_compatible';
     pool ||= getDatabase().pool as unknown as SqlPool;
     const db = postgresStorage(pool), repo = postgresRepository(pool);
-    const directory = schoolDirectory(pool,repo);
-    const websites=websiteSources(pool,repo);
-    repo.material = row=>row.importKind==='website'?websites.material(row):directory.material(row);
+    const context=getContext();
+    const {directory,websites}=materialRuntime(pool,repo,{production:context.deploy.context==='production',deployId:context.deploy.id});
     const ai = aiService(db, repo), assistant = assistantService(db, repo, ai);
     const request = schoolRequests(pool,async fields => {
       // Fixed site target: never accept URLs, recipients, email addresses or UID

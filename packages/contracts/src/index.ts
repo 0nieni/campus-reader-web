@@ -47,6 +47,7 @@ export interface FeedFilters {
   period?: "7d" | "30d" | "90d" | "all";
 }
 export interface NoticeDetail extends Notice {
+  materialArchive?: {expiresAt:string;attachmentNote:string;version:string;files:Array<{id:string;filename:string;kind:'article'|'attachment';state:string;message:string;collectedAt:string|null;expiresAt:string|null;characters:number;available:boolean}>};
   defaultCategories?: string[];
   categoriesCustomized?: boolean;
   bookmarked?: boolean;
