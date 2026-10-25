@@ -341,3 +341,28 @@ Ruling：记忆作为用户档案JSON字段，不新增表/迁移；写入只发
 - 整合后 npm ci、类型检查、512 项测试（web 186 / cloud 326）、普通构建及 11 函数 Netlify 完整构建全部通过；验证未登录 API 拒绝。未调用真实模型、搜索、邮件或推送。
 - 官方只读 production 数据库状态确认原八份迁移已应用，新资料迁移待应用，missingOnDisk / outOfOrder 为空。后续仅由正常部署应用新迁移，不直接改托管表结构、迁移历史或生产记录。
 - 采集签名密钥通过官方 Netlify CLI 配置到 Production，不打印值、不加入代码、不改其他密钥或套餐；通过 PR 预览检查后合入 main，PR 与合并备注使用“数据库”。最终部署状态以对应 GitHub / Netlify 发布记录及本次回复为准。
+
+
+## Lexmount 网页采集（2026-10-25，新分支）
+
+用户明确选择网站后台自动采集改用 Lexmount、继续保存到现有资料库；新分支名为“lexmount的应用”，推送到 GitHub 保存，本次不合并、不上线。从正式数据库版本 8b038d7 创建同名分支，没有改动其他聊天的检出或生产配置。
+
+- 读取并使用已安装的 lexmount-webfetch / lexmount-browser 技能。WebFetch CLI 0.1.5 的 doctor 报告 ok、credentials 与 agent_skill 均通过。公开 HTML 和渲染内容适合 WebFetch，本次无需交互式 Browser session。后台按官方 Web Fetch /v1/dom/dump 协议调用，不上传本机 CLI 或登录文件。
+- 新增受限 HTML 读取适配器，供学校/个人 HTML 列表、正文入库、旧公开导入资料及 02:45 后台采集使用。只发送公开 URL 与固定选项，凭据只发往官方 CN/COM HTTPS 接口。校验输入与最终 URL、来源范围、公网 DNS、API 和目标状态，约束 20 秒总时限、4 MiB JSON 和 1.5 MB HTML；失败不暗中切换旧 HTML 抓取，不直接暴露服务商错误体。
+- robots、RSS/JSON 保留原始协议读取；二进制附件沿用现有安全下载与提取。365 天资料存储、任务去重/租约/续跑、来源权限和个人预算保留。02:17 清理中的旧列表预热由现有 02:45 后台任务覆盖，避免在短清理函数重复进行渲染；AI 与提醒清理调用不变。没有改动提醒发送、AI 搜索提供商或临时搜索证据链。
+- 真实技能调用仅一次：北京大学教务部公开公告列表，返回目标 200、lightmount_dcl、19175 字符 HTML；本地回放经新适配器和原解析器识别 15 条公告。原始结果仅存本地忽略目录，没有加入仓库或导入生产。真实云端 API 与本机模拟服务的 SQL 集成验证是不同证据，不声称完成 Netlify 中的 Lexmount 联调。
+- 接口回归覆盖凭据/配置、URL与DNS、最终学校范围、目标错误页、额度、鉴权、区域、限流、大小、格式和流式超时；本机 SQL 集成覆盖公告、实际 PDF 附件提取、Blobs 替身、权限撤销、固定期限和 JSON 原始正文。先复现缺少适配模块的失败，再实现并通过。
+- npm ci、typecheck、521 项测试（web 186 / cloud 335）、普通构建、11 函数 Netlify 完整构建通过；没有新增依赖或改写数据库迁移。未来部署需服务端 LEXMOUNT_API_KEY 与 LEXMOUNT_PROJECT_ID，可选官方区域地址及引擎；本机技能已登录不代表 Netlify 已配置。
+- 实现与配置说明见 docs/lexmount-collection.md，计划见 docs/plans/2026-10-25-lexmount-collection.md。验证后的代码准备提交并推送指定新分支，不创建上线 PR，不合并 main，不主动触发正式发布。
+
+### Lexmount 分支保存完成
+
+实现提交 e3fb21406af48b4f637c7dd785ac6633e4c0df9d 已推送至 origin/lexmount的应用，远端引用与本地 SHA 一致。521 项测试和完整构建的证据针对该实现；此后仅补充交付记录，不改变代码。没有创建 PR、合入 main、配置生产 Lexmount 凭据或主动发布。
+
+### Lexmount 合并与发布（2026-10-25，进行中）
+
+用户明确要求合入 main 并应用到现有网站，随后确认保留 main 最新改动，只发布已完成的 Lexmount 功能，提醒和 AI 搜索保持现状；此授权覆盖此前仅保存、不发布的阶段。已只读核对本地工作区干净，GitHub API 与正常 fetch 均确认 main 仍为 8b038d7，Lexmount 分支为 57caa1c，无需解决合并冲突。其他两个 AI PR 不在本次范围内。
+
+本轮重新运行 npm ci、typecheck、全量 521 项测试（web 186 / cloud 335，0 失败）、普通构建及 Netlify 完整构建均通过，完整产物包含 11 个函数。日志保存在忽略目录 .netlify-staging/lexmount-verification/release-*.log，产物为 .netlify-staging/20261025114330230。git diff --check 通过；提醒、AI 搜索、依赖锁文件和历史迁移相对 main 无改动。npm ci 仍报告已有 CloudBase 依赖链的 5 项告警（1 moderate / 4 high）及 4 条未批准安装脚本，本轮未升级依赖或更改批准策略。
+
+现有来源范围、资料库/365 天保留、权限与附件处理继续沿用。生产 Lexmount 凭据不从本机技能复制，需项目所有者安全配置；本次不把代码部署、模拟测试或技能登录当作线上采集联调成功。已通过 find-skills 找到并下载 OpenAI 官方 netlify-deploy 技能到交付目录 output，仅用于核对登录、站点和发布流程，不纳入站点仓库。合并与远端发布结果待后续记录。

@@ -6,6 +6,7 @@ import {materialRuntime} from '../../apps/cloud/src/material-runtime';
 import {schoolDirectory} from '../../apps/cloud/src/school-directory';
 import {materialJobs,validJob} from '../../apps/cloud/src/material-jobs';
 import {dispatchMaterials} from '../../apps/cloud/src/material-dispatch';
+import {readLexmountPage} from '../../apps/cloud/src/lexmount-pages';
 export const config={background:true};
 export default async(request:Request)=>{
  const start=Date.now(),context=getContext(),secret=Netlify.env.get('MATERIALS_JOB_SECRET');
@@ -15,7 +16,7 @@ export default async(request:Request)=>{
  if(body!=='{}'||!validJob(secret,request.headers.get('x-material-time'),body,request.headers.get('x-material-signature')))return;
  const pool=getDatabase().pool as unknown as SqlPool,repo=postgresRepository(pool);
  const runtime=materialRuntime(pool,repo,{production:true,deployId:context.deploy.id});
- const directory=schoolDirectory(pool,repo,undefined,Date.now,{trackActivity:false});
+ const directory=schoolDirectory(pool,repo,readLexmountPage,Date.now,{trackActivity:false});
  const jobs=materialJobs(pool,{school:directory.refresh,source:async(id,owner,school)=>{
   try{return await runtime.websites.refreshSource(id,owner,school);}catch(error){if(error&&typeof error==='object'&&'code' in error&&error.code==='SOURCE_INTERVAL')return;throw error;}
  },material:(row,deadline)=>runtime.material(row,{force:true,deadline}),cleanup:()=>runtime.archive.cleanup(100)});
