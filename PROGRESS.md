@@ -370,3 +370,15 @@ Ruling：记忆作为用户档案JSON字段，不新增表/迁移；写入只发
 PR #19（接入 Lexmount 网页采集）预览 6addec6b14e6e29f94b4561d 已 ready，Netlify GitHub 状态 success；GitHub 确认 clean 后正常合并，main 合并提交为 286bbf2363e3358b2fc25023bdf7d28ebad1267e。官方 Netlify CLI getSite 只输出部署元信息，确认正式发布 6addee806a4eac4036f4a4ee 为 production / main / ready，commit_ref 与合并提交一致，自动构建未关闭。正式网页 GET 返回 200，携带正确本站 Origin 的未登录 API POST 返回 401 / no-store；未登录请求未进入业务动作，没有导入测试数据或触发 AI。
 
 所有者后续需在 Netlify 的 Production 服务端环境变量安全设置或确认 LEXMOUNT_API_KEY、LEXMOUNT_PROJECT_ID；按项目区域选择官方 CN/COM 入口，保存后重新部署。不要覆盖原 MATERIALS_JOB_SECRET 或其他服务密钥。待配置后再用真实账号手动刷新来源，核对列表、正文及附件；目前不声称真实 Netlify Lexmount 采集已成功。本轮没有读取或复制本机技能凭据，也未配置生产 Lexmount 密钥。
+
+## 公共竞赛来源与统一来源中心（2026-10-25，验证中）
+
+用户后续要求加入竞赛导航的网站、统一来源展示及分类筛选；已逐项确认公共目录对所有账号可见，沿用公告标签/关键词并增加勾选状态筛选，只加入实际验证可自动采集的栏目。学校默认勾选，其他默认不勾选；当前学校权限、收藏/详情/AI 许可、提醒与 AI 搜索保持现状。
+
+在指定检出的 codex/competition-source-center 分支实现。导航 214 项、203 条链接去重为 196 地址；通过官方 Lexmount skill 和现有解析器检查，最终接入计算机设计、GIS 软件开发、数媒创意和挑战杯 4 个栏目（覆盖 5 项竞赛），其余未验证通过的项目不纳入。真实响应留在忽略目录 .netlify-staging/competition-verification；没有向生产写入验收数据或复制本机凭据。
+
+新增统一只读目录、受限公共采集和显式显示选择，服务端在 SQL 分页前限制为已勾选来源，精确来源查询不能绕过；首次回归先失败，修改后真实 SQL 专项通过。共享公共采集沿用 robots/公网/域名校验、预算、固定 365 天资料库、去重/冷却及既有日任务，不新增依赖、SQL 迁移或函数。旧版只保存隐藏 ID，未记录的非学校来源按新默认关闭，新选择显式保存且原子合并其他档案字段。
+
+最终 npm ci、typecheck、全量 526 项测试（web 189 / cloud 337，0 失败）、普通构建与 Netlify 11 函数完整构建全部通过；产物 .netlify-staging/20261025154458070，日志为 competition-verification/final-*.log。git diff --check 通过，依赖锁、迁移、提醒和 AI 搜索无改动。npm ci 仍有既有 CloudBase 依赖链 5 项告警（1 moderate / 4 high）与 4 条未批准安装脚本，本轮未更改依赖或批准策略。
+
+Playwright 在真实 App + 独立模拟传输下验证 1440x1000 / 390x900、默认不选、勾选/采集/公告、关键词/分类/已选筛选及取消后不显示，无 pageerror 或横向溢出，截图保存在忽略目录。浏览器仅模拟界面，不代表生产凭据联调；本地兼容 CloudBase 模块仍有两条既有重复注册警告。Netlify 的 Lexmount 配置只读核查超时，未输出变量值；用户截图中的配置错误仍需所有者在服务端安全配置后重新部署，未用技能登录状态代替线上配置。此记录完成时待提交 PR、预览和正式发布。

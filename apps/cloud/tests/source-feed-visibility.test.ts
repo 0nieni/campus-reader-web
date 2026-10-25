@@ -78,12 +78,12 @@ test('per-account source display preferences filter home pages before pagination
    assert.deepEqual(profile.hiddenFeedSources.school_001,['directory_school_001__teaching']);assert.equal(profile.selectedSchoolId,'school_002');assert.deepEqual(profile.testKeep,{memory:'keep',bookmarks:['keep']});
   });
   await t.test('bulk settings cover this school only and source inspection filters before pagination without changing hidden preferences',async()=>{
-   const initial=await action('sources.displayState',{schoolId:'school_002'});assert.ok(initial.ok);assert.equal((initial.data as any).total,3);
-   const hidden=await action('sources.feedVisibilityAll',{schoolId:'school_002',visible:false});assert.ok(hidden.ok);assert.deepEqual(hidden.data,{total:3,shown:0,hidden:3});
-   const empty=await feed();assert.equal(empty.items.length,0);assert.equal(empty.hiddenSourceCount,3);
-   const inspected=await action('feed.list',{schoolId:'school_002',sourceId:'directory_school_002__statistics',keyword:'显示筛选测试公告'});assert.ok(inspected.ok);assert.equal((inspected.data as any).items.length,20);assert.equal((inspected.data as any).nextCursor,'20');assert.ok((inspected.data as any).items.every((item:any)=>Number(item.id.split('-')[1])<25));
-   const stillHidden=await action('sources.displayState',{schoolId:'school_002'});assert.ok(stillHidden.ok);assert.equal((stillHidden.data as any).hidden,3);
-   const restored=await action('sources.feedVisibilityAll',{schoolId:'school_002',visible:true});assert.ok(restored.ok);assert.deepEqual(restored.data,{total:3,shown:3,hidden:0});
+   const initial=await action('sources.displayState',{schoolId:'school_002'});assert.ok(initial.ok);const total=(initial.data as {total:number}).total;assert.ok(total>3);
+   const hidden=await action('sources.feedVisibilityAll',{schoolId:'school_002',visible:false});assert.ok(hidden.ok);assert.deepEqual(hidden.data,{total,shown:0,hidden:total});
+   const empty=await feed();assert.equal(empty.items.length,0);assert.equal(empty.hiddenSourceCount,total);
+   const inspected=await action('feed.list',{schoolId:'school_002',sourceId:'directory_school_002__statistics',keyword:'显示筛选测试公告'});assert.ok(inspected.ok);assert.equal((inspected.data as any).items.length,0);assert.equal((inspected.data as any).nextCursor,null);
+   const stillHidden=await action('sources.displayState',{schoolId:'school_002'});assert.ok(stillHidden.ok);assert.equal((stillHidden.data as any).hidden,total);
+   const restored=await action('sources.feedVisibilityAll',{schoolId:'school_002',visible:true});assert.ok(restored.ok);assert.deepEqual(restored.data,{total,shown:total,hidden:0});
    const profile=(await sql.query("SELECT body FROM campus_documents WHERE collection='user_profiles' AND id='alice'")).rows[0]!.body;assert.deepEqual(profile.hiddenFeedSources.school_001,['directory_school_001__teaching']);
    for(const input of [{schoolId:'school_002',visible:'no'},{schoolId:'school_002',visible:false,ownerId:'bob'}])assert.equal((await action('sources.feedVisibilityAll',input)).ok,false);
    assert.equal((await action('feed.list',{schoolId:'school_002',sourceId:'bad/id'})).ok,false);

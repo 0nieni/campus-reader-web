@@ -99,7 +99,7 @@ onUnmounted(()=>{active=false;request++;});
      <h3>{{source.name}}</h3><p class="muted small">{{catalogue.school.name}} · 已配置</p>
      <label class="source-display"><input type="checkbox" aria-label="在主页公告中显示" :checked="source.showInFeed!==false" :disabled="acting" @change="setFeedVisibility(source,$event)">在主页公告中显示</label>
      <a v-if="safeOriginal(source.url)" class="source-url" :href="safeOriginal(source.url)!" target="_blank" rel="noopener noreferrer">查看原站 ↗</a>
-     <button v-if="openSchool" class="text-button" :disabled="acting" @click="open(source)">查看该来源公告</button>
+     <button v-if="openSchool" class="text-button" :disabled="acting||source.showInFeed===false" @click="open(source)">查看该来源公告</button>
      <p class="small">{{catalogue.coverage}}</p><p class="muted small">{{source.message}}</p>
      <p v-if="sourceDiagnosis(source.errorCode)" class="source-diagnosis small"><strong>{{sourceDiagnosis(source.errorCode)!.title}}</strong> · {{sourceDiagnosis(source.errorCode)!.advice}}</p>
      <p v-if="source.stats" class="small">本次新增 {{source.stats.newCount}} 条 · 已有 {{source.stats.existingCount}} 条 · 失败 {{source.stats.failedSources}} 个来源</p>
