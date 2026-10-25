@@ -20,5 +20,8 @@ test('Netlify v2 bundles workspace runtime code without importing TypeScript pac
     if (name === 'api') {
       assert.ok(Object.keys(compiled.metafile!.inputs).some(path => path.replace(/\\/g, '/').endsWith('packages/contracts/src/index.ts')));
     }
+    const hasLexmount=Object.keys(compiled.metafile!.inputs).some(path=>path.replace(/\\/g,'/').endsWith('/lexmount-pages.ts'));
+    if(['api','material-collect-background'].includes(name))assert.equal(hasLexmount,true,`${name} must use the Lexmount reader`);
+    if(name==='cleanup')assert.equal(hasLexmount,false,'short cleanup must not start rendered collection');
   }
 });

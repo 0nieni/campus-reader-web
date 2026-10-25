@@ -4,7 +4,8 @@ import type {Repository,ItemRow} from './repository';
 import {materialArchive} from './material-archive';
 import {schoolDirectory} from './school-directory';
 import {websiteSources} from './website-sources';
-import {readSchoolPage,approvedSchoolUrl,type SchoolSource} from './school-pages';
+import {approvedSchoolUrl,type SchoolSource} from './school-pages';
+import {readLexmountPage} from './lexmount-pages';
 import {AppError} from './errors';
 
 /** Preview SQL clones can contain production metadata; scopes never share objects. */
@@ -12,7 +13,7 @@ export function materialRuntime(pool:SqlPool,repo:Repository,context:{production
  const scope=context.production?'production-v1':`preview-${context.deployId}`;
  const store=context.production?getStore({name:'campus-materials-production-v1',consistency:'strong'}):getDeployStore({name:'campus-materials',consistency:'strong'});
  const archive=materialArchive(pool,{async put(key,bytes){await store.set(key,bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength) as ArrayBuffer);},async get(key){const data=await store.get(key,{type:'arrayBuffer'});return data?new Uint8Array(data):null;},async remove(key){await store.delete(key);}},scope);
- const directory=schoolDirectory(pool,repo,readSchoolPage,Date.now,{archive}),websites=websiteSources(pool,repo,readSchoolPage,Date.now,undefined,archive);
+ const directory=schoolDirectory(pool,repo,readLexmountPage,Date.now,{archive}),websites=websiteSources(pool,repo,readLexmountPage,Date.now,undefined,archive);
  async function source(row:ItemRow):Promise<SchoolSource>{
   if(row.importKind==='website')return websites.materialSource(row);
   if(row.sourceId?.startsWith('directory_')){const value=await directory.materialSource(row);if(value)return value;}
@@ -27,7 +28,7 @@ export function materialRuntime(pool:SqlPool,repo:Repository,context:{production
  async function material(row:ItemRow,settings:{force?:boolean;deadline?:number}={deadline:Date.now()+18000}){
   if(row.aiSearchExpiresAt)return row; // Search evidence keeps its existing 24-hour lifetime.
   if(row.importKind==='website')return websites.archivedMaterial(row,settings);
-  return archive.collect(row,await source(row),readSchoolPage,settings);
+  return archive.collect(row,await source(row),readLexmountPage,settings);
  }
  repo.material=row=>material(row);
  return{archive,directory,websites,source,material};

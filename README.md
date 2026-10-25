@@ -2,6 +2,10 @@
 
 面向受邀用户的校园公告、收藏与 AI 阅读网站。Vue 3 + TypeScript + Netlify Functions、Identity 和 Database。代码仓库保持私有，各账号的数据独立。
 
+## Lexmount 采集（功能分支，未上线）
+
+`lexmount的应用` 分支将学校与个人 HTML 来源的后台采集接入 Lexmount Web Fetch，保留现有公告解析、附件入库和 365 天资料保存规则。部署此分支前需要服务端 `LEXMOUNT_API_KEY`、`LEXMOUNT_PROJECT_ID`，可选区域入口与引擎配置；不依赖开发电脑的技能登录文件。RSS/JSON、robots 和原文件下载继续保持各自的协议读取。配置、实测及限制见 [Lexmount 采集说明](docs/lexmount-collection.md)。本轮只保存并推送新分支，不合并 main、不发布。
+
 ## 采集资料库
 
 公告正文与 PDF、Word、Excel 附件由 Database + Blobs 保存 365 天，读取自动使用有效文本，过期后停止读取并由每日任务删除；仍符合规则的资料可按需重新采集。每日北京时间 02:45 采集近 30 天使用的学校及启用的个人来源；需要新增服务端 `MATERIALS_JOB_SECRET` 才启用每日采集。扫描件保留原文件并显示未提取文字，不进行 OCR。原有提醒功能保持不变。配置、限制和本地验证见[采集资料库说明](docs/material-archive.md)。下文原有“正文按需读取、附件不自动读”的描述为旧版本状态，以本节的新实现说明为准。

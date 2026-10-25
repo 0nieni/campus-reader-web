@@ -49,7 +49,12 @@ export function websiteSources(pool:SqlPool,repo:Repository,reader:PageReader=re
     if(!source.allowedPath(url))throw new AppError('SOURCE_ROBOTS_BLOCKED','该公告路径不允许自动采集，请使用原站。');
     return source;
   }
-  async function page(url:string,config:WebsiteSourceInput,id:string) {return polite(url,await permitted(url,config,id));}
+  async function page(url:string,config:WebsiteSourceInput,id:string) {
+    const source=await permitted(url,config,id);
+    // Feed payloads must remain original JSON/XML, rather than rendered HTML.
+    if(url===config.entryUrl&&['rss','json_api'].includes(config.type))source.rawResponse=true;
+    return polite(url,source);
+  }
   async function materialSource(row:ItemRow){
     if(!row.ownerOpenid||!row.schoolIds?.[0]||!row.sourceId)throw new AppError('NOT_FOUND','来源不存在。');
     const recordSource=await record(row.sourceId,row.ownerOpenid,row.schoolIds[0]);
