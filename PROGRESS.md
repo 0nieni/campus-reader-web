@@ -359,10 +359,14 @@ Ruling：记忆作为用户档案JSON字段，不新增表/迁移；写入只发
 
 实现提交 e3fb21406af48b4f637c7dd785ac6633e4c0df9d 已推送至 origin/lexmount的应用，远端引用与本地 SHA 一致。521 项测试和完整构建的证据针对该实现；此后仅补充交付记录，不改变代码。没有创建 PR、合入 main、配置生产 Lexmount 凭据或主动发布。
 
-### Lexmount 合并与发布（2026-10-25，进行中）
+### Lexmount 合并与发布（2026-10-25，已发布，真实采集待联调）
 
 用户明确要求合入 main 并应用到现有网站，随后确认保留 main 最新改动，只发布已完成的 Lexmount 功能，提醒和 AI 搜索保持现状；此授权覆盖此前仅保存、不发布的阶段。已只读核对本地工作区干净，GitHub API 与正常 fetch 均确认 main 仍为 8b038d7，Lexmount 分支为 57caa1c，无需解决合并冲突。其他两个 AI PR 不在本次范围内。
 
 本轮重新运行 npm ci、typecheck、全量 521 项测试（web 186 / cloud 335，0 失败）、普通构建及 Netlify 完整构建均通过，完整产物包含 11 个函数。日志保存在忽略目录 .netlify-staging/lexmount-verification/release-*.log，产物为 .netlify-staging/20261025114330230。git diff --check 通过；提醒、AI 搜索、依赖锁文件和历史迁移相对 main 无改动。npm ci 仍报告已有 CloudBase 依赖链的 5 项告警（1 moderate / 4 high）及 4 条未批准安装脚本，本轮未升级依赖或更改批准策略。
 
 现有来源范围、资料库/365 天保留、权限与附件处理继续沿用。生产 Lexmount 凭据不从本机技能复制，需项目所有者安全配置；本次不把代码部署、模拟测试或技能登录当作线上采集联调成功。已通过 find-skills 找到并下载 OpenAI 官方 netlify-deploy 技能到交付目录 output，仅用于核对登录、站点和发布流程，不纳入站点仓库。合并与远端发布结果待后续记录。
+
+PR #19（接入 Lexmount 网页采集）预览 6addec6b14e6e29f94b4561d 已 ready，Netlify GitHub 状态 success；GitHub 确认 clean 后正常合并，main 合并提交为 286bbf2363e3358b2fc25023bdf7d28ebad1267e。官方 Netlify CLI getSite 只输出部署元信息，确认正式发布 6addee806a4eac4036f4a4ee 为 production / main / ready，commit_ref 与合并提交一致，自动构建未关闭。正式网页 GET 返回 200，携带正确本站 Origin 的未登录 API POST 返回 401 / no-store；未登录请求未进入业务动作，没有导入测试数据或触发 AI。
+
+所有者后续需在 Netlify 的 Production 服务端环境变量安全设置或确认 LEXMOUNT_API_KEY、LEXMOUNT_PROJECT_ID；按项目区域选择官方 CN/COM 入口，保存后重新部署。不要覆盖原 MATERIALS_JOB_SECRET 或其他服务密钥。待配置后再用真实账号手动刷新来源，核对列表、正文及附件；目前不声称真实 Netlify Lexmount 采集已成功。本轮没有读取或复制本机技能凭据，也未配置生产 Lexmount 密钥。

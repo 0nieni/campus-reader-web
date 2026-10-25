@@ -38,4 +38,4 @@ Lexmount 的调用使用其服务额度，详情见[官方接口与用量说明]
 - 技能检查：Windows WebFetch CLI 0.1.5，doctor 的 `ok`、credentials、agent_skill 检查均通过。
 - 真实技能调用：对既有白名单中的北京大学教务部公告列表进行一次 Dump DOM，目标状态 200、引擎 `lightmount_dcl`，返回 19175 字符的 HTML。本地回放至新适配器和现有解析器识别 15 条公告；结果只留在本地忽略目录，没有导入生产数据。
 - 本机集成：合成 Lexmount 响应经过学校采集、实际 SQL、附件提取与内存对象存储；验证资料保存、稳定 ID、有效期缓存、来源停用拒读，以及 robots / JSON 原始读取。接口回归覆盖官方请求格式、密钥脱敏、不安全 URL、错误区域、配额、目标错误状态、响应大小与超时。
-- 真实 Netlify 运行环境中的 Lexmount 凭据、账户区域和采集联调尚未验证；本次只推送功能分支。
+- 后续发布：PR #19 已合入 main，正式部署 `6addee806a4eac4036f4a4ee` 的 `commit_ref` 为 `286bbf2363e3358b2fc25023bdf7d28ebad1267e`，官方状态为 production / ready。网页与未登录鉴权已核验；真实 Netlify 运行环境中的 Lexmount 项目凭据、账户区域和采集联调仍待所有者安全配置后验证。
