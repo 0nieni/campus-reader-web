@@ -24,6 +24,10 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,su
 .login-template .toggle-pass svg{color:inherit;}
 .login-template .toggle-pass[aria-pressed=true]{background:var(--soft);color:var(--purple);}
 .login-template .toggle-pass:active{transform:scale(.9);}
+.portal-template{--portal-topbar-height:84px;}
+.portal-template .sidebar{position:sticky;top:var(--portal-topbar-height);height:calc(100dvh - var(--portal-topbar-height));min-height:0;align-self:flex-start;}
+.portal-template .sidebar>.side-label,.portal-template .side-bottom{flex-shrink:0;}
+.portal-template .sidebar>.nav{min-height:0;overflow-y:auto;overscroll-behavior:contain;}
 .portal-template .nav-link{border:0;width:100%;text-align:left;font-family:inherit;}
 .portal-template .nav-link:not(.active){background:transparent;}
 .portal-template .nav-link:not(.active):hover{background:#faf8fd;color:var(--purple);}
@@ -97,4 +101,5 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,su
 .portal-template .account-dialog .provider-editor input:focus-visible,.portal-template .account-dialog .provider-editor textarea:focus-visible,.portal-template .account-dialog .provider-editor select:focus-visible,.portal-template .account-dialog .provider-controls select:focus-visible{outline-color:var(--purple);}
 @media(max-width:520px){.portal-template .notice-card-footer{padding-left:49px;}.portal-template .notice-card-footer .selection-toggle{width:100%;}.portal-template .feed-settings-body{padding:14px;}.portal-template .modal-top{align-items:flex-start;flex-wrap:wrap;}.portal-template .modal-date{max-width:none;}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{transition:none!important;animation:none!important;}}
+@media(max-width:800px){.portal-template{--portal-topbar-height:70px;}}
 @media(max-width:640px){.portal-template .account-modal{padding:20px;}.portal-template .account-dialog .provider-row{grid-template-columns:minmax(0,1fr);}.portal-template .account-tabs{gap:4px;}.portal-template .account-tabs button{padding:9px 11px;}.portal-template .account-model-heading{align-items:flex-start;}.portal-template .account-dialog .provider-heading{display:block;}}
