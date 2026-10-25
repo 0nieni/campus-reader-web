@@ -9,9 +9,9 @@ export function normalizedEmail(value: unknown): string | null {
 }
 
 /** Input must be the official server SDK's user, never browser-submitted claims.
- * Netlify Identity remains invite-only; Identity controls account enrollment. */
+ * Netlify Identity controls account enrollment and email verification. */
 export function requireSiteUser(user: NetlifyUser | null, ownerEmail?: string): NetlifyUser {
-  if (!user?.id?.trim() || !normalizedEmail(user.email)) throw new AppError('UNAUTHENTICATED', '请先使用受邀账号登录。');
+  if (!user?.id?.trim() || !normalizedEmail(user.email)) throw new AppError('UNAUTHENTICATED', '请先登录本人账号。');
   if (!normalizedEmail(ownerEmail)) throw new AppError('OWNER_NOT_CONFIGURED', '本站尚未配置初始工作区账号。');
   return user;
 }

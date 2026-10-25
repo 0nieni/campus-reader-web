@@ -114,7 +114,7 @@ it.each([false,true])('App keeps browsing separate from school selection; select
  });
  Object.assign(transport,{restore:async()=>({uid:'source-test',username:null}),onSessionChange:()=>()=>{}});
  const wrapper=mount(App,{props:{transport,configurationIssues:[]},global:{plugins:[createPinia()]}});await flushPromises();
- await wrapper.findAll('.nav-item').find(b=>b.text().includes('公告来源'))!.trigger('click');await vi.waitFor(()=>expect(wrapper.find('.website-sources').exists()).toBe(true));await browseSchools(wrapper);await flushPromises();
+ await wrapper.findAll('.nav-link').find(b=>b.text().includes('公告来源'))!.trigger('click');await vi.waitFor(()=>expect(wrapper.find('.website-sources').exists()).toBe(true));await browseSchools(wrapper);await flushPromises();
  await button(wrapper,'另一所大学').trigger('click');await flushPromises();expect(selectCount).toBe(0);expect(wrapper.text()).toContain('当前阅读学校：北京交通大学');
  await button(wrapper,'切换到该校并查看公告').trigger('click');await flushPromises();expect(selectCount).toBe(1);
  if(fail){expect(wrapper.text()).toContain('当前阅读学校：北京交通大学');expect(wrapper.find('.website-sources [role=alert]').exists()).toBe(true);}
@@ -132,10 +132,10 @@ it('does not navigate back to feed when a slow school switch finishes after the 
  });
  Object.assign(transport,{restore:async()=>({uid:'source-test',username:null}),onSessionChange:()=>()=>{}});
  const wrapper=mount(App,{props:{transport,configurationIssues:[]},global:{plugins:[createPinia()]}});await flushPromises();
- await wrapper.findAll('.nav-item').find(b=>b.text().includes('公告来源'))!.trigger('click');await vi.waitFor(()=>expect(wrapper.find('.website-sources').exists()).toBe(true));await browseSchools(wrapper);await flushPromises();
+ await wrapper.findAll('.nav-link').find(b=>b.text().includes('公告来源'))!.trigger('click');await vi.waitFor(()=>expect(wrapper.find('.website-sources').exists()).toBe(true));await browseSchools(wrapper);await flushPromises();
  await button(wrapper,'另一所大学').trigger('click');await flushPromises();await button(wrapper,'切换到该校并查看公告').trigger('click');await flushPromises();
- await wrapper.findAll('.nav-item').find(b=>b.text().includes('收藏'))!.trigger('click');await flushPromises();
- release({items:[],nextCursor:null});await flushPromises();expect(wrapper.findAll('.nav-item').find(b=>b.text().includes('收藏'))!.classes()).toContain('active');wrapper.unmount();
+ await wrapper.findAll('.nav-link').find(b=>b.text().includes('收藏'))!.trigger('click');await flushPromises();
+ release({items:[],nextCursor:null});await flushPromises();expect(wrapper.findAll('.nav-link').find(b=>b.text().includes('收藏'))!.classes()).toContain('active');wrapper.unmount();
 });
 it('saves an independent home-display preference on school and personal source cards',async()=>{
  const {transport,call}=fixture((a,i)=>{
@@ -170,7 +170,7 @@ it.each(['leave-during-save','cached-other-school'])('invalidates display prefer
  const pinia=createPinia();const wrapper=mount(App,{props:{transport,configurationIssues:[]},global:{plugins:[pinia]}});await flushPromises();
  const store=workspaceStore(transport)(pinia);
  if(scenario==='cached-other-school')await store.selectSchool('bjtu');
- await wrapper.findAll('.nav-item').find(b=>b.text().includes('公告来源'))!.trigger('click');await vi.waitFor(()=>expect(wrapper.find('.website-sources').exists()).toBe(true));await browseSchools(wrapper);await flushPromises();
+ await wrapper.findAll('.nav-link').find(b=>b.text().includes('公告来源'))!.trigger('click');await vi.waitFor(()=>expect(wrapper.find('.website-sources').exists()).toBe(true));await browseSchools(wrapper);await flushPromises();
  if(scenario==='cached-other-school'){await button(wrapper,'另一所大学').trigger('click');await flushPromises();}
  await wrapper.get('.school-source-card input[aria-label="在主页公告中显示"]').setValue(false);
  if(scenario==='leave-during-save'){await button(wrapper,'返回公告').trigger('click');release();await flushPromises();}

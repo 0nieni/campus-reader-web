@@ -2,10 +2,10 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import type { AiChatTurn, AiConversation, AiConnection, AiMemoryItem, AiMemorySlot, AiMemoryState, AiPreferences, AiProviderSelection, AiRecommendations, GatewayActions, Notice, RecommendedNotice } from '@campus/contracts';
 import AiProviderSettings from './AiProviderSettings.vue';
-import type { Transport } from '../lib/transport';
+import type { ProviderChange,Transport } from '../lib/transport';
 import { ClientError, safeError } from '../lib/errors';
 import { downloadFile, renderMarkdown } from '../lib/markdown';
-const props = defineProps<{ transport: Transport; schoolId: string | null; selection: Notice[] }>();
+const props = defineProps<{ transport: Transport; schoolId: string | null; selection: Notice[]; providerChange?:ProviderChange|null }>();
 const emit = defineEmits<{ remove: [id: string]; back: [] }>();
 const status = ref<GatewayActions['ai.status']['output'] | null>(null);
 const preferences = ref<AiPreferences | null>(null), recommendations = ref<AiRecommendations | null>(null), chat = ref<AiConversation | null>(null);
@@ -39,6 +39,15 @@ function selectProfile(value: AiProviderSelection | null, activate: boolean) {
   profileSelection.value = value ? { profile: { ...value.profile }, model: value.model } : null;
   if (value && activate) { service.value = 'byok'; apiMode.value = 'saved'; apiKey.value = ''; }
 }
+watch(()=>props.providerChange,change=>{
+  if(!change)return;
+  stopped=true;
+  providerStorageConfigured.value=change.state.storageConfigured;
+  providerSettings.value?.syncState(change.state);
+  selectProfile(change.state.selection,change.activate==='saved');
+  if(change.activate==='official'){service.value='official';apiKey.value='';}
+  if(active)note.value='服务模型设置已更新，用于之后的新问题。未完成的回答请核对状态后继续。';
+});
 function useTemporary() { service.value = 'byok'; apiMode.value = 'temporary'; }
 async function useOfficial() { if (providerSettings.value && !await providerSettings.value.chooseOfficial()) service.value = 'byok'; }
 function temporaryConnection(): AiConnection { return { provider: provider.value, model: model.value.trim(), apiKey: apiKey.value }; }

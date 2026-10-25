@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onUnmounted } from 'vue';
 import { acceptInvite } from '@netlify/identity';
+import TemplateIcon from './TemplateIcon.vue';
 const props = defineProps<{ token: string }>();
 const emit = defineEmits<{ complete: [] }>();
 const password = ref(''), confirmation = ref(''), busy = ref(false), error = ref('');
@@ -15,16 +16,15 @@ async function accept() {
 }
 </script>
 <template>
-  <section class="feature-surface" aria-labelledby="invite-title">
+  <section class="form-wrap" aria-labelledby="invite-title">
+    <div class="welcome">WELCOME TO CAMPUS READER</div>
     <h2 id="invite-title">设置你的阅览室密码</h2>
-    <p>此邀请仅用于本站账号。设置完成后即可登录。</p>
+    <p class="sub">此邀请仅用于本站账号。设置完成后即可登录。</p>
     <form @submit.prevent="accept">
-      <label for="invite-password">设置密码</label>
-      <input id="invite-password" v-model="password" type="password" autocomplete="new-password" minlength="12" maxlength="256" required :disabled="busy" />
-      <label for="invite-confirm">再输入一次</label>
-      <input id="invite-confirm" v-model="confirmation" type="password" autocomplete="new-password" required maxlength="256" :disabled="busy" />
+      <div class="field"><div class="field-head"><label for="invite-password">设置密码</label></div><div class="input-box"><TemplateIcon name="lock" /><input id="invite-password" v-model="password" type="password" autocomplete="new-password" minlength="12" maxlength="256" required :disabled="busy" /></div></div>
+      <div class="field"><div class="field-head"><label for="invite-confirm">再输入一次</label></div><div class="input-box"><TemplateIcon name="lock" /><input id="invite-confirm" v-model="confirmation" type="password" autocomplete="new-password" required maxlength="256" :disabled="busy" /></div></div>
       <p v-if="error" role="alert" class="error-message">{{ error }}</p>
-      <button class="primary" type="submit" :disabled="busy">{{ busy ? '正在开通…' : '完成设置' }}</button>
+      <button class="submit" type="submit" :disabled="busy">{{ busy ? '正在开通…' : '完成设置' }}</button>
     </form>
   </section>
 </template>

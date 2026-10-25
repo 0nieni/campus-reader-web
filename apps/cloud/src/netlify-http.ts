@@ -6,6 +6,8 @@ export interface SiteAuth {
   user(): Promise<NetlifyUser | null>;
   login(email: string, password: string): Promise<NetlifyUser>;
   logout(): Promise<void>;
+  signup?(email: string, password: string): Promise<NetlifyUser & { confirmedAt?: string }>;
+  requestPasswordRecovery?(email: string): Promise<void>;
 }
 const response = (body: unknown, status = 200) => Response.json(body, { status, headers: { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer' } });
 export async function boundedJson(request: Request, max = 12000): Promise<Record<string, unknown>> {
@@ -36,16 +38,45 @@ export function createSiteAuth(auth: SiteAuth, email: () => string | undefined) 
       if (op === 'session' && request.method === 'GET') {
         const user = await auth.user(); return response({ ok: true, data: user ? session(requireSiteUser(user, email())) : null });
       }
-      if (request.method !== 'POST' || !['login', 'logout'].includes(op)) return response({ ok: false, code: 'ACTION_NOT_ALLOWED', message: '请求方式无效。' }, 405);
+      if (request.method !== 'POST' || !['login', 'logout', 'signup', 'password-recovery'].includes(op)) return response({ ok: false, code: 'ACTION_NOT_ALLOWED', message: '请求方式无效。' }, 405);
       sameOrigin(request);
       if (op === 'logout') { await auth.logout(); return response({ ok: true, data: null }); }
+      if (op === 'password-recovery') {
+        const current = await auth.user();
+        if (!current) throw new AppError('UNAUTHENTICATED', '请先登录本人账号。');
+        const own = requireSiteUser(current, email());
+        const body = await boundedJson(request, 1000);
+        if (Object.keys(body).length) throw new AppError('VALIDATION_FAILED', '重置邮件仅发送到当前账号邮箱。');
+        if (!auth.requestPasswordRecovery) throw new AppError('RECOVERY_UNAVAILABLE', '本站密码重置暂未启用。');
+        try { await auth.requestPasswordRecovery(own.email); }
+        catch { throw new AppError('RECOVERY_UNAVAILABLE', '重置邮件未能发送，请稍后再试，或联系站点管理员。'); }
+        return response({ ok: true, data: null });
+      }
       const body = await boundedJson(request, 2000);
       if (Object.keys(body).some(key => !['email','password'].includes(key)) || typeof body.email !== 'string' || typeof body.password !== 'string' || body.email.length > 254 || !body.password || body.password.length > 256) throw new AppError('VALIDATION_FAILED', '请输入有效的邮箱和密码。');
       if (!normalizedEmail(email())) throw new AppError('OWNER_NOT_CONFIGURED', '本站尚未配置初始工作区账号。');
-      if (!normalizedEmail(body.email)) throw new AppError('UNAUTHENTICATED', '邮箱或密码不正确，或账号尚未接受邀请。');
+      if (op === 'signup') {
+        if (!auth.signup) throw new AppError('REGISTRATION_UNAVAILABLE', '本站注册尚未启用，请稍后再试。');
+        const submittedEmail = normalizedEmail(body.email);
+        if (!submittedEmail || body.password.length < 12) throw new AppError('VALIDATION_FAILED', '请输入有效邮箱，并设置12至256位密码。');
+        try {
+          const user = await auth.signup(submittedEmail, body.password);
+          // The product requires email verification. Do not adopt an unexpected
+          // autoconfirmed session or return identity/provider payloads to the UI.
+          if (user.confirmedAt) {
+            await auth.logout();
+            throw new AppError('REGISTRATION_UNAVAILABLE', '本站邮箱验证注册暂不可用，请联系站点管理员后再试。');
+          }
+        } catch (error) {
+          if (error instanceof AppError) throw error;
+          throw new AppError('REGISTRATION_UNAVAILABLE', '注册未能完成。若已注册，请登录或查看此前的确认邮件；否则请稍后重试。');
+        }
+        return response({ ok: true, data: { verificationRequired: true } });
+      }
+      if (!normalizedEmail(body.email)) throw new AppError('UNAUTHENTICATED', '邮箱或密码不正确，或邮箱尚未完成验证。');
       let user: NetlifyUser;
       try { user = await auth.login(body.email.trim(), body.password); }
-      catch { throw new AppError('UNAUTHENTICATED', '邮箱或密码不正确，或账号尚未接受邀请。'); }
+      catch { throw new AppError('UNAUTHENTICATED', '邮箱或密码不正确，或邮箱尚未完成验证。'); }
       try {
         requireSiteUser(user, email());
         if (normalizedEmail(user.email) !== normalizedEmail(body.email)) throw new AppError('UNAUTHENTICATED', '登录会话与提交的账号不一致，请重新登录。');
@@ -61,7 +92,7 @@ export function createSiteApi(options: { auth: Pick<SiteAuth, 'user'>; ownerEmai
       if (request.method !== 'POST') return response({ ok: false, code: 'ACTION_NOT_ALLOWED', message: '请使用 POST 请求。' }, 405);
       sameOrigin(request);
       const current = await options.auth.user();
-      if (!current) throw new AppError('UNAUTHENTICATED','请先使用受邀账号登录。');
+      if (!current) throw new AppError('UNAUTHENTICATED','请先登录本人账号。');
       const user = requireSiteUser(current, options.ownerEmail());
       const body = await boundedJson(request);
       if (body.action === 'ai.relay') throw new AppError('FORBIDDEN', '本站不提供外部 AI 中继操作。');
