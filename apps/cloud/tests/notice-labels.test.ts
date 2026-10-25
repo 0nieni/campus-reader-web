@@ -18,6 +18,7 @@ test('personal notice labels preserve authorization, account isolation and filte
   try {
     await server.applyMigrations(fileURLToPath(new URL('../../../netlify/database/migrations',import.meta.url)));
     for(const owner of ['member_a','member_b']) await repo.selectSchool(owner,'bjtu');
+    await db.collection('sources').doc('fixture').set({name:'本地学校来源',scope:'school',schoolIds:['bjtu'],categories:['school'],aiProcessing:'allow'});
     for(let index=0;index<25;index++) await db.collection('items').doc(`label_${String(index).padStart(3,'0')}`).set({...base,title:`${keyword}${index}`});
     await db.collection('items').doc('label_private').set({...base,title:keyword+'私人邮件',scope:'private',categories:['mail'],ownerOpenid:'member_a'});
     await db.collection('items').doc('label_other_school').set({...base,title:keyword+'其他学校',schoolIds:['school_001']});
@@ -35,7 +36,7 @@ test('personal notice labels preserve authorization, account isolation and filte
       const page=await data('member_a','feed.list',{schoolId:'bjtu',keyword,categories:['school']});assert.equal(page.items.length,20);assert.equal(page.nextCursor,'20');
       const next=await data('member_a','feed.list',{schoolId:'bjtu',keyword,categories:['school'],cursor:page.nextCursor});assert.equal(next.items.length,4);assert.equal(next.nextCursor,null);
       assert.ok(![...page.items,...next.items].some((row:any)=>row.id==='label_000'));
-      assert.deepEqual(await data('member_a','feed.list',{schoolId:'bjtu',keyword,categories:[]}),{items:[],nextCursor:null});
+      const empty=await data('member_a','feed.list',{schoolId:'bjtu',keyword,categories:[]});assert.deepEqual(empty.items,[]);assert.equal(empty.nextCursor,null);
     });
     await t.test('a personal mail label cannot make a public notice private or reveal another account mail',async()=>{
       await data('member_a','feed.labels.set',{schoolId:'bjtu',itemId:'label_001',categories:['mail']});

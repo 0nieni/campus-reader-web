@@ -23,6 +23,15 @@
 [functions.reminders]
   schedule = "0 1,12 * * *"
 
+[functions.api]
+  external_node_modules = ["unpdf", "word-extractor", "xlsx", "yauzl"]
+[functions.material-collect-background]
+  external_node_modules = ["unpdf", "word-extractor", "xlsx", "yauzl"]
+[functions.material-file]
+  external_node_modules = ["unpdf", "word-extractor", "xlsx", "yauzl"]
+[functions.material-schedule]
+  schedule = "45 18 * * *"
+
 # The Netlify monorepo package directory is apps/web. Resolve migrations from
 # the repository base explicitly instead of package-directory auto-detection.
 [database.migrations]

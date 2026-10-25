@@ -15,7 +15,7 @@ it('saves, tests and collects a source without automatically generating summarie
  });
  const transport={call} as unknown as Transport;
  const wrapper=mount(WebsiteSourcesPanel,{props:{transport,schoolId:'bjtu',schoolName:'北京交通大学'}});await flushPromises();
- await wrapper.findAll('button').find(b=>b.text()==='我的来源')!.trigger('click');await flushPromises();
+  await wrapper.findAll('button').find(b=>b.text()==='管理我的来源')!.trigger('click');await flushPromises();
  expect(wrapper.text()).toContain('不提供免费摘要');
  await wrapper.get('button.primary').trigger('click');
  await wrapper.get('input[placeholder="例如：某学院通知公告"]').setValue('学院公开通知');

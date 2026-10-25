@@ -55,6 +55,8 @@ const fields: Record<string, string[]> = {
   'reminders.email.test':[],
   'reminders.email.enable':['enabled'],
   'sources.list':['schoolId'],
+  'sources.catalogue':['schoolId'],
+  'sources.public.refresh':['schoolId','sourceId'],
   'sources.feedVisibility':['schoolId','sourceId','visible'],
   'sources.displayState':['schoolId'],
   'sources.feedVisibilityAll':['schoolId','visible'],
@@ -257,16 +259,18 @@ export function createGateway(
       const since = filterSince(filters, now());
       if (action === "feed.list") {
         const offset = offsetOf(input.cursor);
-        const hiddenSourceIds=await repo.hiddenFeedSources?.(identity.dataOwnerId,schoolId)??[];
-        const excluded=hiddenSourceIds.filter(id=>id!==filters.sourceId);
+        const selection=await repo.feedSourceSelection?.(identity.dataOwnerId,schoolId);
+        const hiddenSourceIds=selection?.hiddenIds??await repo.hiddenFeedSources?.(identity.dataOwnerId,schoolId)??[];
+        const excluded=hiddenSourceIds;
         if (filters.categories?.length === 0) return {ok:true,data:{items:[],nextCursor:null,...(hiddenSourceIds.length?{hiddenSourceCount:hiddenSourceIds.length}:{})}};
-        const rows = await repo.items(scope, offset, 21, since, filters,{hiddenSourceIds:excluded});
+        const rows = await repo.items(scope, offset, 21, since, filters,{hiddenSourceIds:excluded,...(selection?{shownSourceIds:selection.shownIds}:{})});
         // DB predicates operate before pagination; recheck every returned row for defense in depth.
         if (
           rows.some(
             (row) =>
               !itemVisible(row, scope) ||
               excluded.includes(row.sourceId||'') ||
+              (selection&&!selection.shownIds.includes(row.sourceId||'')) ||
               row.status !== "published" ||
               !isRetained(row, since) ||
               !matchesFilters(row, filters),
@@ -314,7 +318,8 @@ export function createGateway(
         defaultCategories: originalCategories(row),
         categoriesCustomized: row.personalCategories !== undefined,
         originalUrl: originalUrl(row),
-        attachmentNote: (materialNote ? materialNote + ' ' : '') + "本阶段未读取附件正文，请以公告原文和附件为准。",
+        attachmentNote: (materialNote ? materialNote + ' ' : '') + (row.materialArchive?.attachmentNote || "本次未读取附件正文，请以公告原文和附件为准。"),
+        ...(row.materialArchive?{materialArchive:row.materialArchive}:{}),
         ...(features?.bookmarks ? { bookmarked: await features.bookmarks.has(identity.dataOwnerId, schoolId, row._id) } : {}),
       };
       return { ok: true, data: detail };

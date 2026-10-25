@@ -968,4 +968,9 @@ select {
 .email-setting-main>div:first-child{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .reminder-email-settings>p{margin:8px 0 0}
 .reminder-channel-status p{margin:4px 0;overflow-wrap:anywhere}
+.material-files{border-top:1px solid var(--line);margin-top:24px;padding-top:18px;overflow-wrap:anywhere}
+.material-files h2{font-size:18px;margin:0 0 8px}
+.material-files ul{list-style:none;padding:0;margin:14px 0}
+.material-files li{padding:12px 0;border-bottom:1px solid var(--line)}
+.material-files li p{margin:6px 0 0}
 @media(max-width:650px){.email-setting-main{align-items:flex-start;flex-direction:column}.email-setting-main .action-row{flex-wrap:wrap}.reminder-email-settings{padding:12px}}

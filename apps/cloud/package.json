@@ -20,7 +20,11 @@
     "@netlify/identity": "2.0.0",
     "@upstash/qstash": "2.12.1",
     "cheerio": "1.1.2",
-    "web-push": "3.6.7"
+    "unpdf": "1.9.1",
+    "web-push": "3.6.7",
+    "word-extractor": "1.0.4",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
+    "yauzl": "3.4.0"
   },
   "devDependencies": {
     "@netlify/database-dev": "1.0.1",
