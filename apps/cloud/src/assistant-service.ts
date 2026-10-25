@@ -5,6 +5,7 @@ import { authorizeSchool, identifier } from './access';
 import { atomic, readDoc, seed, transactionRow, type Database } from './storage';
 import { assistantProfile } from './assistant-profile';
 import { assistantChat } from './assistant-chat';
+import { memoryService } from './assistant-memory';
 import { searchAnnouncements } from './announcement-search';
 import { approvedSchoolUrl, extractArticle, readSchoolPage, type PageReader } from './school-pages';
 import { beijingDay, type aiService } from './ai-service';
@@ -31,9 +32,10 @@ function publicCandidate(row: ItemRow, scope: Scope, current: number): boolean {
     && row.category !== 'mail' && !row.categories?.includes('mail');
 }
 
-const actions = new Set(['ai.profile.get','ai.profile.save','ai.profile.clearBehavior','ai.behavior','ai.dismiss','ai.recommend','ai.chat.create','ai.chat.get','ai.chat.send','ai.chat.step','ai.chat.cancel','ai.chat.resolve','ai.chat.clear','ai.chat.latest']);
+const actions = new Set(['ai.memory.get','ai.memory.configure','ai.memory.forget','ai.memory.clear','ai.profile.get','ai.profile.save','ai.profile.clearBehavior','ai.behavior','ai.dismiss','ai.recommend','ai.chat.create','ai.chat.get','ai.chat.send','ai.chat.step','ai.chat.cancel','ai.chat.resolve','ai.chat.clear','ai.chat.latest']);
 export function assistantService(db: Database, repo: Repository, ai: ReturnType<typeof aiService>, now = Date.now, search = searchAnnouncements, reader: PageReader = readSchoolPage) {
   const profile = assistantProfile(db, repo, now);
+  const memory = memoryService(db, repo, now);
   const chat = assistantChat(db, repo, ai, profile.recommend, now, async (schoolId, query, identity) => {
     try { return await recommendations({ schoolId, query, search: true }, identity); }
     catch (error) {
@@ -138,6 +140,7 @@ export function assistantService(db: Database, repo: Repository, ai: ReturnType<
   return {
     supports(action: string) { return actions.has(action); },
     async handle(action: string, input: Record<string, unknown>, identity: IdentityContext): Promise<unknown> {
+      if (action.startsWith('ai.memory.')) return memory.handle(action, input, identity);
       if (action.startsWith('ai.chat.')) return chat.handle(action, input, identity);
       if (action === 'ai.recommend') return recommendations(input, identity);
       if (!actions.has(action)) throw new AppError('ACTION_NOT_ALLOWED', '不支持的助手操作。');
