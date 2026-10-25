@@ -1,6 +1,6 @@
 # Lexmount 采集分支
 
-本分支为 `lexmount的应用`，基于已发布的“数据库”版本 `8b038d7`。用户确认将网站后台自动采集改用 Lexmount，保留现有资料库，并仅推送新分支保存；没有合并 main 或发布，也没有改动生产环境变量。
+功能最初在 `lexmount的应用` 分支实现，基于已发布的“数据库”版本 `8b038d7`。用户确认将网站后台自动采集改用 Lexmount，保留现有资料库；2026-10-25 后续明确授权合入 main 并发布，覆盖此前仅推送保存的阶段限制。实际部署和凭据联调状态见 [进度记录](../PROGRESS.md)。
 
 ## 使用方式
 
@@ -12,7 +12,7 @@
 
 robots.txt、RSS/Atom、JSON 接口需要保留原始文本/XML/JSON，仍使用已有受限 HTTP 读取；PDF、Word、Excel 原文件继续使用原有受限下载器并本地提取文字。个人来源的 robots 限制、请求节流、每天 60 次请求预算、学校与账号权限、365 天固定有效期均保留。AI 联网搜索服务和临时搜索证据链没有改动；提醒的发送与调度实现没有改动。
 
-## 未来部署所需配置
+## 运行所需配置
 
 仅通过 Netlify 服务端环境变量设置：
 
@@ -21,7 +21,7 @@ robots.txt、RSS/Atom、JSON 接口需要保留原始文本/XML/JSON，仍使用
 - `LEXMOUNT_WEBFETCH_BASE_URL`：可选，默认 `https://api.lexmount.cn`；海外区域使用 `https://api.lexmount.com`，项目凭据需与区域一致。本版只允许这两个官方 HTTPS 根地址。
 - `LEXMOUNT_WEBFETCH_ENGINE`：可选，默认 `auto`；支持官方的 `http`、`chrome`、`chrome_cdp`、`lightmount_lite`、`lightmount_dcl`、`lightmount_domstable`。
 
-不要加 `VITE_` 前缀，不将密钥写入仓库、浏览器或日志，也不要复制本机技能凭据文件到站点。本机技能已登录不代表 Netlify 已配置上述变量。本轮不替用户填写生产凭据或修改套餐。
+不要加 `VITE_` 前缀，不将密钥写入仓库、浏览器或日志，也不要复制本机技能凭据文件到站点。本机技能已登录不代表 Netlify 已配置上述变量。由项目所有者通过 Netlify 环境变量界面安全填写对应 Production 的服务端变量，并重新部署使其生效；无需将 Key 发送到聊天。若日采集已启用，保留原有 `MATERIALS_JOB_SECRET`，不要更换它或其他服务密钥。
 
 未配置时 HTML 采集明确返回 `LEXMOUNT_NOT_CONFIGURED`，不会悄悄切回旧 HTML 抓取。已有有效资料仍可读取；JSON/RSS 等原始格式读取不依赖 HTML 渲染配置。配额、鉴权、区域、限流和超时均有独立错误提示。适配器不自动重发；后台队列仍沿用每任务每天最多三次尝试，不能将超时理解为服务商没有执行或计量。
 

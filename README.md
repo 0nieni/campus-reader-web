@@ -2,9 +2,9 @@
 
 面向受邀用户的校园公告、收藏与 AI 阅读网站。Vue 3 + TypeScript + Netlify Functions、Identity 和 Database。代码仓库保持私有，各账号的数据独立。
 
-## Lexmount 采集（功能分支，未上线）
+## Lexmount 采集
 
-`lexmount的应用` 分支将学校与个人 HTML 来源的后台采集接入 Lexmount Web Fetch，保留现有公告解析、附件入库和 365 天资料保存规则。部署此分支前需要服务端 `LEXMOUNT_API_KEY`、`LEXMOUNT_PROJECT_ID`，可选区域入口与引擎配置；不依赖开发电脑的技能登录文件。RSS/JSON、robots 和原文件下载继续保持各自的协议读取。配置、实测及限制见 [Lexmount 采集说明](docs/lexmount-collection.md)。本轮只保存并推送新分支，不合并 main、不发布。
+学校与个人 HTML 来源的后台采集接入 Lexmount Web Fetch，保留现有公告解析、附件入库和 365 天资料保存规则。运行前需要服务端 `LEXMOUNT_API_KEY`、`LEXMOUNT_PROJECT_ID`，可选区域入口与引擎配置；不依赖开发电脑的技能登录文件。RSS/JSON、robots 和原文件下载继续保持各自的协议读取。配置、实测及限制见 [Lexmount 采集说明](docs/lexmount-collection.md)。用户已于 2026-10-25 授权合入 main 并发布，实际发布及联调状态以 [进度记录](PROGRESS.md) 为准；部署代码不等于已配置凭据或采集联调成功。
 
 ## 采集资料库
 
