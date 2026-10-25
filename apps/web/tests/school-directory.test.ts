@@ -19,8 +19,10 @@ function fixture() {
   }) as Transport['call']};return fake;
 }
 beforeEach(()=>setActivePinia(createPinia()));
+async function openSchools(wrapper:ReturnType<typeof mount>){await wrapper.get('.profile-mini').trigger('click');await vi.dynamicImportSettled();await flushPromises();await wrapper.findAll('.account-tabs button')[1].trigger('click');await flushPromises();}
 it('every login loads the complete catalog before a missing-school application; the special choice never changes saved school',async()=>{
   const fake=fixture(),wrapper=mount(App,{props:{transport:fake,configurationIssues:[]}});await flushPromises();
+  expect(wrapper.find('#school').exists()).toBe(false);await openSchools(wrapper);
   expect(wrapper.findAll('#school option')).toHaveLength(117);
   expect(wrapper.find('#school').text()).toContain('学校114');
   await wrapper.find('#school').setValue('__request__');await flushPromises();
@@ -45,6 +47,6 @@ it('a busy school application cannot be submitted twice and has no client-chosen
 it('source coverage and partial failures are visible with safe original links',async()=>{
  const fake=fixture(),original=vi.mocked(fake.call).getMockImplementation()!;
  vi.mocked(fake.call).mockImplementation((async(action,input)=>action==='school.refresh'?{state:'ready',count:8,checkedAt:null,message:'已读取1/2个公开栏目',coverage:'仅覆盖院系公开通知，不包括校内门户。',sources:[{name:'统计系通知',url:'https://www.stat.tsinghua.edu.cn/xwdt/tzgg.htm',state:'ready',count:8,message:'列表可读取'},{name:'暂不可用的栏目',url:'javascript:alert(1)',state:'unavailable',count:0,message:'需要学校登录'}]}:original(action,input)) as Transport['call']);
- const wrapper=mount(App,{props:{transport:fake,configurationIssues:[]}});await flushPromises();await wrapper.find('#school').setValue('school_114');await flushPromises();
+ const wrapper=mount(App,{props:{transport:fake,configurationIssues:[]}});await flushPromises();await openSchools(wrapper);await wrapper.find('#school').setValue('school_114');await flushPromises();
  expect(wrapper.text()).toContain('仅覆盖院系公开通知');expect(wrapper.text()).toContain('需要学校登录');expect(wrapper.find('details.school-sources a').attributes('href')).toContain('stat.tsinghua.edu.cn');expect(wrapper.findAll('details.school-sources a')[1]!.attributes('href')).toBeUndefined();wrapper.unmount();
 });

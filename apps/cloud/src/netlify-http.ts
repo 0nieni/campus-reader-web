@@ -7,6 +7,7 @@ export interface SiteAuth {
   login(email: string, password: string): Promise<NetlifyUser>;
   logout(): Promise<void>;
   signup?(email: string, password: string): Promise<NetlifyUser & { confirmedAt?: string }>;
+  requestPasswordRecovery?(email: string): Promise<void>;
 }
 const response = (body: unknown, status = 200) => Response.json(body, { status, headers: { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer' } });
 export async function boundedJson(request: Request, max = 12000): Promise<Record<string, unknown>> {
@@ -37,9 +38,20 @@ export function createSiteAuth(auth: SiteAuth, email: () => string | undefined) 
       if (op === 'session' && request.method === 'GET') {
         const user = await auth.user(); return response({ ok: true, data: user ? session(requireSiteUser(user, email())) : null });
       }
-      if (request.method !== 'POST' || !['login', 'logout', 'signup'].includes(op)) return response({ ok: false, code: 'ACTION_NOT_ALLOWED', message: '请求方式无效。' }, 405);
+      if (request.method !== 'POST' || !['login', 'logout', 'signup', 'password-recovery'].includes(op)) return response({ ok: false, code: 'ACTION_NOT_ALLOWED', message: '请求方式无效。' }, 405);
       sameOrigin(request);
       if (op === 'logout') { await auth.logout(); return response({ ok: true, data: null }); }
+      if (op === 'password-recovery') {
+        const current = await auth.user();
+        if (!current) throw new AppError('UNAUTHENTICATED', '请先登录本人账号。');
+        const own = requireSiteUser(current, email());
+        const body = await boundedJson(request, 1000);
+        if (Object.keys(body).length) throw new AppError('VALIDATION_FAILED', '重置邮件仅发送到当前账号邮箱。');
+        if (!auth.requestPasswordRecovery) throw new AppError('RECOVERY_UNAVAILABLE', '本站密码重置暂未启用。');
+        try { await auth.requestPasswordRecovery(own.email); }
+        catch { throw new AppError('RECOVERY_UNAVAILABLE', '重置邮件未能发送，请稍后再试，或联系站点管理员。'); }
+        return response({ ok: true, data: null });
+      }
       const body = await boundedJson(request, 2000);
       if (Object.keys(body).some(key => !['email','password'].includes(key)) || typeof body.email !== 'string' || typeof body.password !== 'string' || body.email.length > 254 || !body.password || body.password.length > 256) throw new AppError('VALIDATION_FAILED', '请输入有效的邮箱和密码。');
       if (!normalizedEmail(email())) throw new AppError('OWNER_NOT_CONFIGURED', '本站尚未配置初始工作区账号。');

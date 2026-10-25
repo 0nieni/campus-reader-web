@@ -260,6 +260,14 @@ it('a revoked-source failed turn with held quota can cancel and then resolve the
 });
 
 const savedState: AiProviderState = { storageConfigured: true, version: 4, profiles: [{ id: 'personal-1', name: '我的阅读接口', protocol: 'openai-chat', baseUrl: 'https://example.com/v1', models: ['personal-model', 'second-model'], defaultModel: 'personal-model', version: 2, keySaved: true, updatedAt: new Date().toISOString() }], selection: { profile: { id: 'personal-1', version: 2 }, model: 'personal-model' } };
+it('account-dialog model changes preserve conversation and quota state without starting or replaying an answer',async()=>{
+ let state=structuredClone(savedState);const previous={...turn,state:'complete' as const,quotaHeld:false,result:'保留的旧回答'};
+ const fake=fakeTransport(action=>action==='ai.providers.list'?structuredClone(state):action==='ai.chat.latest'?{conversation:conversation([previous])}:undefined),w=open(fake);await flushPromises();
+ state={...state,version:5,selection:{profile:{id:'personal-1',version:2},model:'second-model'}};
+ await w.setProps({providerChange:{state:structuredClone(state),activate:'saved'}});await flushPromises();expect(w.text()).toContain('保留的旧回答');expect(w.text()).toContain('已选个人模型：second-model');
+ expect(vi.mocked(fake.call).mock.calls.filter(([a])=>a==='ai.status')).toHaveLength(1);expect(vi.mocked(fake.call).mock.calls.some(([a])=>['ai.chat.create','ai.chat.send','ai.chat.step'].includes(a))).toBe(false);
+ state={...state,version:6,selection:null};await w.setProps({providerChange:{state:structuredClone(state),activate:'official'}});await flushPromises();expect((w.get('input[value="official"]').element as HTMLInputElement).checked).toBe(true);expect(w.text()).toContain('保留的旧回答');
+});
 it('an uncertain personal call can explicitly end after checking usage without replaying the request', async () => {
   const unknown = { ...turn, state: 'uncertain' as const, quotaHeld: false, service: 'byok' as const, providerProfile: { id: 'personal-1', version: 2 } };
   const fake = fakeTransport(action => action === 'ai.providers.list' ? structuredClone(savedState) : action === 'ai.chat.latest' ? { conversation: conversation([unknown]) } : action === 'ai.chat.cancel' ? { ...unknown, state: 'cancelled' } : undefined);

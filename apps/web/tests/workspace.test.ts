@@ -63,6 +63,15 @@ function fixture() {
 }
 beforeEach(() => setActivePinia(createPinia()));
 describe("session and data race boundaries", () => {
+  it('queues notices without leaving the feed or invoking a model, and removes the old checkbox',async()=>{
+    const {fake}=fixture(),original=vi.mocked(fake.call).getMockImplementation()!;
+    vi.mocked(fake.call).mockImplementation((async(action,input)=>action==='feed.list'?{items:[detail,{...detail,id:'two',title:'另一份公告的完整标题'}],nextCursor:null}:original(action,input)) as Transport['call']);
+    const wrapper=mount(App,{props:{transport:fake,configurationIssues:[]},global:{plugins:[createPinia()]}});await flushPromises();
+    expect(wrapper.find('.selection-toggle').exists()).toBe(false);expect(wrapper.findAll('.notice-title').map(w=>w.text())).toEqual([detail.title,'另一份公告的完整标题']);
+    await wrapper.findAll('.notice-read')[0].trigger('click');await wrapper.findAll('.notice-read')[1].trigger('click');await flushPromises();
+    expect(wrapper.find('.feed').exists()).toBe(true);expect(wrapper.find('.assistant-panel').exists()).toBe(false);expect(wrapper.findAll('.notice-read').every(w=>w.attributes('disabled')!==undefined)).toBe(true);
+    expect(wrapper.findAll('.nav-link').find(w=>w.text().startsWith('AI 阅读'))!.text()).toContain('2');expect(vi.mocked(fake.call).mock.calls.some(([action])=>action.startsWith('ai.'))).toBe(false);wrapper.unmount();
+  });
   it('adds a notice beside the AI action and configures its time only in reminder center', async () => {
     const {fake}=fixture();
     const state={reminders:[] as any[],watches:[],notifications:[],unread:0,checkedAt:new Date().toISOString(),more:false,pushConfigured:false,publicKey:null};
@@ -76,7 +85,7 @@ describe("session and data race boundaries", () => {
       throw new Error('unexpected '+action);
     });
     const wrapper=mount(App,{props:{transport:fake,configurationIssues:[]},global:{plugins:[createPinia()]}});await flushPromises();
-    expect(wrapper.findAll('.notice-quick-actions button').map(b=>b.text())).toEqual(['加入提醒','用 AI 生成摘要']);
+    expect(wrapper.findAll('.notice-quick-actions button').map(b=>b.text())).toEqual(['加入提醒','加入ai搭子']);
     await wrapper.get('.notice-remind').trigger('click');await flushPromises();
     expect(fake.call).toHaveBeenCalledWith('reminders.add',{schoolId:'bjtu',itemIds:['one']});expect(wrapper.get('.notice-remind').text()).toBe('已加入提醒');
     expect(wrapper.find('input[type=datetime-local]').exists()).toBe(false);
