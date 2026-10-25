@@ -17,15 +17,21 @@ const reminders = [
   '20261021000200_aliyun_reminders.sql',
 ];
 
-test('production and the existing PR14 preview retain their applied migration history and converge without data loss', async t => {
+test('production and existing PR14/PR17 previews retain their applied migration history and converge without data loss', async t => {
   for (const file of [...common, ...reminders]) {
     assert.deepEqual(await readFile(join(root, 'migrations', file)), await readFile(join(root, 'pr14-migrations', file)), `Applied migration copies must have the same checksum: ${file}`);
   }
   assert.deepEqual(await readFile(join(root, 'migrations/20261022000100_ai_conversations.sql')), await readFile(join(root, 'pr14-migrations/20261019000100_ai_conversations.sql')));
+  assert.deepEqual(await readFile(join(root, 'migrations/20261024000300_ai_provider_profiles.sql')), await readFile(join(root, 'pr14-migrations/20261024000300_ai_provider_profiles.sql')));
+  for (const file of (await readdir(join(root, 'migrations'))).filter(name => name.endsWith('.sql'))) {
+    const previewName = file === '20261024000100_collected_materials.sql' ? '20261026000100_collected_materials.sql' : file;
+    assert.deepEqual(await readFile(join(root, 'migrations', file)), await readFile(join(root, 'pr17-migrations', previewName)), `PR17 migration bytes must match: ${file}`);
+  }
   const schemas: unknown[] = [];
   for (const history of [
     { name: 'production', directory: 'migrations', initial: [...common, ...reminders] },
     { name: 'existing PR14 preview', directory: 'pr14-migrations', initial: [...common, '20261019000100_ai_conversations.sql'] },
+    { name: 'existing PR17 preview', directory: 'pr17-migrations', initial: [...common, ...reminders, '20261022000100_ai_conversations.sql', '20261024000300_ai_provider_profiles.sql'] },
   ]) await t.test(history.name, async () => {
     const directory = join(root, history.directory), initial = await mkdtemp(join(tmpdir(), 'campus-migration-history-'));
     const server = new NetlifyDB({ logger() {} });
@@ -34,6 +40,7 @@ test('production and the existing PR14 preview retain their applied migration hi
       for (const file of history.initial) await copyFile(join(directory, file), join(initial, file));
       await server.applyMigrations(initial);
       await pool.query("INSERT INTO campus_documents(id,collection,body) VALUES('migration-fixture-profile','user_profiles',$1::jsonb)", [JSON.stringify({ schoolId: 'bjtu', marker: 'preserve existing account data' })]);
+      if (history.directory === 'pr17-migrations') await pool.query("INSERT INTO campus_ai_provider_accounts(owner_id,version) VALUES('existing-provider-owner',7)");
       const files = (await readdir(directory)).filter(name => name.endsWith('.sql')).sort();
       for (const file of history.initial) assert.ok(files.includes(file), `Already applied migration must remain: ${file}`);
       const highest = Math.max(...history.initial.map(file => Number(file.split('_')[0])));
@@ -43,12 +50,15 @@ test('production and the existing PR14 preview retain their applied migration hi
       await server.applyMigrations(directory);
       const saved = await pool.query("SELECT body FROM campus_documents WHERE id='migration-fixture-profile'");
       assert.equal(saved.rows[0].body.marker, 'preserve existing account data');
+      if (history.directory === 'pr17-migrations') assert.equal((await pool.query("SELECT version FROM campus_ai_provider_accounts WHERE owner_id='existing-provider-owner'")).rows[0].version, 7);
       await pool.query("INSERT INTO campus_documents(id,collection,body) VALUES('migration-fixture-chat','web_ai_conversations','{}')");
       const tables = await pool.query("SELECT table_name,column_name,data_type,is_nullable,column_default FROM information_schema.columns WHERE table_schema='public' AND table_name LIKE 'campus_%' ORDER BY table_name,ordinal_position");
       const indexes = await pool.query("SELECT indexname,indexdef FROM pg_indexes WHERE schemaname='public' AND tablename LIKE 'campus_%' ORDER BY indexname");
       const constraints = await pool.query("SELECT conname,pg_get_constraintdef(oid) AS definition FROM pg_constraint WHERE conrelid IN (SELECT oid FROM pg_class WHERE relname LIKE 'campus_%') ORDER BY conname");
       assert.ok(tables.rows.some((row: { table_name: string }) => row.table_name === 'campus_reminder_accounts'));
       assert.ok(tables.rows.some((row: { table_name: string }) => row.table_name === 'campus_reminder_channel_receipts'));
+      assert.ok(tables.rows.some((row: { table_name: string }) => row.table_name === 'campus_ai_provider_profiles'));
+      assert.ok(tables.rows.some((row: { table_name: string }) => row.table_name === 'campus_material_files'));
       schemas.push({ tables: tables.rows, indexes: indexes.rows, constraints: constraints.rows });
     } finally {
       await pool.end(); await server.stop();
@@ -57,6 +67,7 @@ test('production and the existing PR14 preview retain their applied migration hi
       await rm(initial, { recursive: true, force: true });
     }
   });
-  assert.equal(schemas.length, 2);
+  assert.equal(schemas.length, 3);
   assert.deepEqual(schemas[0], schemas[1], 'Both existing histories must reach the same AI and reminder schema');
+  assert.deepEqual(schemas[0], schemas[2], 'PR17 must reach the canonical schema while preserving its applied provider migration');
 });

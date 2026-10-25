@@ -10,13 +10,16 @@ import { buildChatContext, type ContextExchange, type MemorySnapshot, type Memor
 import { chatSearchQuery } from './chat-intent';
 import { memoryService, selectMemoryItems } from './assistant-memory';
 import { buildConversationSummary } from './conversation-summary';
+import type { AiProviderRef } from '@campus/contracts';
+import type { ProviderProfiles } from './ai-provider-profiles';
+import { checkedProviderRef } from './provider-endpoints';
 
 const COLLECTION = 'web_ai_conversations';
 const unreadableMaterial = new Set(['NO_MATERIAL', 'SOURCE_UNAVAILABLE', 'SOURCE_LOGIN_REQUIRED', 'SOURCE_RESTRICTED', 'SOURCE_NOT_FOUND', 'SOURCE_ROBOTS_BLOCKED', 'SOURCE_BUSY', 'SOURCE_DAILY_LIMIT']);
-type SavedTurn = { id: string; question: string; fingerprint: string; taskId: string | null; materialIds: string[]; references: AiChatTurn['references']; reply?: string; error?: string; history: string; summary?: string; evidence?: import('./chat-context').HistoryEvidence[]; memory?: MemorySnapshot; memoryDependencies?: MemoryDependency[]; search?: AiRecommendations['search']; preparing?: boolean; preparationStartedAt?: number; cancelled?: boolean; service: 'official' | 'byok'; provider?: string; model?: string };
+type SavedTurn = { id: string; question: string; fingerprint: string; taskId: string | null; materialIds: string[]; references: AiChatTurn['references']; reply?: string; error?: string; history: string; summary?: string; evidence?: import('./chat-context').HistoryEvidence[]; memory?: MemorySnapshot; memoryDependencies?: MemoryDependency[]; search?: AiRecommendations['search']; preparing?: boolean; preparationStartedAt?: number; cancelled?: boolean; service: 'official' | 'byok'; provider?: string; model?: string; providerProfile?: AiProviderRef };
 type Conversation = { _id: string; owner: string; schoolId: string; createdAt: string; expireAt: string; turns: SavedTurn[]; pendingTurn: string | null; purged?: boolean };
 type Ai = ReturnType<typeof aiService>;
-export function assistantChat(db: Database, repo: Repository, ai: Ai, recommend: (owner: string, schoolId: string, query?: string) => Promise<AiRecommendations>, now = Date.now, discover?: (schoolId: string, query: string, identity: IdentityContext) => Promise<AiRecommendations>) {
+export function assistantChat(db: Database, repo: Repository, ai: Ai, recommend: (owner: string, schoolId: string, query?: string) => Promise<AiRecommendations>, now = Date.now, discover?: (schoolId: string, query: string, identity: IdentityContext) => Promise<AiRecommendations>, providers?: ProviderProfiles) {
   const memory = memoryService(db, repo, now);
   const requestId = (value: unknown) => { const id = identifier(value); if (id.length < 12 || id.length > 100) reject('VALIDATION_FAILED', '请求编号无效。'); return id; };
   async function purge(row: Conversation) {
@@ -33,7 +36,7 @@ export function assistantChat(db: Database, repo: Repository, ai: Ai, recommend:
     await authorizeSchool(repo, owner, row.schoolId); return row;
   }
   function baseTurn(turn: SavedTurn): AiChatTurn {
-    return { id: turn.id, question: turn.question, taskId: turn.taskId, state: turn.cancelled ? 'cancelled' : turn.preparing ? 'running' : turn.error ? 'failed' : 'complete', result: turn.reply || null, message: turn.preparing ? '正在检索或准备资料，请稍后刷新对话状态。' : turn.error || (turn.reply ? '未调用模型，不扣官方次数。' : '正在准备本轮，请先刷新状态。'), references: turn.references, step: 0, totalSteps: 0, quotaHeld: false, service: turn.service, provider: turn.provider || '', model: turn.model || '', ...(turn.search ? { search: turn.search } : {}) };
+    return { id: turn.id, question: turn.question, taskId: turn.taskId, state: turn.cancelled ? 'cancelled' : turn.preparing ? 'running' : turn.error ? 'failed' : 'complete', result: turn.reply || null, message: turn.preparing ? '正在检索或准备资料，请稍后刷新对话状态。' : turn.error || (turn.reply ? '未调用模型，不扣官方次数。' : '正在准备本轮，请先刷新状态。'), references: turn.references, step: 0, totalSteps: 0, quotaHeld: false, service: turn.service, provider: turn.provider || '', model: turn.model || '', ...(turn.providerProfile ? { providerProfile: turn.providerProfile } : {}), ...(turn.search ? { search: turn.search } : {}) };
   }
   async function publicTurn(row: Conversation, turn: SavedTurn): Promise<AiChatTurn> {
     if (turn.preparing && now() - (turn.preparationStartedAt || 0) > 90000) {
@@ -122,13 +125,16 @@ export function assistantChat(db: Database, repo: Repository, ai: Ai, recommend:
         if (input.service !== undefined && !['official', 'byok'].includes(String(input.service))) reject('VALIDATION_FAILED', '使用方式无效。');
         if (input.itemIds !== undefined && (!Array.isArray(input.itemIds) || input.itemIds.length > 8)) reject('VALIDATION_FAILED', '一次最多使用八篇公告。');
         const explicitIds = Array.isArray(input.itemIds) ? [...new Set(input.itemIds.map(identifier))] : [];
-        const fingerprint = digest([question, explicitIds, input.service || 'official', input.provider || null, input.model || null]);
+        const providerProfile = input.providerProfile === undefined ? undefined : checkedProviderRef(input.providerProfile);
+        if (providerProfile && (input.service !== 'byok' || input.provider !== undefined || !providers)) reject('VALIDATION_FAILED', '请重新选择已保存的个人服务商配置。');
+        const fingerprint = digest([question, explicitIds, input.service || 'official', input.provider || null, input.model || null, ...(providerProfile ? [providerProfile] : [])]);
         let turn = row.turns.find(t => t.id === id);
         if (turn && turn.fingerprint !== fingerprint) reject('REQUEST_CONFLICT', '同一请求编号不能更换问题、资料或模型。');
         if (turn?.error || turn?.reply || turn?.preparing || turn?.cancelled) return publicTurn(row, turn);
         if (turn?.taskId && await readDoc(db, 'web_ai_tasks', turn.taskId)) return publicTurn(row, turn);
         if (!turn) {
-          const pending: SavedTurn = { id, question, fingerprint, taskId: null, materialIds: [], references: [], history: '', preparing: true, preparationStartedAt: now(), service: input.service === 'byok' ? 'byok' : 'official', ...(input.provider ? { provider: String(input.provider) } : {}), ...(input.model ? { model: String(input.model) } : {}) };
+          if (providerProfile) await providers!.resolve(owner, providerProfile, String(input.model || ''));
+          const pending: SavedTurn = { id, question, fingerprint, taskId: null, materialIds: [], references: [], history: '', preparing: true, preparationStartedAt: now(), service: input.service === 'byok' ? 'byok' : 'official', ...(input.provider ? { provider: String(input.provider) } : {}), ...(input.model ? { model: String(input.model) } : {}), ...(providerProfile ? { providerProfile } : {}) };
           let acquired = false;
           await atomic(db, async tx => {
             const ref = tx.collection(COLLECTION).doc(row._id), current = transactionRow((await ref.get()).data) as Conversation;
@@ -137,6 +143,7 @@ export function assistantChat(db: Database, repo: Repository, ai: Ai, recommend:
             if (existing) { if (existing.fingerprint !== fingerprint) reject('REQUEST_CONFLICT', '请求编号冲突。'); turn = existing; return; }
             if (current.pendingTurn) reject('TASK_BUSY', '请先完成、取消或核查当前轮次，再发送新问题。');
             if (current.turns.length >= 20) reject('CONTEXT_TOO_LONG', '本对话已达到 20 轮，请新建对话。');
+            if (providerProfile) await providers!.guard(tx, owner, providerProfile, String(input.model || ''));
             row.turns = current.turns;
             await ref.update({ turns: [...current.turns, pending], pendingTurn: id });
             acquired = true;
@@ -160,7 +167,7 @@ export function assistantChat(db: Database, repo: Repository, ai: Ai, recommend:
             }
             const searchQuery = discover ? chatSearchQuery(question) : null;
             const discovery = searchQuery ? await discover!(row.schoolId, searchQuery, identity) : null;
-            let ids = discovery ? discovery.items.filter(item => item.allowAi).map(item => item.id).slice(0, 5) : explicitIds;
+            let ids = discovery ? [...new Set([...explicitIds, ...discovery.items.filter(item => item.allowAi).map(item => item.id).slice(0, 5)])].slice(0, 8) : explicitIds;
             if (!ids.length && !discovery) {
               const last = [...row.turns].reverse().find(t => t.materialIds.length && !t.error);
               const isFollowup = /^(那|它|这个|这条|这项|什么时候|截止|需要|怎么|能否|可以|还有|报名|材料|费用|地点|你刚才|刚才|之前|第二|第一个|接下来)/.test(question);
@@ -175,7 +182,7 @@ export function assistantChat(db: Database, repo: Repository, ai: Ai, recommend:
               try { await readingPackage(db, repo, owner, row.schoolId, [itemId]); readable.push(itemId); }
               catch (error) {
                 if (!(error instanceof AppError) || !unreadableMaterial.has(error.code)) throw error;
-                if (explicitIds.length && !discovery) missingExplicit = true;
+                if (explicitIds.includes(itemId)) missingExplicit = true;
               }
             }
             if (discovery && !readable.length) {
@@ -211,7 +218,7 @@ export function assistantChat(db: Database, repo: Repository, ai: Ai, recommend:
             const summaryInput = buildConversationSummary(older);
             const { history, evidence, summary, memoryDependencies } = buildChatContext(row.schoolId, prefs, exchanges, pack?.docs.map(doc => doc.title) || [], discovery?.search, summaryInput);
             const taskId = pack ? digest([owner, digest(['chat-turn', row._id, id])]) : null;
-            turn = { id, question, fingerprint, taskId, materialIds: pack?.docs.map(d => d.itemId) || [], references: pack?.docs.map(d => ({ reference: d.reference, itemId: d.itemId, title: d.title, originalUrl: d.originalUrl })) || [], history, summary, evidence, memory: memorySnapshot, memoryDependencies, ...(discovery ? { search: discovery.search } : {}), service: input.service === 'byok' ? 'byok' : 'official', ...(input.provider ? { provider: String(input.provider) } : {}), ...(input.model ? { model: String(input.model) } : {}), ...(!pack ? { reply: missingExplicit ? '所选公告有正文暂时不可读取，请查看原文或调整选择后再提问。此提示未调用模型，不扣官方次数。' : '当前没有可供 AI 阅读的公告正文。请先选择本校公告，或使用联网搜索查找公开公告，再继续提问。此提示未调用模型，不扣官方次数。' } : {}) };
+            turn = { id, question, fingerprint, taskId, materialIds: pack?.docs.map(d => d.itemId) || [], references: pack?.docs.map(d => ({ reference: d.reference, itemId: d.itemId, title: d.title, originalUrl: d.originalUrl })) || [], history, summary, evidence, memory: memorySnapshot, memoryDependencies, ...(discovery ? { search: discovery.search } : {}), service: input.service === 'byok' ? 'byok' : 'official', ...(input.provider ? { provider: String(input.provider) } : {}), ...(input.model ? { model: String(input.model) } : {}), ...(providerProfile ? { providerProfile } : {}), ...(!pack ? { reply: missingExplicit ? '所选公告有正文暂时不可读取，请查看原文或调整选择后再提问。此提示未调用模型，不扣官方次数。' : '当前没有可供 AI 阅读的公告正文。请先选择本校公告，或使用联网搜索查找公开公告，再继续提问。此提示未调用模型，不扣官方次数。' } : {}) };
             const saved = turn;
             await authorizeSchool(repo, owner, row.schoolId);
             await atomic(db, async tx => {
@@ -219,6 +226,7 @@ export function assistantChat(db: Database, repo: Repository, ai: Ai, recommend:
               if (current.purged || Date.parse(current.expireAt) <= now()) reject('RESULT_EXPIRED', '对话已到期或清除。');
               const existing = current.turns.find(t => t.id === id);
               if (!existing?.preparing || current.pendingTurn !== id) { turn = existing || { ...pending, preparing: false, cancelled: true }; return; }
+              if (providerProfile) await providers!.guard(tx, owner, providerProfile, String(input.model || ''));
               await ref.update({ turns: current.turns.map(value => value.id === id ? saved : value), pendingTurn: pack ? id : null });
             });
           } catch (error) {
@@ -232,7 +240,7 @@ export function assistantChat(db: Database, repo: Repository, ai: Ai, recommend:
         if (!turn!.taskId) return publicTurn(row, turn!);
         let task: ReadingTask;
         try {
-          task = await ai.handle('ai.start', { schoolId: row.schoolId, itemIds: turn!.materialIds, requestId: digest(['chat-turn', row._id, id]), service: turn!.service, provider: turn!.provider, model: turn!.model, task: 'answer', question: turn!.question, chat: { history: turn!.history, summary: turn!.summary, evidence: turn!.evidence, memory: turn!.memory, memoryDependencies: turn!.memoryDependencies, expireAt: row.expireAt } }, identity) as ReadingTask;
+          task = await ai.handle('ai.start', { schoolId: row.schoolId, itemIds: turn!.materialIds, requestId: digest(['chat-turn', row._id, id]), service: turn!.service, ...(turn!.providerProfile ? { providerProfile: turn!.providerProfile } : { provider: turn!.provider }), model: turn!.model, task: 'answer', question: turn!.question, chat: { history: turn!.history, summary: turn!.summary, memory: turn!.memory, memoryDependencies: turn!.memoryDependencies, evidence: turn!.evidence, expireAt: row.expireAt } }, identity) as ReadingTask;
         } catch (error) {
           // Preserve idempotency and a safe explanation; do not leave the conversation locked.
           const message = error instanceof AppError ? error.message : '本轮准备未完成，请查询对话状态。';

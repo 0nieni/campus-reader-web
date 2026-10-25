@@ -13,6 +13,7 @@ import { siteWorkspace } from '../../apps/cloud/src/site-access';
 import { schoolRequests } from '../../apps/cloud/src/school-requests';
 import {reminderService} from '../../apps/cloud/src/reminders';
 import {reminderRuntime} from '../../apps/cloud/src/netlify-reminder-runtime';
+import {providerProfiles} from '../../apps/cloud/src/ai-provider-profiles';
 import {materialRuntime} from '../../apps/cloud/src/material-runtime';
 declare const Netlify: { env: { get(name: string): string | undefined } };
 let pool: SqlPool | undefined;
@@ -32,7 +33,8 @@ export default createSiteApi({
     const db = postgresStorage(pool), repo = postgresRepository(pool);
     const context=getContext();
     const {directory,websites,publicSources}=materialRuntime(pool,repo,{production:context.deploy.context==='production',deployId:context.deploy.id});
-    const ai = aiService(db, repo), assistant = assistantService(db, repo, ai);
+    const providers = providerProfiles(pool, {encryptionKey:()=>Netlify.env.get('AI_PROVIDER_ENCRYPTION_KEY')});
+    const ai = aiService(db, repo, undefined, undefined, undefined, providers), assistant = assistantService(db, repo, ai, undefined, undefined, undefined, providers);
     const request = schoolRequests(pool,async fields => {
       // Fixed site target: never accept URLs, recipients, email addresses or UID
       // from the browser. Notification recipients are configured in Netlify Forms.
