@@ -223,7 +223,7 @@ describe("visible entry and untrusted content", () => {
     expect(wrapper.text()).toContain('缺少 user_profiles 集合');
     await wrapper.findAll('button').find(button => button.text() === '重新连接工作区')!.trigger('click');
     await flushPromises();
-    expect(wrapper.find('.notice-index').exists()).toBe(true);
+    expect(wrapper.find('.portal-template .feed').exists()).toBe(true);
     expect(fake.signIn).not.toHaveBeenCalled();
     wrapper.unmount();
   });

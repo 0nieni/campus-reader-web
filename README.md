@@ -1,10 +1,10 @@
 # 校园阅览室
 
-登录与公告页的新模板风格、邮箱注册功能位于本地 `codex/reader-theme-registration`：纸张白、深绿、青柠配色，提供深浅色切换，邮箱验证后进入独立工作区。注册需部署代码，并在 Netlify Identity 将注册改为 Open、保持邮箱验证开启。实现与验收见 [样式及注册说明](docs/template-theme-registration-2026-10-25.md)。当前未推送或上线。
+登录与公告页的新模板风格、邮箱注册功能位于本地 `codex/reader-theme-registration`：按用户最新提供的 `login(1).html` 与 `index(1).html` 迁入原始紫色样式，保留渐变、行星插画、顶栏、侧栏、卡片与详情弹窗。两份模板 CSS 原样保存，邮箱验证后进入独立工作区。注册需部署代码，并在 Netlify Identity 将注册改为 Open、保持邮箱验证开启。实现与验收见 [样式及注册说明](docs/template-theme-registration-2026-10-25.md)。当前未推送或上线。
 
 个人服务商功能新增于 `codex/ai-companion-model-settings`：AI 阅读的“服务模型调整”支持每账号独立保存加密 API Key、多套配置、模型选择及四种接口协议，保留官方 AI 和临时 API。保存与启用分开，切换只影响新轮次；旧配置删改时停止未完成任务。接入需追加迁移与服务端 `AI_PROVIDER_ENCRYPTION_KEY`，见 [个人服务商使用与接入](docs/ai-provider-profiles.md) 和 [CC Switch 源码分析](docs/cc-switch-provider-analysis.md)。当前完成本地验证；功能分支供审核，正式启用仍需配置变量和部署迁移。
 
-面向受邀用户的校园公告、收藏与 AI 阅读网站。Vue 3 + TypeScript + Netlify Functions、Identity 和 Database。代码仓库保持私有，各账号的数据独立。
+面向校园用户的公告、收藏与 AI 阅读网站，支持原有邀请与邮箱验证注册（需配置启用）。Vue 3 + TypeScript + Netlify Functions、Identity 和 Database。代码仓库保持私有，各账号的数据独立。
 
 ## AI 阅读助手（本地实现，尚未部署）
 

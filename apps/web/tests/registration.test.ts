@@ -14,7 +14,7 @@ afterEach(()=>{mounted.splice(0).forEach(w=>w.unmount());localStorage.removeItem
 
 it('registering clears passwords immediately and waits for email verification without reading any workspace',async()=>{
   const t=transport();let finish!:(value:{verificationRequired:true})=>void;t.signUp=vi.fn(()=>new Promise<{verificationRequired:true}>(resolve=>{finish=resolve;}));
-  const w=open(t);await flushPromises();await w.findAll('.auth-tabs button')[1].trigger('click');
+  const w=open(t);await flushPromises();await w.get('.register .switch-mode').trigger('click');
   await w.get('#register-email').setValue('fixture@example.test');await w.get('#register-password').setValue('synthetic-password');await w.get('#register-confirmation').setValue('synthetic-password');
   await w.get('[data-test=registration-form]').trigger('submit');
   expect((w.get('#register-password').element as HTMLInputElement).value).toBe('');expect((w.get('#register-confirmation').element as HTMLInputElement).value).toBe('');
@@ -28,9 +28,9 @@ it('invalid or mismatched passwords never reach registration; upstream errors ne
   vi.mocked(t.signUp!).mockRejectedValue(Error('provider token=private'));await w.get('form').trigger('submit');await flushPromises();expect(w.text()).not.toContain('private');expect(w.text()).toContain('连接失败');expect((w.get('#register-password').element as HTMLInputElement).value).toBe('');
 });
 it('leaving registration discards the draft and ignores a later response',async()=>{
-  const t=transport();let finish!:(value:{verificationRequired:true})=>void;t.signUp=vi.fn(()=>new Promise<{verificationRequired:true}>(resolve=>{finish=resolve;}));const w=open(t);await flushPromises();await w.findAll('.auth-tabs button')[1].trigger('click');
+  const t=transport();let finish!:(value:{verificationRequired:true})=>void;t.signUp=vi.fn(()=>new Promise<{verificationRequired:true}>(resolve=>{finish=resolve;}));const w=open(t);await flushPromises();await w.get('.register .switch-mode').trigger('click');
   await w.get('#register-email').setValue('fixture@example.test');await w.get('#register-password').setValue('synthetic-password');await w.get('#register-confirmation').setValue('synthetic-password');await w.get('[data-test=registration-form]').trigger('submit');
-  await w.findAll('.auth-tabs button')[0].trigger('click');finish({verificationRequired:true});await flushPromises();expect(w.find('#register-password').exists()).toBe(false);expect(w.text()).not.toContain('下一步，确认你的邮箱');expect(w.html()).not.toContain('synthetic-password');
+  const form=w.getComponent(RegistrationForm);w.unmount();finish({verificationRequired:true});await flushPromises();expect(form.emitted('sent')).toBeUndefined();expect(t.call).not.toHaveBeenCalled();
 });
 it('confirmation tokens are stripped from the URL and block workspace requests until verification succeeds',async()=>{
   history.replaceState(null,'','/#confirmation_token=synthetic-confirmation');const t=transport();let finish!:(value:typeof session)=>void;t.confirmEmail=vi.fn(()=>new Promise<typeof session>(resolve=>{finish=resolve;}));const w=open(t);await flushPromises();
@@ -46,7 +46,9 @@ it('a confirmation link arriving in the already-open login page is also consumed
   history.replaceState(null,'','/#confirmation_token=same-page-fixture');window.dispatchEvent(new Event('hashchange'));await flushPromises();
   expect(t.confirmEmail).toHaveBeenCalledWith('same-page-fixture');expect(location.hash).toBe('');expect(w.text()).toContain('先选择你的学校');
 });
-it('theme switching stores only a visual preference and restores it for a subsequent page',async()=>{
-  const w=open(transport());await flushPromises();const before=document.documentElement.dataset.theme;await w.get('.theme-toggle').trigger('click');expect(document.documentElement.dataset.theme).not.toBe(before);const chosen=document.documentElement.dataset.theme;expect(localStorage.getItem('campus-reader:theme')).toBe(chosen);expect(localStorage.length).toBe(1);w.unmount();
-  open(transport());await flushPromises();expect(document.documentElement.dataset.theme).toBe(chosen);
+it('the supplied purple template stays in its original palette even with an earlier dark preference',async()=>{
+  localStorage.setItem('campus-reader:theme','dark');document.documentElement.dataset.theme='dark';const w=open(transport());await flushPromises();
+  expect(w.find('.theme-toggle').exists()).toBe(false);expect(document.documentElement.dataset.theme).toBeUndefined();expect(document.documentElement.dataset.pageTemplate).toBe('login');
+  // Vite suppresses CSS imports in unit tests; exact CSS bytes are verified in template-styles.test.ts.
+  expect(document.querySelector('style[data-campus-template]')).not.toBeNull();
 });

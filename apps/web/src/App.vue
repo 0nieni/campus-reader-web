@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch, defineAsyncComponent, defineComponent, h } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch, nextTick, defineAsyncComponent, defineComponent, h } from "vue";
 import { noticeCategories, type FeedFilters, type Notice, type Favorite } from "@campus/contracts";
 const featureLoading = defineComponent(() => () => h("section", { class: "feature-surface", role: "status" }, "正在打开功能页…"));
 const featureFailed = defineComponent(() => () => h("section", { class: "feature-surface", role: "alert" }, "功能页加载失败，请刷新网页后重试。"));
@@ -16,7 +16,8 @@ import SchoolRequestForm from './components/SchoolRequestForm.vue';
 import NoticeLabelsEditor from './components/NoticeLabelsEditor.vue';
 import RegistrationForm from './components/RegistrationForm.vue';
 import EmailConfirmationPanel from './components/EmailConfirmationPanel.vue';
-import {useAppearance} from './lib/appearance';
+import {usePageTemplate} from './lib/page-template';
+import TemplateIcon from './components/TemplateIcon.vue';
 const ReminderCenter=defineAsyncComponent({loader:()=>import('./components/ReminderCenter.vue'),loadingComponent:featureLoading,errorComponent:featureFailed});
 import type {ReminderNotification,ReminderState} from '@campus/contracts';
 
@@ -26,7 +27,18 @@ const props = defineProps<{
 }>();
 const store = workspaceStore(props.transport || cloudTransport)();
 const transport = props.transport || cloudTransport;
-const {theme,toggle:toggleTheme}=useAppearance();
+usePageTemplate(computed(()=>Boolean(store.workspace)));
+const sidebarCollapsed=ref(false),showPassword=ref(false),rememberAccount=ref(false),authHint=ref('');
+const searchInput=ref<HTMLInputElement|null>(null),readerDialog=ref<HTMLElement|null>(null);
+const avatarLetter=computed(()=>(store.auth?.username?.trim()[0]||'阅').toUpperCase());
+const pageName=computed(()=>({feed:'首页',favorites:'我的收藏',ai:'AI 阅读',sources:'公告来源',reminders:'提醒中心'})[view.value]);
+function noticeIcon(item:Notice){return item.categories.includes('competition')?'cup':item.categories.includes('academic')?'book':item.categories.includes('activity')?'cal':'doc';}
+function noticeDate(value:string|null){return value&&Number.isFinite(Date.parse(value))?new Intl.DateTimeFormat('zh-CN',{month:'2-digit',day:'2-digit',timeZone:'Asia/Shanghai'}).format(new Date(value)).replace('/','.'): '未标注';}
+function noticeYear(value:string|null){return value&&Number.isFinite(Date.parse(value))?new Intl.DateTimeFormat('zh-CN',{year:'numeric',timeZone:'Asia/Shanghai'}).format(new Date(value)).replace('年',''):'';}
+let focusBeforeReader:HTMLElement|null=null,previousOverflow='';
+watch(()=>Boolean(store.detail||store.detailLoading),async open=>{if(open){focusBeforeReader=document.activeElement instanceof HTMLElement?document.activeElement:null;previousOverflow=document.body.style.overflow;document.body.style.overflow='hidden';await nextTick();readerDialog.value?.focus();}else{document.body.style.overflow=previousOverflow;await nextTick();focusBeforeReader?.isConnected&&focusBeforeReader.focus();}},{flush:'post'});
+function readerKeys(event:KeyboardEvent){if(event.key==='Escape'){event.preventDefault();store.closeNotice();}if(event.key!=='Tab')return;const controls=Array.from(readerDialog.value?.querySelectorAll<HTMLElement>('button:not(:disabled),a[href],input:not(:disabled),select:not(:disabled),summary,[tabindex="0"]')||[]).filter(el=>el.getClientRects().length);const first=controls[0],last=controls.at(-1);if(!first){event.preventDefault();return;}if(event.shiftKey&&(document.activeElement===first||document.activeElement===readerDialog.value)){event.preventDefault();last?.focus();}else if(!event.shiftKey&&(document.activeElement===last||document.activeElement===readerDialog.value)){event.preventDefault();first.focus();}}
+async function searchShortcut(event:KeyboardEvent){if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='k'&&store.workspace){event.preventDefault();if(view.value!=='feed')navigate('feed');await nextTick();searchInput.value?.focus();}}
 const authMode=ref<'login'|'register'>('login');
 const canRegister=Boolean(transport.signUp);
 const featureTransport: Transport = { ...transport, call: (async (action, input) => {
@@ -83,6 +95,7 @@ async function openFavorite(item: Favorite) {
 const issues = props.configurationIssues ?? setupIssues;
 const username = ref("");
 const password = ref("");
+try{const remembered=localStorage.getItem('campus-reader:login-email');if(remembered){username.value=remembered;rememberAccount.value=true;}}catch{}
 const copied = ref("");
 // Invite token stays in memory, never in API logs, Storage, or rendered text.
 const inviteToken = ref(isNetlify ? new URLSearchParams(location.hash.slice(1)).get('invite_token') || '' : '');
@@ -135,12 +148,15 @@ const date = new Intl.DateTimeFormat("zh-CN", {
 let unwatch: (() => void) | undefined;
 onMounted(() => {
   window.addEventListener('hashchange',receiveConfirmationLink);
+  window.addEventListener('keydown',searchShortcut);
   navigator.serviceWorker?.addEventListener('message',pushNavigation);
   unwatch = store.watchSession();
   if (!issues.length&&!inviteToken.value&&!confirmationToken.value) void store.connect();
 });
 onUnmounted(() => {
   window.removeEventListener('hashchange',receiveConfirmationLink);
+  window.removeEventListener('keydown',searchShortcut);
+  if(store.detail||store.detailLoading)document.body.style.overflow=previousOverflow;
   navigator.serviceWorker?.removeEventListener('message',pushNavigation);
   unwatch?.();
   password.value = "";
@@ -148,10 +164,11 @@ onUnmounted(() => {
 });
 async function login() {
   const value = password.value;
+  try{if(rememberAccount.value)localStorage.setItem('campus-reader:login-email',username.value.trim());else localStorage.removeItem('campus-reader:login-email');}catch{}
   password.value = "";
   await store.signIn(username.value.trim(), value);
 }
-function changeAuthMode(mode:'login'|'register'){password.value='';store.error='';authMode.value=mode;}
+function changeAuthMode(mode:'login'|'register'){password.value='';showPassword.value=false;authHint.value='';store.error='';authMode.value=mode;}
 async function copyOriginal() {
   if (!original.value) return;
   try {
@@ -176,57 +193,18 @@ function schoolChanged(event: Event) {
 </script>
 
 <template>
-  <div class="application">
-    <header class="masthead">
-      <a
-        class="brand"
-        href="#"
-        aria-label="校园阅览室首页"
-        @click.prevent="navigate('feed')"
-      >
-        <svg viewBox="0 0 32 32" aria-hidden="true">
-          <path
-            d="M4 7c5-2 9-1 12 2 3-3 7-4 12-2v20c-5-2-9-1-12 1-3-2-7-3-12-1V7Z"
-          />
-          <path d="M16 9v19M8 13h4m-4 5h4m8-5h4m-4 5h4" />
-        </svg>
-        <span>校园阅览室<small>把校园信息，读得更清楚</small></span>
-      </a>
-      <div class="header-right">
-        <button type="button" class="theme-toggle" :aria-label="theme==='light'?'切换为深色模式':'切换为浅色模式'" @click="toggleTheme"><span aria-hidden="true">{{theme==='light'?'☾':'☀'}}</span><span>{{theme==='light'?'深色':'浅色'}}</span></button>
-        <span class="today">{{ date }}</span
-        ><span class="private-label">个人工作区</span>
-      </div>
-    </header>
-
-    <EmailConfirmationPanel v-if="confirmationToken" :key="confirmationToken" :token="confirmationToken" :transport="transport" @complete="confirmationToken='';store.connect()" @back="confirmationToken='';changeAuthMode('login')" />
-    <InvitationPanel v-else-if="inviteToken" :token="inviteToken" @complete="inviteToken = ''; store.connect()" />
-    <main v-else-if="!store.workspace" class="entry">
-      <section class="entry-intro" aria-labelledby="entry-title">
-        <span class="section-label"><span class="line" /> 你的校园阅读空间</span>
-        <h1 id="entry-title">校园里的重要消息，<br /><em>在这里，读清楚。</em></h1>
-        <p class="intro-copy">
-          学校公告、竞赛活动和重要时间，汇集到你自己的阅览室。每一条信息，都能回到原始来源。
-        </p>
-        <div class="reading-mark" aria-hidden="true">
-          <div class="paper-back"></div>
-          <div class="paper-front">
-            <span class="paper-label">校园阅览室</span>
-            <div class="paper-title">一份公告，<br />一条清晰的线索。</div>
-            <span class="paper-rule"></span
-            ><span class="paper-rule short"></span
-            ><span class="paper-stamp">保留原文<br />有据可查</span>
-          </div>
-        </div>
-        <div class="entry-highlights"><span>原文有出处</span><span>收藏留线索</span><span>重要时间有安排</span></div>
-        <p class="privacy-note">{{ canRegister ? '邮箱验证后开始 · 各账号数据独立' : isNetlify ? '受邀使用 · 各账号数据独立' : '仅本人访问 · 原有资料保留' }}</p>
-      </section>
-
-      <section class="login-panel" aria-labelledby="login-title">
-        <div v-if="canRegister&&!store.auth" class="auth-tabs" aria-label="账号操作"><button type="button" :class="{active:authMode==='login'}" :aria-pressed="authMode==='login'" :disabled="store.loading" @click="changeAuthMode('login')">登录</button><button type="button" :class="{active:authMode==='register'}" :aria-pressed="authMode==='register'" :disabled="store.loading" @click="changeAuthMode('register')">注册</button></div>
-        <span class="panel-kicker">开始阅读</span>
-        <h2 id="login-title">{{authMode==='register'?'创建你的阅览室':'欢迎回到阅览室'}}</h2>
-        <p class="muted">{{authMode==='register'?'用一个邮箱，留住值得关注的校园消息。':canRegister?'登录邮箱，继续阅读你的校园。':isNetlify?'使用受邀邮箱登录你的独立工作区。':'使用已配置的本人账号登录。'}}</p>
+  <div v-if="!store.workspace" class="page login-template">
+    <section class="visual" aria-label="校园阅览室介绍">
+      <div class="brand"><div class="brandmark"><TemplateIcon name="planet" /></div><div><div class="brand-name">校园阅览室</div><div class="brand-sub">校园信息门户</div></div></div>
+      <div class="visual-copy"><div class="overline">A CAMPUS CONNECTED</div><h1>让每一份热爱<br>都有回响。</h1><p>校园资讯、学术活动与成长机会，<br>从校园阅览室开始。</p><div class="visual-art"><span class="star s1">✦</span><span class="star s2">✧</span><span class="star s3">✦</span><div class="orbit"></div><div class="orbit two"></div><div class="planet"></div></div></div>
+      <div class="visual-foot">校园阅览室 · 探索 · 连接 · 成长</div>
+    </section>
+    <main class="form-side">
+      <div class="locale"><TemplateIcon name="globe" />简体中文</div>
+      <EmailConfirmationPanel v-if="confirmationToken" :key="confirmationToken" :token="confirmationToken" :transport="transport" @complete="confirmationToken='';store.connect()" @back="confirmationToken='';changeAuthMode('login')" />
+      <InvitationPanel v-else-if="inviteToken" :token="inviteToken" @complete="inviteToken='';store.connect()" />
+      <div v-else class="form-wrap">
+        <div class="welcome">{{authMode==='register'?'CREATE ACCOUNT':'WELCOME BACK'}}</div><h2 id="login-title">{{authMode==='register'?'创建你的账号':'欢迎回来'}}</h2><p class="sub">{{authMode==='register'?'验证邮箱，开启你的独立校园阅览室。':'登录你的校园账号，继续探索校园。'}}</p>
         <p v-if="!props.transport && regionNeedsVerification && !issues.length" class="account-help">暂按 SDK 默认上海地域连接，尚未验证。若环境连接失败，请核实地域与访问来源。</p>
         <div v-if="store.auth" class="setup-note" role="status">
           <strong>云账号已登录，工作区仍待验证</strong>
@@ -245,90 +223,44 @@ function schoolChanged(event: Event) {
             <p>完成后重启网页服务，再连接本人工作区。</p>
           </details>
         </div>
-        <RegistrationForm v-if="authMode==='register'&&canRegister&&!store.auth" :transport="transport" :disabled="issues.length>0||store.loading" @sent="username=$event" @back="changeAuthMode('login')" />
-        <form v-else @submit.prevent="login">
-          <label for="username">{{ canRegister || isNetlify ? '登录邮箱' : '用户名' }}</label
-          ><input
-            id="username"
-            :type="canRegister || isNetlify ? 'email' : 'text'"
-            v-model="username"
-            autocomplete="username"
-            required
-            maxlength="254"
-            :disabled="issues.length > 0 || store.loading"
-            :placeholder="canRegister ? '输入登录邮箱' : isNetlify ? '输入受邀邮箱' : '输入本人用户名'"
-          />
-          <label for="password">密码</label
-          ><input
-            id="password"
-            v-model="password"
-            autocomplete="current-password"
-            type="password"
-            required
-            maxlength="256"
-            :disabled="issues.length > 0 || store.loading"
-            placeholder="输入密码"
-          />
-          <p v-if="store.error" class="error-message" role="alert">
-            {{ store.error }}
-          </p>
-          <button
-            class="primary login-button"
-            type="submit"
-            :disabled="issues.length > 0 || store.loading"
-          >
-            {{ store.loading ? "正在连接…" : "登录工作区"
-            }}<span aria-hidden="true">↗</span>
-          </button>
-        </form>
-        <p v-if="!issues.length&&authMode==='login'" class="account-help">
-          <template v-if="canRegister">第一次来？<button type="button" class="text-button" :disabled="store.loading" @click="changeAuthMode('register')">注册新账号</button>，验证邮箱后即可使用。</template>
-          <template v-else>{{ isNetlify ? '请先接受本站发送的账号邀请并设置密码。' : '没有账号或忘记密码，请在本人云开发控制台管理账号。' }}</template>
-        </p>
-        <p class="login-footnote">
-          登录后才会读取公告和个人资料。<br />连接失败会明确提示，不显示演示数据。
-        </p>
-      </section>
-    </main>
 
-    <main
-      v-else
-      class="workspace"
-      :class="{ 'show-detail': view === 'feed' && (store.detail || store.detailLoading), 'feature-view': view !== 'feed', 'reminder-view': view === 'reminders' }"
-    >
-      <aside class="navigation" aria-label="工作区导航">
-        <div class="workspace-name">我的阅览室</div>
-        <button class="nav-item" :class="{ active: view === 'feed' }" @click="navigate('feed')">
-          <span aria-hidden="true">▤</span> 公告
-        </button>
-        <button class="nav-item" :class="{ active: view === 'favorites' }" @click="navigate('favorites')"><span aria-hidden="true">☆</span>收藏</button>
-        <button v-if="store.workspace.capabilities.reminders" class="nav-item" :class="{active:view==='reminders'}" @click="navigate('reminders')"><span aria-hidden="true">◷</span>提醒<span v-if="unreadReminders" class="reminder-badge" :aria-label="`${unreadReminders}条未读提醒`">{{unreadReminders>99?'99+':unreadReminders}}</span></button>
-        <button v-if="store.workspace.capabilities.websiteSources" class="nav-item" :class="{active:view==='sources'}" @click="navigate('sources')"><span aria-hidden="true">↗</span>公告来源</button>
-        <button class="nav-item" :class="{ active: view === 'ai' }" @click="navigate('ai')"><span aria-hidden="true">✧</span>AI 阅读{{ selection.length ? `（${selection.length}）` : '' }}</button>
-        <div class="navigation-note">
-          勾选公告后进入 AI 阅读。<br />关键词查找不消耗 AI 次数。
-        </div>
-        <div class="nav-bottom">
-          <span>{{ isNetlify ? '当前账号的独立工作区' : '仅本人访问' }}</span
-          ><button class="text-button" @click="store.signOut()">
-            退出登录
-          </button>
-        </div>
+        <RegistrationForm v-if="authMode==='register'&&canRegister&&!store.auth" :transport="transport" :disabled="issues.length>0||store.loading" @sent="username=$event" @back="changeAuthMode('login')" />
+        <template v-else>
+          <form @submit.prevent="login">
+            <div class="field"><div class="field-head"><label for="username">{{canRegister||isNetlify?'登录邮箱':'账号'}}</label></div><div class="input-box"><TemplateIcon name="user" /><input id="username" v-model="username" :type="canRegister||isNetlify?'email':'text'" autocomplete="username" required maxlength="254" :disabled="issues.length>0||store.loading" :placeholder="canRegister||isNetlify?'请输入登录邮箱':'请输入账号'" /></div></div>
+            <div class="field"><div class="field-head"><label for="password">登录密码</label><button class="forgot" type="button" @click="authHint='请联系站点管理员，从账号管理中向你的邮箱发送密码重置邮件。'">忘记密码？</button></div><div class="input-box"><TemplateIcon name="lock" /><input id="password" v-model="password" :type="showPassword?'text':'password'" autocomplete="current-password" required maxlength="256" :disabled="issues.length>0||store.loading" placeholder="请输入登录密码" /><button type="button" class="toggle-pass" :aria-label="showPassword?'隐藏密码':'显示密码'" @click="showPassword=!showPassword"><TemplateIcon name="eye" /></button></div></div>
+            <div class="options"><label class="remember"><input v-model="rememberAccount" type="checkbox" />记住账号</label><span class="secure"><TemplateIcon name="lock" />安全加密登录</span></div>
+            <p v-if="store.error" class="error-message" role="alert">{{store.error}}</p><p v-if="authHint" class="auth-feedback" role="status">{{authHint}}</p>
+            <button class="submit" type="submit" :disabled="issues.length>0||store.loading">{{store.loading?'正在连接…':'登 录'}} <span aria-hidden="true">→</span></button>
+          </form>
+          <div v-if="canRegister" class="register">还没有账号？<button class="switch-mode" type="button" @click="changeAuthMode('register')">注册账号</button></div>
+          <p v-else class="register">{{isNetlify?'请先接受账号邀请，再使用邮箱登录。':'请使用已配置的本人账号登录。'}}</p>
+        </template>
+      </div>
+      <div class="copyright">校园阅览室 · 信息有来源，各账号数据独立</div>
+    </main>
+  </div>
+  <div v-else class="shell portal-template" :class="{collapsed:sidebarCollapsed}">
+    <header class="topbar"><div class="brand"><div class="brandmark"><TemplateIcon name="planet" /></div><div><div class="brand-name">校园阅览室</div><div class="brand-sub">校园信息门户</div></div></div><div class="top-actions"><span class="term">{{date}}</span><button v-if="store.workspace.capabilities.reminders" class="icon-btn" type="button" aria-label="通知" @click="navigate('reminders')"><span v-if="unreadReminders" class="notification-dot"></span><TemplateIcon name="bell" /></button><div class="avatar" aria-label="当前账号">{{avatarLetter}}</div></div></header>
+    <div class="layout">
+      <aside class="sidebar" aria-label="工作区导航">
+        <div class="side-label">校园空间</div>
+        <nav class="nav">
+          <button class="nav-link" :class="{active:view==='feed'}" @click="navigate('feed')"><TemplateIcon name="grid" /><span class="nav-text">首页</span></button>
+          <button class="nav-link" :class="{active:view==='favorites'}" @click="navigate('favorites')"><TemplateIcon name="saved" /><span class="nav-text">我的收藏</span></button>
+          <button v-if="store.workspace.capabilities.reminders" class="nav-link" :class="{active:view==='reminders'}" @click="navigate('reminders')"><TemplateIcon name="bell" /><span class="nav-text">提醒中心<span v-if="unreadReminders">（{{unreadReminders}}）</span></span></button>
+          <button v-if="store.workspace.capabilities.websiteSources" class="nav-link" :class="{active:view==='sources'}" @click="navigate('sources')"><TemplateIcon name="globe" /><span class="nav-text">公告来源</span></button>
+          <button class="nav-link" :class="{active:view==='ai'}" @click="navigate('ai')"><TemplateIcon name="sparkle" /><span class="nav-text">AI 阅读{{selection.length?'（'+selection.length+'）':''}}</span></button>
+          <div class="sidebar-spacer"></div><button class="nav-link" @click="store.signOut()"><TemplateIcon name="logout" /><span class="nav-text">退出登录</span></button>
+        </nav>
+        <div class="side-bottom"><button class="collapse-btn" :aria-label="sidebarCollapsed?'展开侧栏':'收起侧栏'" @click="sidebarCollapsed=!sidebarCollapsed"><TemplateIcon name="collapse" /><span class="collapse-text">{{sidebarCollapsed?'展开侧栏':'收起侧栏'}}</span></button><div class="profile-mini"><div class="avatar">{{avatarLetter}}</div><div class="profile-meta"><strong>个人工作区</strong><span>{{store.workspace.school?.name||'请选择学校'}}</span></div></div></div>
       </aside>
-      <section v-if="view === 'feed'" class="notice-index" aria-labelledby="notice-title">
-        <div class="index-heading">
-          <div>
-            <span class="panel-kicker">校园消息</span>
-            <h1 id="notice-title">校园公告</h1><p class="index-lead">从一条消息，找到下一步。</p>
-          </div>
-          <button
-            class="text-button"
-            :disabled="store.loading || store.refreshingSchool || !store.workspace.school"
-            @click="store.refreshSchool()"
-          >
-            {{store.refreshingSchool ? '检查更新中…' : '刷新'}}
-          </button>
-        </div>
+      <main class="main">
+        <template v-if="view==='feed'">
+          <div class="main-head"><div><div class="eyebrow">校园门户 <span>/</span> <span>{{pageName}}</span></div><h1 class="page-title" id="notice-title">首页</h1><p class="page-desc">发现校园动态，连接学术与成长。</p></div><div class="head-date">北京时间<strong>{{date}}</strong></div></div>
+          <form class="searchbar" @submit.prevent="search"><TemplateIcon name="search" /><input id="notice-keyword" ref="searchInput" v-model="keyword" type="search" aria-label="搜索校园信息" placeholder="搜索校园信息…" maxlength="100" :disabled="!store.workspace.school" /><kbd class="shortcut">⌘ K</kbd></form>
+          <section class="hero"><div class="hero-content"><div class="hero-kicker"><span class="hero-icon"><TemplateIcon name="bell" /></span>校园公告</div><h2>欢迎来到校园阅览室</h2><p>查看最新通知、学术讲座和竞赛活动，及时掌握重要信息。</p><a class="hero-link" href="#notice-feed">浏览公告 <span>→</span></a></div></section>
+          <details class="feed-settings"><summary>学校、分类与时间<span v-if="isFiltered"> · 已筛选</span></summary><div class="feed-settings-body">
         <label class="school-label" for="school">我的学校</label>
         <input v-if="store.schools.length > 10" v-model="schoolQuery" aria-label="搜索学校" placeholder="输入学校名称筛选" maxlength="80" class="school-search">
         <select
@@ -381,12 +313,8 @@ function schoolChanged(event: Event) {
           </ul>
         </details>
         <p v-if="safeOriginal(store.workspace.school?.announcementUrl || null)" class="small"><a :href="safeOriginal(store.workspace.school?.announcementUrl || null)!" target="_blank" rel="noopener noreferrer">查看目录原始入口 ↗</a></p>
-        <form class="feed-filters" @submit.prevent="search">
-          <label for="notice-keyword" class="filter-label">查找公告</label>
-          <div class="search-row">
-            <input id="notice-keyword" v-model="keyword" maxlength="100" placeholder="标题、正文或摘要关键词" :disabled="!store.workspace.school" />
-            <button class="primary" type="submit" :disabled="!store.workspace.school">查找</button>
-          </div>
+
+          <form class="feed-filters" @submit.prevent="search">
           <details ref="filterDetails" class="filter-options">
             <summary>分类与时间<span v-if="isFiltered"> · 已筛选</span></summary>
             <fieldset>
@@ -410,7 +338,9 @@ function schoolChanged(event: Event) {
             <span>{{ store.filters.keyword ? `“${store.filters.keyword}” · ` : "" }}{{ categoryLabel(store.filters.categories) || "未选择标签（不显示公告）" }}{{ appliedPeriod ? ` · ${appliedPeriod}` : "" }}</span>
             <button class="text-button" type="button" @click="resetFilters">清除筛选</button>
           </div>
-        </form>
+
+
+          </form></div></details>
         <p v-if="store.error" class="error-message" role="alert">
           {{ store.error }}
         </p>
@@ -421,97 +351,30 @@ function schoolChanged(event: Event) {
         </div>
         <p v-else-if="store.refreshingSchool && store.items.length" class="muted small" role="status">已显示保存的公告，正在后台检查学校来源…</p>
         <p class="muted small">浏览和采集不扣次数；生成摘要请使用 AI 阅读，每人每天 3 次。</p>
-        <div class="notice-scroll" :aria-busy="store.loading">
-          <p
-            v-if="store.loading && !store.items.length"
-            class="empty-state"
-            role="status"
-          >
-            正在读取真实公告…
-          </p>
-          <p v-else-if="!store.items.length && store.refreshingSchool" class="empty-state" role="status">还没有匹配的已保存公告，正在检查学校公开来源…</p>
-          <div v-else-if="!store.items.length" class="empty-state">
-            <h3>
-              {{
-                store.workspace.school
-                  ? isFiltered ? "没有匹配的公告" : "当前暂无可显示的公告"
-                  : "先选择你的学校"
-              }}
-            </h3>
-            <p>
-              {{
-                store.error
-                  ? "请排查上方错误后重试。"
-                  : store.workspace.school
-                    ? store.filters.categories?.length === 0 ? "请勾选至少一个标签后查看公告。" : isFiltered ? "试试其他关键词，或重置分类与时间筛选。" : "可稍后刷新，或检查学校来源是否已接入。"
-                    : "学校偏好会保存到本人账号。"
-              }}
-            </p>
-          </div>
-          <article
-            v-for="item in store.items"
-            :key="item.id"
-            class="notice-row"
-            :class="{ selected: store.detail?.id === item.id }"
-          >
-            <button class="notice-open"
-              @click="
-                copied = '';
-                store.openNotice(item.id);
-              "
-            >
-              <div class="notice-meta">
-                <div class="notice-origin"><span class="notice-category">{{ categoryLabel(item.categories) || "公告" }}</span><span class="notice-source">{{ item.sourceName }}</span></div>
-                <time>{{ displayTime(item.publishedAt) }}</time>
-              </div>
-              <h2>{{ item.title }}</h2>
 
-            </button>
-            <div class="notice-quick-actions"><button v-if="store.workspace.capabilities.reminders" class="text-button notice-remind" :disabled="Boolean(addingReminder)||alreadyReminded(item.id)" @click="addReminder(item)">{{alreadyReminded(item.id)?'已加入提醒':addingReminder===item.id?'正在加入…':'加入提醒'}}</button><button class="text-button notice-read" @click="selection = [item]; navigate('ai')">用 AI 生成摘要</button></div>
-            <label class="selection-toggle"><input type="checkbox" :checked="selection.some(row => row.id === item.id)" :disabled="selection.length >= 8 && !selection.some(row => row.id === item.id)" @change="chooseNotice(item)" />用于 AI 阅读</label>
-          </article>
-          <button
-            v-if="store.nextCursor"
-            class="load-more"
-            :disabled="store.loading || store.pendingUpdates"
-            @click="store.loadFeed(true)"
-          >
-            {{ store.loading ? "正在读取…" : "加载更多公告" }}
-          </button>
-        </div>
-        <div class="index-footer">
-          {{
-            store.items.length
-              ? `已读取 ${store.items.length} 条`
-              : "真实云端资料"
-          }}<span>北京时间</span>
-        </div>
-      </section>
-      <section
-        v-if="view === 'feed'"
-        class="reader"
-        aria-label="公告阅读区"
-        :aria-busy="store.detailLoading"
-      >
-        <button
-          v-if="store.detail || store.detailLoading"
-          class="text-button mobile-back"
-          @click="store.closeNotice()"
-        >
-          ← 返回公告
-        </button>
-        <p v-if="store.detailLoading" class="empty-state" role="status">
-          正在打开公告…
-        </p>
-        <article v-else-if="store.detail" class="notice-body">
-          <span class="section-label">公告原文</span>
-          <h1>{{ store.detail.title }}</h1>
-          <p class="byline">
-            {{ store.detail.sourceName }}<br />{{
-              displayTime(store.detail.publishedAt)
-            }}
-            · 北京时间
-          </p>
+          <div class="section-head" id="notice-feed"><h2 class="section-title">校园动态</h2><span class="section-note">已读取 {{store.items.length}} 条<button class="text-button" :disabled="store.loading||store.refreshingSchool||!store.workspace.school" @click="store.refreshSchool()">{{store.refreshingSchool?'检查更新中…':'刷新'}}</button></span></div>
+          <div class="feed notice-scroll" :aria-busy="store.loading">
+            <div v-if="store.loading&&!store.items.length" class="empty" role="status">正在读取真实公告…</div>
+            <div v-else-if="!store.items.length&&store.refreshingSchool" class="empty" role="status">还没有匹配的已保存公告，正在检查学校公开来源…</div>
+            <div v-else-if="!store.items.length" class="empty"><TemplateIcon name="doc" /><span>{{store.workspace.school?(isFiltered?'没有匹配的公告':'当前暂无可显示的公告'):'先选择你的学校'}}</span><p>{{store.error?'请排查上方错误后重试。':store.workspace.school?(store.filters.categories?.length===0?'请勾选至少一个标签后查看公告。':'可修改筛选条件，或稍后刷新。'):'学校偏好会保存到本人账号。'}}</p></div>
+            <article v-for="item in store.items" :key="item.id" class="notice notice-row">
+              <button class="notice-open" @click="copied='';store.openNotice(item.id)"><span class="notice-icon"><TemplateIcon :name="noticeIcon(item)" /></span><span class="notice-copy"><span class="notice-title" role="heading" aria-level="2">{{item.title}}</span><span class="notice-meta"><span class="notice-origin"><span class="notice-category">{{categoryLabel(item.categories)||'公告'}}</span><span class="notice-source">{{item.sourceName}}</span></span></span></span><time class="notice-date" :title="displayTime(item.publishedAt)">{{noticeDate(item.publishedAt)}}<span>{{noticeYear(item.publishedAt)}}</span></time></button>
+              <div class="notice-card-footer"><div class="notice-quick-actions"><button v-if="store.workspace.capabilities.reminders" class="text-button notice-remind" :disabled="Boolean(addingReminder)||alreadyReminded(item.id)" @click="addReminder(item)">{{alreadyReminded(item.id)?'已加入提醒':addingReminder===item.id?'正在加入…':'加入提醒'}}</button><button class="text-button notice-read" @click="selection=[item];navigate('ai')">用 AI 生成摘要</button></div><label class="selection-toggle"><input type="checkbox" :checked="selection.some(row=>row.id===item.id)" :disabled="selection.length>=8&&!selection.some(row=>row.id===item.id)" @change="chooseNotice(item)" />用于 AI 阅读</label></div>
+            </article>
+            <button v-if="store.nextCursor" class="load-more" :disabled="store.loading||store.pendingUpdates" @click="store.loadFeed(true)">{{store.loading?'正在读取…':'加载更多公告'}}</button>
+          </div><div class="bottom-note">真实云端资料 · 北京时间 · 各账号数据独立</div>
+        </template>
+      <BookmarksPanel v-if="view === 'favorites'" :transport="featureTransport" :school-id="store.workspace.school?.id || null" @open="openFavorite" />
+      <ReminderCenter v-if="store.workspace.capabilities.reminders" v-show="view==='reminders'" :key="`reminders:${store.auth?.uid}`" :transport="featureTransport" :school-id="store.workspace.school?.id||null" :school-name="store.workspace.school?.name||''" :revision="reminderRevision" :visible="view==='reminders'" @unread="unreadReminders=$event" @changed="applyReminderState" @open="openReminder" @back="navigate('feed')" />
+      <WebsiteSourcesPanel v-if="view === 'sources'" :key="`${store.auth?.uid}:${store.workspace.school?.id}`" :transport="featureTransport" :school-id="store.workspace.school?.id || null" :school-name="store.workspace.school?.name || ''" @changed="selection=[];store.sourcesChanged()" @back="navigate('feed')" />
+      <AssistantPanel v-if="view === 'ai'" :key="`assistant:${store.auth?.uid}:${store.workspace.school?.id}`" :transport="featureTransport" :school-id="store.workspace.school?.id || null" :selection="selection" @remove="selection = selection.filter(item => item.id !== $event)" @back="navigate('feed')" />
+
+      </main>
+    </div>
+    <section v-if="view==='feed'&&(store.detail||store.detailLoading)" ref="readerDialog" class="overlay show reader" role="dialog" aria-modal="true" aria-label="公告阅读区" tabindex="-1" :aria-busy="store.detailLoading" @click.self="store.closeNotice()" @keydown="readerKeys">
+      <article class="modal notice-body"><p v-if="store.detailLoading" class="empty" role="status">正在打开公告…</p><template v-else-if="store.detail">
+        <div class="modal-top"><div class="modal-badge"><TemplateIcon :name="noticeIcon(store.detail)" /></div><div><div class="modal-cat">{{store.detail.sourceName}}</div><h2>{{store.detail.title}}</h2></div><span class="modal-date">{{displayTime(store.detail.publishedAt)}}</span></div><div class="modal-rule"></div>
+        <div class="modal-body">
           <div class="action-row detail-actions"><button class="secondary" :disabled="bookmarkBusy" @click="saveBookmark">{{ store.detail.bookmarked ? '取消收藏' : '收藏公告' }}</button><button class="text-button" @click="chooseNotice(store.detail)">{{ selection.some(row => row.id === store.detail!.id) ? '从 AI 选择中移除' : '选入 AI 阅读' }}</button><button v-if="selection.length" class="text-button" @click="navigate('ai')">阅读已选 {{ selection.length }} 篇</button></div>
           <NoticeLabelsEditor v-if="store.workspace.capabilities.noticeLabels && store.workspace.school" :key="`${store.auth?.uid}:${store.detail.id}`" :transport="featureTransport" :school-id="store.workspace.school.id" :item-id="store.detail.id" :categories="store.detail.categories" :customized="Boolean(store.detail.categoriesCustomized)" @saved="store.noticeLabelsChanged" />
           <div v-if="store.workspace.capabilities.reminders" class="detail-reminder-action"><button class="secondary" :disabled="Boolean(addingReminder)||alreadyReminded(store.detail.id)" @click="addReminder(store.detail)">{{alreadyReminded(store.detail.id)?'已加入提醒中心':'加入提醒'}}</button><button class="text-button" @click="navigate('reminders')">前往提醒中心设置时间</button></div>
@@ -527,25 +390,9 @@ function schoolChanged(event: Event) {
             {{ store.detail.text || "尚未提供正文，请查看公告原文。" }}
           </div>
           <p class="attachment-note">{{ store.detail.attachmentNote }}</p>
-        </article>
-        <div v-else class="reader-empty">
-          <svg viewBox="0 0 64 64" aria-hidden="true">
-            <path
-              d="M9 13c9-3 17-2 23 4 6-6 14-7 23-4v39c-9-3-17-2-23 3-6-5-14-6-23-3V13Z"
-            />
-            <path d="M32 17v38M16 25h9m-9 9h9m14-9h9m-9 9h9" />
-          </svg>
-          <h2>选一条消息，展开阅读</h2>
-          <p>原文、来源和已有摘要会显示在这里。</p>
-        </div>
-      </section>
-      <BookmarksPanel v-if="view === 'favorites'" :transport="featureTransport" :school-id="store.workspace.school?.id || null" @open="openFavorite" />
-      <ReminderCenter v-if="store.workspace.capabilities.reminders" v-show="view==='reminders'" :key="`reminders:${store.auth?.uid}`" :transport="featureTransport" :school-id="store.workspace.school?.id||null" :school-name="store.workspace.school?.name||''" :revision="reminderRevision" :visible="view==='reminders'" @unread="unreadReminders=$event" @changed="applyReminderState" @open="openReminder" @back="navigate('feed')" />
-      <WebsiteSourcesPanel v-if="view === 'sources'" :key="`${store.auth?.uid}:${store.workspace.school?.id}`" :transport="featureTransport" :school-id="store.workspace.school?.id || null" :school-name="store.workspace.school?.name || ''" @changed="selection=[];store.sourcesChanged()" @back="navigate('feed')" />
-      <AssistantPanel v-if="view === 'ai'" :key="`assistant:${store.auth?.uid}:${store.workspace.school?.id}`" :transport="featureTransport" :school-id="store.workspace.school?.id || null" :selection="selection" @remove="selection = selection.filter(item => item.id !== $event)" @back="navigate('feed')" />
-    </main>
-    <footer v-if="!store.workspace" class="page-footer">
-      <span>校园阅览室</span><span>阅读有来源，重要信息不遗漏。</span>
-    </footer>
+
+        </div></template><div class="modal-actions"><button class="close-btn mobile-back" @click="store.closeNotice()">返回公告</button></div>
+      </article>
+    </section>
   </div>
 </template>

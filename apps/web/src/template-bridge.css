@@ -1,0 +1,66 @@
+/* Business controls absent from the supplied prototypes reuse their existing palette.
+   Template styles are activated unchanged by page-template.ts. */
+:root{font-size:16px;--blue:var(--purple);--accent-soft:var(--purple-soft,var(--soft));}
+body{line-height:normal;}
+button:disabled{cursor:not-allowed;opacity:.55;}
+button:hover:not(:disabled){filter:none;}
+button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible{outline:2px solid var(--purple);outline-offset:3px;}
+.brand{font-size:inherit;font-weight:400;letter-spacing:normal;text-decoration:none;}
+.login-template .brand{color:inherit;}
+.brandmark svg{color:inherit;stroke-width:1.7;}
+.login-template .register .switch-mode{color:var(--purple);font-weight:600;margin-left:4px;}
+.login-template .forgot{border:0;background:none;padding:0;font-family:inherit;cursor:pointer;}
+.login-template .copyright{text-align:center;}
+.login-template .form-wrap{min-width:0;}
+.login-template .error-message,.login-template .auth-feedback,.login-template .setup-note{font-size:12px;line-height:1.8;padding:10px 12px;margin:0 0 18px;border:1px solid var(--line);border-radius:10px;background:var(--soft);color:var(--purple-dark);overflow-wrap:anywhere;}
+.login-template .setup-note p{color:inherit;}
+.login-template .setup-note ul{padding-left:18px;}
+.login-template .account-help{font-size:11px;line-height:1.8;color:var(--muted);margin:14px 0 18px;}
+.login-template .registration-sent h3{font-size:21px;}
+.login-template .registration-sent p{font-size:13px;line-height:1.9;color:var(--muted);}
+.login-template .registration-sent .submit{margin-top:15px;}
+.login-template .auth-back{display:block;margin:16px auto 0;}
+.portal-template .nav-link{border:0;width:100%;text-align:left;font-family:inherit;}
+.portal-template .nav-link:not(.active){background:transparent;}
+.portal-template .nav-link:not(.active):hover{background:#faf8fd;color:var(--purple);}
+.portal-template .notice-row{flex-wrap:wrap;min-width:0;}
+.portal-template .notice-open{display:flex;align-items:center;width:100%;min-width:0;gap:inherit;border:0;padding:0;background:transparent;color:inherit;text-align:left;cursor:pointer;}
+.portal-template .notice-title{display:block;}
+.portal-template .notice-origin{display:flex;align-items:center;flex-wrap:wrap;gap:8px;}
+.portal-template .notice-card-footer{display:flex;align-items:center;justify-content:space-between;gap:8px 16px;flex-wrap:wrap;width:100%;padding-left:56px;}
+.portal-template .notice-quick-actions{display:flex;align-items:center;gap:14px;padding:0;}
+.portal-template .notice-quick-actions .text-button{font-size:11px;margin:0;padding:0;}
+.portal-template .selection-toggle{font-size:10px;color:var(--muted);padding:0;}
+.portal-template .selection-toggle input{accent-color:var(--purple);width:13px;height:13px;}
+.portal-template .section-note{display:flex;align-items:center;gap:12px;}
+.portal-template .text-button{color:var(--purple);background:none;border:0;font-family:inherit;}
+.portal-template .feed-settings{position:relative;margin:0 0 20px;font-size:12px;color:var(--muted);}
+.portal-template .feed-settings summary{cursor:pointer;color:var(--purple);}
+.portal-template .feed-settings-body{margin-top:12px;background:var(--paper);border:1px solid var(--line);border-radius:13px;padding:18px;}
+.portal-template .feed-settings-body select,.portal-template .feed-settings-body input:not([type=checkbox]){width:100%;font-size:13px;padding:10px 12px;color:var(--ink);background:var(--paper);border:1px solid var(--line);border-radius:10px;}
+.portal-template .feed-settings-body .school-label,.portal-template .feed-settings-body .filter-label{display:block;margin:12px 0 7px;font-size:12px;}
+.portal-template .feed-settings-body .category-option{font-size:12px;}
+.portal-template .feed-settings-body .filter-options{margin-top:15px;}
+.portal-template .feed-settings-body .school-sources,.portal-template .feed-update{background:var(--purple-soft);border-color:var(--purple-line);color:var(--purple-dark);}
+.portal-template .feed-settings-body .school-sources summary{color:var(--purple);}
+.portal-template .feed-settings-body .small,.portal-template .muted.small{font-size:11px;color:var(--muted);}
+.portal-template .load-more{width:100%;border:1px solid var(--line);border-radius:10px;background:var(--paper);color:var(--purple);padding:13px;}
+.portal-template .error-message{background:#fff3f5;color:#c17790;border:1px solid var(--line);border-radius:10px;}
+.portal-template .reader{outline:0;}
+.portal-template .modal{max-height:calc(100dvh - 40px);overflow:auto;margin:0;}
+.portal-template .modal-top>div:nth-child(2){min-width:0;}
+.portal-template .modal-top h2{overflow-wrap:anywhere;}
+.portal-template .modal-badge{flex-shrink:0;}
+.portal-template .modal-date{flex-shrink:0;max-width:100px;line-height:1.7;}
+.portal-template .modal .original-text{font-size:inherit;line-height:inherit;color:inherit;white-space:pre-wrap;overflow-wrap:anywhere;margin:20px 0;}
+.portal-template .modal-body p{color:inherit;}
+.portal-template .modal .original-url{color:var(--muted);font-size:11px;}
+.portal-template .modal .secondary{border:1px solid var(--purple-line);background:var(--purple-soft);color:var(--purple);}
+.portal-template .modal .notice-label-editor{border-color:var(--line);}
+.portal-template .modal .notice-label-editor>summary{color:var(--purple);}
+.portal-template .modal .mobile-back{display:inline-flex;margin:0;}
+.portal-template .modal .original-source{font-size:12px;}
+.portal-template .modal .attachment-note{font-size:11px;color:var(--muted);}
+.portal-template .feature-surface{padding:0;overflow:visible;background:var(--paper);border-radius:13px;}
+@media(max-width:520px){.portal-template .notice-card-footer{padding-left:49px;}.portal-template .notice-card-footer .selection-toggle{width:100%;}.portal-template .feed-settings-body{padding:14px;}.portal-template .modal-top{align-items:flex-start;flex-wrap:wrap;}.portal-template .modal-date{max-width:none;}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{transition:none!important;animation:none!important;}}
