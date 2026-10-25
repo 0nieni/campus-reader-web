@@ -46,9 +46,16 @@ function readerKeys(event:KeyboardEvent){if(event.key==='Escape'){event.preventD
 async function searchShortcut(event:KeyboardEvent){if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='k'&&store.workspace&&!accountOpen.value){event.preventDefault();if(view.value!=='feed')navigate('feed');await nextTick();searchInput.value?.focus();}}
 const authMode=ref<'login'|'register'>('login');
 const canRegister=Boolean(transport.signUp);
+let sourceFeatureSession=0;
+watch(()=>store.auth?.uid,()=>{sourceFeatureSession++;},{flush:'sync'});
 const featureTransport: Transport = { ...transport, call: (async (action, input) => {
-  try { return await transport.call(action, input); }
-  catch (caught) { if (caught instanceof ClientError && ["UNAUTHENTICATED", "FORBIDDEN"].includes(caught.code)) store.clear(); throw caught; }
+  const ticket=sourceFeatureSession;
+  try {
+    const result=await transport.call(action,input);
+    if(['sources.feedVisibility','sources.feedVisibilityAll'].includes(action)&&ticket===sourceFeatureSession)await store.sourcesChanged((input as {schoolId:string}).schoolId);
+    return result;
+  }
+  catch (caught) { if (ticket===sourceFeatureSession&&caught instanceof ClientError && ["UNAUTHENTICATED", "FORBIDDEN"].includes(caught.code)) store.clear(); throw caught; }
 }) as Transport["call"] };
 const view = ref<"feed" | "favorites" | "ai" | "sources" | "reminders">("feed"), selection = ref<Notice[]>([]), bookmarkBusy = ref(false);
 const unreadReminders=ref(0),reminderRevision=ref(0);
@@ -79,7 +86,27 @@ function chooseNotice(item: Notice) {
   else if (selection.value.length < 8) selection.value.push(item);
   else store.error = "一次最多选择 8 篇公告。";
 }
-function navigate(target: "feed" | "favorites" | "ai" | "sources" | "reminders") { store.closeNotice(); view.value = target; }
+let sourceNavigationEpoch=0;
+watch(()=>store.auth?.uid,()=>{sourceNavigationEpoch++;},{flush:'sync'});
+function navigate(target: "feed" | "favorites" | "ai" | "sources" | "reminders") { sourceNavigationEpoch++;store.closeNotice(); view.value = target; }
+async function openSourceSchool(schoolId:string,source?:{id:string;name:string}) {
+  const uid=store.auth?.uid,ticket=sourceNavigationEpoch;
+  if(store.workspace?.school?.id!==schoolId)await store.selectSchool(schoolId);
+  if(!uid||store.auth?.uid!==uid||ticket!==sourceNavigationEpoch)return;
+  if(store.workspace?.school?.id!==schoolId)throw new ClientError('SCHOOL_SWITCH_FAILED',store.error||'切换学校失败，请稍后重试。');
+  if(source||store.filters.sourceId){
+    const {sourceId,...rest}=store.filters;sourceFilterName.value=source?.name||'';
+    await store.applyFilters(source?{...rest,sourceId:source.id}:rest);
+    if(store.auth?.uid!==uid||ticket!==sourceNavigationEpoch)return;
+  }
+  selection.value=[];navigate('feed');
+}
+function sourceCenterChanged(kind?:'visibility') {
+  // Visibility mutations invalidate their own school's cache in the stable
+  // transport above, including when the source page has already unmounted.
+  if(kind==='visibility')return;
+  selection.value=[];void store.sourcesChanged();
+}
 async function openReminder(event:ReminderNotification){
   const uid=store.auth?.uid;navigate('feed');
   if(store.workspace?.school?.id!==event.schoolId)await store.selectSchool(event.schoolId);
@@ -120,11 +147,13 @@ function receiveConfirmationLink(){
   history.replaceState(null,'',location.pathname+location.search);
 }
 const keyword = ref("");
+const sourceFilterName=ref('');
+watch(()=>store.workspace?.school?.id,()=>{sourceFilterName.value='';});
 const selectedCategories = ref<string[]>([...noticeCategories]);
 const period = ref<NonNullable<FeedFilters["period"]>>("all");
 const filterDetails = ref<HTMLDetailsElement | null>(null);
 const appliedPeriod = computed(() => ({ "7d": "最近 7 天", "30d": "最近 30 天", "90d": "最近 90 天", all: "" })[store.filters.period || "all"]);
-const isFiltered = computed(() => Boolean(store.filters.keyword || (store.filters.categories && store.filters.categories.length < noticeCategories.length) || (store.filters.period && store.filters.period !== "all")));
+const isFiltered = computed(() => Boolean(store.filters.sourceId||store.filters.keyword || (store.filters.categories && store.filters.categories.length < noticeCategories.length) || (store.filters.period && store.filters.period !== "all")));
 function categoryLabel(categories?: string[]) {
   return categories?.map(category => categoryNames[category] || category).join(" · ") || "";
 }
@@ -135,7 +164,7 @@ watch(() => store.auth?.uid, () => {
 });
 async function search() {
   if (filterDetails.value) filterDetails.value.open = false;
-  await store.applyFilters({ keyword: keyword.value.trim(), categories: selectedCategories.value, period: period.value });
+  await store.applyFilters({ ...store.filters,keyword: keyword.value.trim(), categories: selectedCategories.value, period: period.value });
 }
 async function filterCategories(value?:string[]) {
   if(value)selectedCategories.value=[...value];
@@ -147,6 +176,7 @@ async function resetFilters() {
   period.value = "all";
   await store.applyFilters({});
 }
+async function clearSourceFilter(){const {sourceId,...rest}=store.filters;sourceFilterName.value='';await store.applyFilters(rest);}
 const original = computed(() =>
   safeOriginal(store.detail?.originalUrl || null),
 );
@@ -272,6 +302,7 @@ function schoolChanged(event: Event) {
           <div class="main-head"><div><div class="eyebrow">校园门户 <span>/</span> <span>{{pageName}}</span></div><h1 class="page-title" id="notice-title">首页</h1><p class="page-desc">发现校园动态，连接学术与成长。</p></div><div class="head-date">北京时间<strong>{{date}}</strong></div></div>
           <form class="searchbar" @submit.prevent="search"><TemplateIcon name="search" /><input id="notice-keyword" ref="searchInput" v-model="keyword" type="search" aria-label="搜索校园信息" placeholder="搜索校园信息…" maxlength="100" :disabled="!store.workspace.school" /><kbd class="shortcut">⌘ K</kbd></form>
           <section class="hero"><div class="hero-content"><div class="hero-kicker"><span class="hero-icon"><TemplateIcon name="bell" /></span>校园公告</div><h2>欢迎来到校园阅览室</h2><p>查看最新通知、学术讲座和竞赛活动，及时掌握重要信息。</p><a class="hero-link" href="#notice-feed">浏览公告 <span>→</span></a></div></section>
+          <div v-if="store.filters.sourceId" class="feed-update source-filter-banner" role="status"><span>仅查看：{{sourceFilterName||store.filters.sourceId}}。主页显示设置不变。</span><button class="text-button" @click="clearSourceFilter">查看全部来源</button></div>
           <details class="feed-settings"><summary>分类与时间<span v-if="isFiltered"> · 已筛选</span></summary><div class="feed-settings-body">
           <form class="feed-filters" @submit.prevent="search">
           <details ref="filterDetails" class="filter-options">
@@ -316,7 +347,7 @@ function schoolChanged(event: Event) {
           <div class="feed notice-scroll" :aria-busy="store.loading">
             <div v-if="store.loading&&!store.items.length" class="empty" role="status">正在读取真实公告…</div>
             <div v-else-if="!store.items.length&&store.refreshingSchool" class="empty" role="status">还没有匹配的已保存公告，正在检查学校公开来源…</div>
-            <div v-else-if="!store.items.length" class="empty"><TemplateIcon name="doc" /><span>{{store.workspace.school?(isFiltered?'没有匹配的公告':'当前暂无可显示的公告'):'先选择你的学校'}}</span><button v-if="!store.workspace.school" class="text-button" @click="openAccount">打开个人工作区选择学校</button><p>{{store.error?'请排查上方错误后重试。':store.workspace.school?(store.filters.categories?.length===0?'请勾选至少一个标签后查看公告。':'可修改筛选条件，或稍后刷新。'):'学校偏好会保存到本人账号。'}}</p></div>
+            <div v-else-if="!store.items.length" class="empty"><TemplateIcon name="doc" /><span>{{store.workspace.school?(isFiltered?'没有匹配的公告':'当前暂无可显示的公告'):'先选择你的学校'}}</span><button v-if="!store.workspace.school" class="text-button" @click="openAccount">打开个人工作区选择学校</button><p>{{store.error?'请排查上方错误后重试。':store.workspace.school?(store.filters.categories?.length===0?'请勾选至少一个标签后查看公告。':'可修改筛选条件，或稍后刷新。'):'学校偏好会保存到本人账号。'}}</p><div v-if="store.hiddenSourceCount&&store.workspace.capabilities.websiteSources" class="hidden-sources-hint"><p>有 {{store.hiddenSourceCount}} 个来源已关闭主页显示，可前往来源中心检查设置。</p><button class="text-button" @click="navigate('sources')">管理来源</button></div></div>
             <article v-for="item in store.items" :key="item.id" class="notice notice-row">
               <button class="notice-open" @click="copied='';store.openNotice(item.id)"><span class="notice-icon"><TemplateIcon :name="noticeIcon(item)" /></span><span class="notice-copy"><span class="notice-title" role="heading" aria-level="2">{{item.title}}</span><span class="notice-meta"><span class="notice-origin"><span class="notice-category">{{categoryLabel(item.categories)||'公告'}}</span><span class="notice-source">{{item.sourceName}}</span></span></span></span><time class="notice-date" :title="displayTime(item.publishedAt)">{{noticeDate(item.publishedAt)}}<span>{{noticeYear(item.publishedAt)}}</span></time></button>
               <div class="notice-card-footer"><div class="notice-quick-actions"><button v-if="store.workspace.capabilities.reminders" class="text-button notice-remind" :disabled="Boolean(addingReminder)||alreadyReminded(item.id)" @click="addReminder(item)">{{alreadyReminded(item.id)?'已加入提醒':addingReminder===item.id?'正在加入…':'加入提醒'}}</button><button class="text-button notice-read" :disabled="selection.some(row=>row.id===item.id)" @click="addToAssistant(item)">{{selection.some(row=>row.id===item.id)?'已加入ai搭子':'加入ai搭子'}}</button></div></div>
@@ -326,7 +357,7 @@ function schoolChanged(event: Event) {
         </template>
       <BookmarksPanel v-if="view === 'favorites'" :transport="featureTransport" :school-id="store.workspace.school?.id || null" @open="openFavorite" />
       <ReminderCenter v-if="store.workspace.capabilities.reminders" v-show="view==='reminders'" :key="`reminders:${store.auth?.uid}`" :transport="featureTransport" :school-id="store.workspace.school?.id||null" :school-name="store.workspace.school?.name||''" :revision="reminderRevision" :visible="view==='reminders'" @unread="unreadReminders=$event" @changed="applyReminderState" @open="openReminder" @back="navigate('feed')" />
-      <WebsiteSourcesPanel v-if="view === 'sources'" :key="`${store.auth?.uid}:${store.workspace.school?.id}`" :transport="featureTransport" :school-id="store.workspace.school?.id || null" :school-name="store.workspace.school?.name || ''" @changed="selection=[];store.sourcesChanged()" @back="navigate('feed')" />
+      <WebsiteSourcesPanel v-if="view === 'sources'" :key="`${store.auth?.uid}:${store.workspace.school?.id}`" :transport="featureTransport" :school-id="store.workspace.school?.id || null" :school-name="store.workspace.school?.name || ''" :open-school="openSourceSchool" @changed="sourceCenterChanged" @back="navigate('feed')" />
       <AssistantPanel v-if="view === 'ai'" :key="`assistant:${store.auth?.uid}:${store.workspace.school?.id}`" :transport="featureTransport" :school-id="store.workspace.school?.id || null" :selection="selection" :provider-change="providerChange" @remove="selection = selection.filter(item => item.id !== $event)" @back="navigate('feed')" />
 
       </main>
@@ -404,6 +435,17 @@ function schoolChanged(event: Event) {
             {{ store.detail.text || "尚未提供正文，请查看公告原文。" }}
           </div>
           <p class="attachment-note">{{ store.detail.attachmentNote }}</p>
+          <section v-if="store.detail.materialArchive" class="material-files" aria-label="已保存的资料">
+            <h2>资料库</h2>
+            <p class="small muted">最早到期：{{ displayTime(store.detail.materialArchive.expiresAt) }} · 北京时间。到期后按来源许可重新采集。</p>
+            <ul>
+              <li v-for="file in store.detail.materialArchive.files" :key="file.id">
+                <a v-if="file.available && store.workspace.school" :href="`/.netlify/functions/material-file?schoolId=${encodeURIComponent(store.workspace.school.id)}&itemId=${encodeURIComponent(store.detail.id)}&fileId=${encodeURIComponent(file.id)}`">{{ file.filename }} ↓</a>
+                <span v-else>{{ file.filename }}</span>
+                <p class="small muted">{{ file.message }}<template v-if="file.expiresAt"> · 保存至 {{ displayTime(file.expiresAt) }}</template></p>
+              </li>
+            </ul>
+          </section>
 
         </div></template><div class="modal-actions"><button class="close-btn mobile-back" @click="store.closeNotice()">返回公告</button></div>
       </article>

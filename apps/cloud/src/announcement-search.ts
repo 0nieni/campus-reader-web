@@ -54,7 +54,7 @@ async function limitedJson(response: Response, signal: AbortSignal): Promise<unk
 
 /** Search snippets are discovery hints only. Callers must read and re-authorize
  * each candidate through school-pages before treating it as body evidence. */
-export async function searchAnnouncements(school: SearchSchool, query: string, options: { fetch?: typeof fetch; apiKey?: string } = {}): Promise<SearchResult> {
+export async function searchAnnouncements(school: SearchSchool, query: string, options: { fetch?: typeof fetch; apiKey?: string; scope?: 'school' | 'web' } = {}): Promise<SearchResult> {
   const apiKey = (options.apiKey ?? process.env.TAVILY_API_KEY ?? '').trim();
   if (!apiKey) return { state: 'unconfigured', message: '联网搜索未配置，继续使用已有公告。', candidates: [] };
   const domains = [...new Set([school.homepage, school.announcementUrl].flatMap(value => {
@@ -65,7 +65,8 @@ export async function searchAnnouncements(school: SearchSchool, query: string, o
     const host = url.hostname;
     return [host.endsWith('.edu.cn') ? host.split('.').slice(-3).join('.') : host];
   }))];
-  if (!domains.length) return failed();
+  const web = options.scope === 'web';
+  if (!web && !domains.length) return failed();
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
@@ -77,8 +78,8 @@ export async function searchAnnouncements(school: SearchSchool, query: string, o
         method: 'POST', redirect: 'error', signal: controller.signal,
         headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json', accept: 'application/json' },
         body: JSON.stringify({
-          query: `${school.name.trim()} ${query.trim()}`.slice(0, 500),
-          include_domains: domains, include_domains_mode: 'restrict', search_depth: 'basic', topic: 'general',
+          query: (web ? query.trim().replace(/本校|我们学校/g, school.name.trim()) : `${school.name.trim()} ${query.trim()}`).slice(0, 500),
+          ...(!web ? { include_domains: domains, include_domains_mode: 'restrict' } : {}), search_depth: 'basic', topic: 'general',
           max_results: 5, auto_parameters: false, include_answer: false, include_raw_content: false,
         }),
       });
@@ -89,7 +90,7 @@ export async function searchAnnouncements(school: SearchSchool, query: string, o
       for (const item of data.results) {
         if (!item || typeof item !== 'object' || typeof item.url !== 'string' || typeof item.title !== 'string' || !item.title.trim()) continue;
         const url = safeUrl(item.url);
-        if (!url || !domains.some(domain => url.hostname === domain || url.hostname.endsWith('.' + domain)) || seen.has(url.href)) continue;
+        if (!url || (!web && !domains.some(domain => url.hostname === domain || url.hostname.endsWith('.' + domain))) || seen.has(url.href)) continue;
         seen.add(url.href);
         candidates.push({ url: url.href, title: item.title.trim().slice(0, 220), snippet: typeof item.content === 'string' ? item.content.trim().slice(0, 2000) : '' });
         if (candidates.length === 5) break;
@@ -99,3 +100,6 @@ export async function searchAnnouncements(school: SearchSchool, query: string, o
   } catch { return failed(); }
   finally { clearTimeout(timer); }
 }
+
+export const searchPublicWeb = (school: SearchSchool, query: string, options: { fetch?: typeof fetch; apiKey?: string } = {}) =>
+  searchAnnouncements(school, query, { ...options, scope: 'web' });

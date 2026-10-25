@@ -145,6 +145,7 @@ export function cloudRepository(db: Database): Repository {
         ]),
       ]);
       const predicates = [{ status: "published" }, queryItem(scope), retained];
+      if(filters.sourceId)predicates.push(command.and([{sourceId:filters.sourceId}]));
       if (filters.categories?.length) predicates.push(command.or([
         { category: command.in(filters.categories) },
         { categories: command.in(filters.categories) },

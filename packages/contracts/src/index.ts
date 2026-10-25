@@ -11,7 +11,16 @@ export interface School {
   homepage?: string;
   tags?: string[];
 }
-export interface SchoolSync { state: 'ready' | 'checking' | 'unavailable'; count: number; checkedAt: string | null; message: string; changed?:boolean; coverage?:string; sources?:Array<{name:string;url:string;state:'ready'|'unavailable';count:number;message:string}> }
+export interface SourceCollectionStats {newCount:number;existingCount:number;failedSources:number;skippedCount:number}
+export interface SourceDisplayState {total:number;shown:number;hidden:number}
+export interface SourceCatalogueEntry {id:string;name:string;kind:'school'|'public'|'personal';schoolId:string;url:string|null;categories:string[];showInFeed:boolean;collectable:boolean;state:'unchecked'|'ready'|'unavailable';checkedAt:string|null;count:number|null;message:string;verifiedAt?:string;nextRefreshAt?:string|null;errorCode?:string|null}
+export interface SourceCatalogue {sources:SourceCatalogueEntry[];total:number;shown:number;hidden:number}
+export interface SchoolSync { state: 'ready' | 'checking' | 'unavailable'; count: number; checkedAt: string | null; message: string; changed?:boolean; coverage?:string;stats?:SourceCollectionStats; sources?:Array<{name:string;url:string;state:'ready'|'unavailable';count:number;message:string;errorCode?:string|null;stats?:SourceCollectionStats}> }
+export interface SchoolSourceCatalogue {
+  school: School;
+  coverage: string;
+  sources: Array<{id:string;name:string;url:string;state:'unchecked'|'ready'|'unavailable';checkedAt:string|null;count:number|null;message:string;showInFeed?:boolean;errorCode?:string|null;stats?:SourceCollectionStats;nextRefreshAt?:string|null}>;
+}
 export interface SchoolRequest { id: string; state: 'pending' | 'submitted' | 'unknown'; message: string }
 export interface WorkspaceSession {
   identity: AuthSession;
@@ -30,14 +39,17 @@ export interface Notice {
 export interface NoticePage {
   items: Notice[];
   nextCursor: string | null;
+  hiddenSourceCount?:number;
 }
 export const noticeCategories = ["school", "college", "competition", "academic", "activity", "scholarship", "mail"] as const;
 export interface FeedFilters {
+  sourceId?:string;
   keyword?: string;
   categories?: string[];
   period?: "7d" | "30d" | "90d" | "all";
 }
 export interface NoticeDetail extends Notice {
+  materialArchive?: {expiresAt:string;attachmentNote:string;version:string;files:Array<{id:string;filename:string;kind:'article'|'attachment';state:string;message:string;collectedAt:string|null;expiresAt:string|null;characters:number;available:boolean}>};
   defaultCategories?: string[];
   categoriesCustomized?: boolean;
   bookmarked?: boolean;
@@ -47,7 +59,7 @@ export interface NoticeDetail extends Notice {
 }
 export interface Favorite { itemId: string; schoolId: string; schoolName: string; savedAt: string; notice: Notice | null }
 export interface WebsiteSourceInput {name:string;entryUrl:string;type:'html_list'|'html_detail'|'rss'|'json_api';categories:string[];intervalMinutes:number;selectors:Record<string,string>;allowAi:boolean;authorized:boolean}
-export interface WebsiteSource extends WebsiteSourceInput {id:string;enabled:boolean;lastSuccessAt:string|null;message:string;count:number}
+export interface WebsiteSource extends WebsiteSourceInput {id:string;enabled:boolean;lastSuccessAt:string|null;message:string;count:number;showInFeed?:boolean;nextRefreshAt?:string|null;lastAttemptAt?:string|null;lastErrorCode?:string|null;lastCollection?:SourceCollectionStats|null}
 export interface AiConnection { provider: "deepseek" | "openai"; model: string; apiKey: string }
 export type { AiProviderProtocol, AiProviderRef, AiSavedProvider, AiProviderSelection, AiProviderState, AiProviderSave } from './ai-providers';
 import type { AiProviderActions, AiProviderRef } from './ai-providers';
@@ -65,7 +77,7 @@ export interface AiStartInput {
   schoolId: string; itemIds: string[]; requestId: string; service: "official" | "byok";
   provider?: "deepseek" | "openai"; model?: string; providerProfile?: AiProviderRef; task: "summary" | "outline" | "answer"; question?: string; fingerprint?: string;
 }
-export type { AiPreferences, RecommendedNotice, AiRecommendations, ChatReference, AiChatTurn, AiConversation } from './assistant';
+export type { AiPreferences, AiMemorySlot, AiMemoryItem, AiMemoryState, RecommendedNotice, AiRecommendations, ChatReference, AiChatTurn, AiConversation } from './assistant';
 import type { AssistantActions } from './assistant';
 export interface ReminderChannels {browser:boolean;email:boolean}
 export interface ReminderInput { id?:string; schoolId:string; itemId:string; label:string; dueAt:string; days:number[];channels?:ReminderChannels }
@@ -95,9 +107,14 @@ export interface GatewayActions extends AssistantActions, AiProviderActions {
   'reminders.email.test':{input:Record<string,never>;output:ReminderEmailState};
   'reminders.email.enable':{input:{enabled:boolean};output:ReminderEmailState};
   "sources.list":{input:{schoolId:string};output:{sources:WebsiteSource[]}};
+  "sources.catalogue":{input:{schoolId:string};output:SourceCatalogue};
+  "sources.public.refresh":{input:{schoolId:string;sourceId:string};output:{count:number;message:string;stats:SourceCollectionStats}};
+  "sources.feedVisibility":{input:{schoolId:string;sourceId:string;visible:boolean};output:{visible:boolean}};
+  "sources.displayState":{input:{schoolId:string};output:SourceDisplayState};
+  "sources.feedVisibilityAll":{input:{schoolId:string;visible:boolean};output:SourceDisplayState};
   "sources.save":{input:{schoolId:string;sourceId?:string;source:WebsiteSourceInput};output:{id:string}};
   "sources.test":{input:{schoolId:string;sourceId:string};output:{count:number;titles:string[];message:string}};
-  "sources.refresh":{input:{schoolId:string;sourceId:string};output:{count:number;message:string}};
+  "sources.refresh":{input:{schoolId:string;sourceId:string};output:{count:number;message:string;stats?:SourceCollectionStats}};
   "sources.toggle":{input:{schoolId:string;sourceId:string;enabled:boolean};output:{enabled:boolean}};
   "sources.remove":{input:{schoolId:string;sourceId:string};output:{removed:boolean}};
   "session.get": { input: Record<string, never>; output: WorkspaceSession };
@@ -106,6 +123,7 @@ export interface GatewayActions extends AssistantActions, AiProviderActions {
     output: { schools: School[]; nextCursor: string | null };
   };
   "school.select": { input: { schoolId: string }; output: WorkspaceSession };
+  "school.sources": { input: { schoolId: string }; output: SchoolSourceCatalogue };
   "school.refresh": { input: { schoolId: string }; output: SchoolSync };
   "school.request": { input: { schoolName: string }; output: SchoolRequest };
   "feed.list": {

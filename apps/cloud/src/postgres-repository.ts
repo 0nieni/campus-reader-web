@@ -3,6 +3,7 @@ import type { Repository, ItemRow } from './repository';
 import type { SqlPool } from './postgres-storage';
 import { isPrivate, sourceVisible, type Resource } from './scope';
 import { reject } from './errors';
+import {hiddenFeedSources,saveFeedVisibility,feedDisplayState,saveAllFeedVisibility,feedSourceSelection} from './source-feed-preferences';
 const bjtu: School = { id: 'bjtu', name: '北京交通大学', status: 'ready' };
 // Shared by feed queries and new-announcement watches. Parameters 1..4 are
 // owner, school, public sources and private sources, respectively.
@@ -16,6 +17,7 @@ export const visibleItemsSql = `((body->>'ownerOpenid'=$1 AND (body->>'importKin
   AND (body->>'scope'='global' OR (body->>'scope'='school' AND body->'schoolIds' ? $2)
     OR (NOT(body ? 'scope') AND body->>'sourceId'=ANY($3::text[])))))`;
 export function postgresRepository(pool: SqlPool): Repository {
+  const payload=(row:ItemRow)=>row.materialExpiresAt&&Date.parse(row.materialExpiresAt)<=Date.now()?{...row,contentText:undefined,materialArchive:undefined}:row;
   const one = async (collection: string, id: string) => {
     const { rows } = await pool.query('SELECT body FROM campus_documents WHERE collection=$1 AND id=$2', [collection, id]);
     return rows[0] ? { ...rows[0].body, _id: id } : null;
@@ -31,6 +33,15 @@ export function postgresRepository(pool: SqlPool): Repository {
     async selectSchool(owner, schoolId) {
       await pool.query("INSERT INTO campus_documents(collection,id,body) VALUES('user_profiles',$1,$2::jsonb) ON CONFLICT(collection,id) DO UPDATE SET body=campus_documents.body || EXCLUDED.body", [owner, JSON.stringify({ _id: owner, selectedSchoolId: schoolId, updatedAt: new Date().toISOString() })]);
     },
+    hiddenFeedSources:(owner,schoolId)=>hiddenFeedSources(pool,owner,schoolId),
+    async feedSourceSelection(owner,schoolId){const school=await this.school(schoolId);if(!school)reject('SCHOOL_NOT_FOUND','学校不在目录中。');return feedSourceSelection(pool,school,owner);},
+    async sourceDisplayState(owner,schoolId){const school=await this.school(schoolId);if(!school)reject('SCHOOL_NOT_FOUND','学校不在目录中。');return feedDisplayState(pool,school,owner);},
+    async setAllSourceFeedVisibility(owner,schoolId,visible){const school=await this.school(schoolId);if(!school)reject('SCHOOL_NOT_FOUND','学校不在目录中。');return saveAllFeedVisibility(pool,school,owner,visible);},
+    async setSourceFeedVisibility(owner,schoolId,sourceId,visible){
+      const school=await this.school(schoolId);
+      if(!school)reject('SCHOOL_NOT_FOUND','学校不在目录中。');
+      return saveFeedVisibility(pool,school,owner,sourceId,visible);
+    },
     async scope(schoolId, ownerId) {
       const { rows } = await pool.query("SELECT id,body FROM campus_documents WHERE collection='sources' ORDER BY id LIMIT 2001");
       if (rows.length > 2000) reject('SOURCE_LIMIT_EXCEEDED', '来源目录超过当前读取范围。');
@@ -38,7 +49,7 @@ export function postgresRepository(pool: SqlPool): Repository {
       for (const row of rows) { const resource = row.body as Resource; if (isPrivate(resource)) scope.privateSourceIds.push(row.id); else if (sourceVisible(resource, schoolId, ownerId)) scope.publicSourceIds.push(row.id); }
       return scope;
     },
-    async item(id) { return await one('items', id) as ItemRow | null; },
+    async item(id) { const row=await one('items', id) as ItemRow|null;return row?payload(row):null; },
     async personalize(row, owner) {
       const {rows} = await pool.query('SELECT categories FROM campus_notice_labels WHERE owner_id=$1 AND item_id=$2',[owner,row._id]);
       return rows[0] ? {...row,personalCategories:rows[0].categories} : row;
@@ -47,19 +58,22 @@ export function postgresRepository(pool: SqlPool): Repository {
       if (categories === null) { await pool.query('DELETE FROM campus_notice_labels WHERE owner_id=$1 AND item_id=$2',[owner,itemId]); return; }
       await pool.query('INSERT INTO campus_notice_labels(owner_id,item_id,categories) VALUES($1,$2,$3::jsonb) ON CONFLICT(owner_id,item_id) DO UPDATE SET categories=EXCLUDED.categories,updated_at=now()',[owner,itemId,JSON.stringify(categories)]);
     },
-    async items(scope, offset, limit, since, filters = {}) {
+    async items(scope, offset, limit, since, filters = {}, feedOptions) {
       if (filters.categories?.length === 0) return [];
       const values: any[] = [scope.ownerId, scope.schoolId, scope.publicSourceIds, scope.privateSourceIds, since];
       const bind = (value: unknown) => { values.push(value); return `$${values.length}`; };
       // SQL predicates precede pagination. The gateway also rechecks every returned row.
       const visible = visibleItemsSql;
       const where = ["collection='items'", "body->>'status'='published'", visible, "coalesce(nullif(body->>'publishedAt',''),nullif(body->>'discoveredAt',''),body->>'createdAt') >= $5"];
+      if(feedOptions?.hiddenSourceIds.length)where.push(`NOT (coalesce(body->>'sourceId','')=ANY(${bind(feedOptions.hiddenSourceIds)}::text[]))`);
+      if(feedOptions?.shownSourceIds)where.push(`coalesce(body->>'sourceId','')=ANY(${bind(feedOptions.shownSourceIds)}::text[])`);
+      if(filters.sourceId)where.push(`body->>'sourceId'=${bind(filters.sourceId)}`);
       where.push(`(body->>'aiSearchExpiresAt' IS NULL OR body->>'aiSearchExpiresAt'>${bind(new Date().toISOString())})`);
-      if (filters.keyword) where.push(`strpos(lower(coalesce(body->>'title','') || E'\\n' || coalesce(body->>'contentText','') || E'\\n' || coalesce(body->'summary'->>'oneLine','')), lower(${bind(filters.keyword)}))>0`);
+      if (filters.keyword) where.push(`strpos(lower(coalesce(body->>'title','') || E'\\n' || CASE WHEN body->>'materialExpiresAt'<=${bind(new Date().toISOString())} THEN '' ELSE coalesce(body->>'contentText','') END || E'\\n' || coalesce(body->'summary'->>'oneLine','')), lower(${bind(filters.keyword)}))>0`);
       const effectiveCategories = `coalesce(labels.categories,CASE WHEN jsonb_typeof(body->'categories')='array' THEN CASE WHEN jsonb_array_length(body->'categories')>0 THEN body->'categories' ELSE jsonb_build_array(body->>'category') END ELSE jsonb_build_array(body->>'category') END)`;
       if (filters.categories?.length) where.push(`jsonb_exists_any(${effectiveCategories},${bind(filters.categories)}::text[])`);
       const { rows } = await pool.query(`SELECT d.id,d.body,labels.categories AS personal_categories FROM campus_documents AS d LEFT JOIN campus_notice_labels AS labels ON labels.owner_id=$1 AND labels.item_id=d.id WHERE ${where.join(' AND ')} ORDER BY body->>'publishedAt' DESC NULLS LAST,d.id DESC LIMIT ${bind(limit)} OFFSET ${bind(offset)}`, values);
-      return rows.map(row => ({ ...row.body, _id: row.id, ...(Array.isArray(row.personal_categories) ? {personalCategories:row.personal_categories} : {}) })) as ItemRow[];
+      return rows.map(row => payload({ ...row.body, _id: row.id, ...(Array.isArray(row.personal_categories) ? {personalCategories:row.personal_categories} : {}) })) as ItemRow[];
     },
   };
 }

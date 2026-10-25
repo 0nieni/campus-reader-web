@@ -21,6 +21,10 @@ const fields: Record<string, string[]> = {
   'ai.providers.save': ['profile'],
   'ai.providers.remove': ['id','version'],
   'ai.providers.select': ['id','model','version'],
+  'ai.memory.get': ['schoolId'],
+  'ai.memory.configure': ['schoolId','enabled','version'],
+  'ai.memory.forget': ['schoolId','id','version'],
+  'ai.memory.clear': ['schoolId','version'],
   'ai.profile.get': ['schoolId'],
   'ai.profile.save': ['schoolId','interests','goals','learningEnabled','version'],
   'ai.profile.clearBehavior': ['schoolId'],
@@ -51,6 +55,11 @@ const fields: Record<string, string[]> = {
   'reminders.email.test':[],
   'reminders.email.enable':['enabled'],
   'sources.list':['schoolId'],
+  'sources.catalogue':['schoolId'],
+  'sources.public.refresh':['schoolId','sourceId'],
+  'sources.feedVisibility':['schoolId','sourceId','visible'],
+  'sources.displayState':['schoolId'],
+  'sources.feedVisibilityAll':['schoolId','visible'],
   'sources.save':['schoolId','sourceId','source'],
   'sources.test':['schoolId','sourceId'],
   'sources.refresh':['schoolId','sourceId'],
@@ -59,9 +68,10 @@ const fields: Record<string, string[]> = {
   "session.get": [],
   "school.list": ["cursor"],
   "school.select": ["schoolId"],
+  "school.sources": ["schoolId"],
   "school.refresh": ["schoolId"],
   "school.request": ["schoolName"],
-  "feed.list": ["schoolId", "cursor", "keyword", "categories", "period"],
+  "feed.list": ["schoolId", "cursor", "keyword", "categories", "period","sourceId"],
   "feed.detail": ["schoolId", "itemId"],
   "feed.labels.set": ["schoolId", "itemId", "categories"],
   "favorites.list": ["schoolId", "cursor"],
@@ -169,7 +179,7 @@ export function createGateway(
   repo: Repository,
   config: OwnerConfig,
   now: () => number = Date.now,
-  features?: { reminders?:{handle(action:string,input:Record<string,unknown>,identity:IdentityContext):Promise<unknown>}; websites?:{handle(action:string,input:Record<string,unknown>,identity:IdentityContext):Promise<unknown>}; bookmarks?: { handle(action: string, input: Record<string, unknown>, identity: IdentityContext): Promise<unknown>; has(ownerId: string, schoolId: string, itemId: string): Promise<boolean> }; ai?: { handle(action: string, input: Record<string, unknown>, identity: IdentityContext): Promise<unknown> }; directory?: { refresh(schoolId:string):Promise<unknown>; request(name:unknown,identity:IdentityContext):Promise<unknown> } },
+  features?: { reminders?:{handle(action:string,input:Record<string,unknown>,identity:IdentityContext):Promise<unknown>}; websites?:{handle(action:string,input:Record<string,unknown>,identity:IdentityContext):Promise<unknown>}; bookmarks?: { handle(action: string, input: Record<string, unknown>, identity: IdentityContext): Promise<unknown>; has(ownerId: string, schoolId: string, itemId: string): Promise<boolean> }; ai?: { handle(action: string, input: Record<string, unknown>, identity: IdentityContext): Promise<unknown> }; directory?: { refresh(schoolId:string):Promise<unknown>; sources?(schoolId:string,ownerId?:string):Promise<unknown>; request(name:unknown,identity:IdentityContext):Promise<unknown> } },
 ) {
   return async (
     event: unknown,
@@ -181,9 +191,23 @@ export function createGateway(
       const { action, input } = inputOf(event);
       operation = action;
       const filters = action === "feed.list" ? filtersOf(input) : {};
+      if(action==='sources.displayState'){
+        if(!repo.sourceDisplayState)reject('SERVICE_UNAVAILABLE','来源显示设置尚未接通。');
+        return{ok:true,data:await repo.sourceDisplayState(identity.dataOwnerId,text(input,'schoolId'))};
+      }
+      if(action==='sources.feedVisibilityAll'){
+        if(!repo.setAllSourceFeedVisibility)reject('SERVICE_UNAVAILABLE','来源批量显示设置尚未接通。');
+        if(typeof input.visible!=='boolean')reject('VALIDATION_FAILED','请选择显示或隐藏。');
+        return{ok:true,data:await repo.setAllSourceFeedVisibility(identity.dataOwnerId,text(input,'schoolId'),input.visible)};
+      }
       if(action.startsWith('reminders.')){
         if(!features?.reminders)reject('SERVICE_UNAVAILABLE','此环境尚未接通提醒服务。');
         return{ok:true,data:await features.reminders.handle(action,input,identity)};
+      }
+      if(action==='sources.feedVisibility'){
+        if(!repo.setSourceFeedVisibility)reject('SERVICE_UNAVAILABLE','此环境尚未接通来源显示设置。');
+        if(typeof input.visible!=='boolean')reject('VALIDATION_FAILED','请选择是否在主页公告中显示。');
+        return{ok:true,data:await repo.setSourceFeedVisibility(identity.dataOwnerId,text(input,'schoolId'),text(input,'sourceId'),input.visible)};
       }
       if(action.startsWith('sources.')){
         if(!features?.websites)reject('SERVICE_UNAVAILABLE','网站来源管理尚未接通。');
@@ -217,6 +241,10 @@ export function createGateway(
       const schoolId = text(input, "schoolId");
       const school = await repo.school(schoolId);
       if (!school) reject("SCHOOL_NOT_FOUND", "学校不在目录中，请重新选择。");
+      if (action === 'school.sources') {
+        if(!features?.directory?.sources)reject('SERVICE_UNAVAILABLE','学校来源目录尚未接通。');
+        return {ok:true,data:await features.directory.sources(schoolId,identity.dataOwnerId)};
+      }
       if (action === "school.select") {
         await repo.selectSchool(identity.dataOwnerId, schoolId);
         return { ok: true, data: await session(identity, repo,Boolean(features?.directory),Boolean(features?.websites),Boolean(features?.reminders)) };
@@ -230,14 +258,19 @@ export function createGateway(
       const scope = await repo.scope(schoolId, identity.dataOwnerId);
       const since = filterSince(filters, now());
       if (action === "feed.list") {
-        if (filters.categories?.length === 0) return {ok:true,data:{items:[],nextCursor:null}};
         const offset = offsetOf(input.cursor);
-        const rows = await repo.items(scope, offset, 21, since, filters);
+        const selection=await repo.feedSourceSelection?.(identity.dataOwnerId,schoolId);
+        const hiddenSourceIds=selection?.hiddenIds??await repo.hiddenFeedSources?.(identity.dataOwnerId,schoolId)??[];
+        const excluded=hiddenSourceIds;
+        if (filters.categories?.length === 0) return {ok:true,data:{items:[],nextCursor:null,...(hiddenSourceIds.length?{hiddenSourceCount:hiddenSourceIds.length}:{})}};
+        const rows = await repo.items(scope, offset, 21, since, filters,{hiddenSourceIds:excluded,...(selection?{shownSourceIds:selection.shownIds}:{})});
         // DB predicates operate before pagination; recheck every returned row for defense in depth.
         if (
           rows.some(
             (row) =>
               !itemVisible(row, scope) ||
+              excluded.includes(row.sourceId||'') ||
+              (selection&&!selection.shownIds.includes(row.sourceId||'')) ||
               row.status !== "published" ||
               !isRetained(row, since) ||
               !matchesFilters(row, filters),
@@ -252,6 +285,7 @@ export function createGateway(
           data: {
             items: rows.slice(0, 20).map(toNotice),
             nextCursor: rows.length > 20 ? String(offset + 20) : null,
+            ...(hiddenSourceIds.length?{hiddenSourceCount:hiddenSourceIds.length}:{}),
           },
         };
       }
@@ -284,7 +318,8 @@ export function createGateway(
         defaultCategories: originalCategories(row),
         categoriesCustomized: row.personalCategories !== undefined,
         originalUrl: originalUrl(row),
-        attachmentNote: (materialNote ? materialNote + ' ' : '') + "本阶段未读取附件正文，请以公告原文和附件为准。",
+        attachmentNote: (materialNote ? materialNote + ' ' : '') + (row.materialArchive?.attachmentNote || "本次未读取附件正文，请以公告原文和附件为准。"),
+        ...(row.materialArchive?{materialArchive:row.materialArchive}:{}),
         ...(features?.bookmarks ? { bookmarked: await features.bookmarks.has(identity.dataOwnerId, schoolId, row._id) } : {}),
       };
       return { ok: true, data: detail };

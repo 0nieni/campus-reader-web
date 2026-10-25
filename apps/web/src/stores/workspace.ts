@@ -24,6 +24,7 @@ export function workspaceStore(transport: Transport) {
     const items = ref<Notice[]>([]);
     const detail = ref<NoticeDetail | null>(null);
     const nextCursor = ref<string | null>(null);
+    const hiddenSourceCount=ref(0);
     const filters = ref<FeedFilters>({categories:[...noticeCategories]});
     const error = ref("");
     const loading = ref(false);
@@ -37,24 +38,24 @@ export function workspaceStore(transport: Transport) {
     let feedRequest = 0;
     let activeFeed: Promise<void> | null = null;
     let sourceJob: { ticket:number; promise:Promise<void> } | null = null;
-    type CachedPage = { schoolId:string; items:Notice[]; nextCursor:string|null; expiresAt:number };
+    type CachedPage = { schoolId:string; items:Notice[]; nextCursor:string|null; expiresAt:number;hiddenSourceCount:number };
     // Metadata only, in this authenticated browser session. Never Storage/CDN.
     const feedCache = new Map<string,CachedPage>();
     const cloneNotices = (rows:Notice[]) => rows.map(row=>({...row,categories:[...row.categories]}));
     function cacheKey(schoolId:string) {
-      return JSON.stringify([auth.value?.uid,schoolId,filters.value.keyword||'',filters.value.period||'all',[...(filters.value.categories??noticeCategories)].sort()]);
+      return JSON.stringify([auth.value?.uid,schoolId,filters.value.sourceId||'',filters.value.keyword||'',filters.value.period||'all',[...(filters.value.categories??noticeCategories)].sort()]);
     }
     function restoreFeedCache(schoolId:string) {
       const key=cacheKey(schoolId),cached=feedCache.get(key);
       if(!cached)return;
       if(cached.expiresAt<=Date.now() || cached.items.some(row=>row.publishedAt&&Date.parse(row.publishedAt)<Date.now()-365*86400000)){feedCache.delete(key);return;}
       feedCache.delete(key);feedCache.set(key,cached);
-      items.value=cloneNotices(cached.items);nextCursor.value=cached.nextCursor;
+      items.value=cloneNotices(cached.items);nextCursor.value=cached.nextCursor;hiddenSourceCount.value=cached.hiddenSourceCount;
     }
     function rememberFeed(schoolId:string) {
       if(!auth.value||items.value.length>100)return;
       const key=cacheKey(schoolId);
-      feedCache.delete(key);feedCache.set(key,{schoolId,items:cloneNotices(items.value),nextCursor:nextCursor.value,expiresAt:Date.now()+5*60000});
+      feedCache.delete(key);feedCache.set(key,{schoolId,items:cloneNotices(items.value),nextCursor:nextCursor.value,expiresAt:Date.now()+5*60000,hiddenSourceCount:hiddenSourceCount.value});
       while(feedCache.size>8)feedCache.delete(feedCache.keys().next().value!);
     }
     function clear() {
@@ -69,6 +70,7 @@ export function workspaceStore(transport: Transport) {
       items.value = [];
       detail.value = null;
       nextCursor.value = null;
+      hiddenSourceCount.value=0;
       filters.value = {categories:[...noticeCategories]};
       loading.value = false;
       detailLoading.value = false;
@@ -103,6 +105,7 @@ export function workspaceStore(transport: Transport) {
           ...(more && nextCursor.value ? { cursor: nextCursor.value } : {}),
         });
         if (ticket !== epoch || request!==feedRequest) return;
+        hiddenSourceCount.value=page.hiddenSourceCount??0;
         if(keepCached&&items.value.length&&page.items.length>=Math.min(20,items.value.length)) {
           // Keep the previously read pages and cursor until the visitor accepts
           // an update. Do not collapse a restored five-page list to page one.
@@ -184,9 +187,10 @@ export function workspaceStore(transport: Transport) {
     async function applyUpdates() {
       await loadFeed(false,true,true);
     }
-    async function sourcesChanged() {
-      const schoolId=workspace.value?.school?.id;
+    async function sourcesChanged(schoolId=workspace.value?.school?.id) {
+      if(!schoolId)return;
       for(const[key,page]of feedCache)if(page.schoolId===schoolId)feedCache.delete(key);
+      if(workspace.value?.school?.id!==schoolId)return;
       feedRequest++;loading.value=false;
       await loadFeed(false,true,true);
     }
@@ -275,6 +279,8 @@ export function workspaceStore(transport: Transport) {
         const session = await transport.call("school.select", { schoolId });
         if (ticket !== epoch) return;
         workspace.value = session;
+        hiddenSourceCount.value=0;
+        if(filters.value.sourceId){const {sourceId,...rest}=filters.value;filters.value=rest;}
       } catch (caught) {
         if (ticket === epoch) failure(caught);
       } finally {
@@ -333,6 +339,7 @@ export function workspaceStore(transport: Transport) {
       items,
       detail,
       nextCursor,
+      hiddenSourceCount,
       filters,
       error,
       loading,

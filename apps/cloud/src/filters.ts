@@ -6,7 +6,8 @@ import type { ItemRow } from "./repository";
 import { displayedCategories } from './notice-labels';
 
 export function filtersOf(input: Record<string, unknown>): FeedFilters {
-  const { keyword, categories, period } = input;
+  const { keyword, categories, period,sourceId } = input;
+  if(sourceId!==undefined&&(typeof sourceId!=='string'||!/^[A-Za-z0-9_-]{1,200}$/.test(sourceId)))reject('VALIDATION_FAILED','来源编号无效。');
   if (keyword !== undefined && (typeof keyword !== "string" || keyword.length > 100 || /[\u0000-\u001f\u007f]/.test(keyword)))
     reject("VALIDATION_FAILED", "关键词请使用不超过 100 个字符的单行文本。");
   if (categories !== undefined && (!Array.isArray(categories) || categories.length > noticeCategories.length || categories.some(category => !noticeCategories.includes(category))))
@@ -14,6 +15,7 @@ export function filtersOf(input: Record<string, unknown>): FeedFilters {
   if (period !== undefined && (typeof period !== "string" || !["7d", "30d", "90d", "all"].includes(period)))
     reject("VALIDATION_FAILED", "时间范围无效，请重新选择。");
   return {
+    ...(typeof sourceId==='string'?{sourceId}:{}),
     ...(typeof keyword === "string" && keyword.trim() ? { keyword: keyword.trim() } : {}),
     ...(Array.isArray(categories) ? { categories: [...new Set(categories)] } : {}),
     ...(period ? { period: period as FeedFilters["period"] } : {}),
@@ -27,6 +29,7 @@ export function literalPattern(keyword: string): string {
   return keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 export function matchesFilters(row: ItemRow, filters: FeedFilters): boolean {
+  if(filters.sourceId&&row.sourceId!==filters.sourceId)return false;
   if (filters.categories !== undefined && !filters.categories.some(category => displayedCategories(row).includes(category))) return false;
   if (!filters.keyword) return true;
   return [row.title, row.contentText, row.summary?.oneLine].some(value => typeof value === "string" && value.toLowerCase().includes(filters.keyword!.toLowerCase()));

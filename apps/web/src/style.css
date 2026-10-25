@@ -843,6 +843,37 @@ select {
 
 .notice-read { margin:0 10px 8px; font-size:12px; }
 .website-sources {overflow:auto;}
+.source-reading-school {padding:12px 16px;background:#f4f7fe;border-left:3px solid #8cacde;}
+.source-tabs {display:flex;gap:8px;border-bottom:1px solid var(--line);margin:22px 0;}
+.source-tabs button {padding:12px 20px;border:0;border-bottom:3px solid transparent;background:transparent;color:var(--muted);cursor:pointer;min-height:44px;}
+.source-tabs button.active {border-bottom-color:#235ed7;color:#214b83;font-weight:600;}
+.source-toolbar {display:flex;gap:16px;align-items:end;flex-wrap:wrap;margin:18px 0;}
+.source-toolbar label {display:flex;flex-direction:column;gap:8px;font-size:14px;min-width:0;}
+.source-toolbar input,.source-toolbar select {padding:11px 12px;min-height:44px;border:1px solid var(--line);border-radius:5px;background:white;color:inherit;max-width:100%;}
+.source-toolbar input {width:280px;}
+.school-choices {display:flex;flex-wrap:wrap;gap:8px;max-height:190px;overflow:auto;padding:4px 2px 10px;}
+.school-choice {border:1px solid var(--line);border-radius:5px;padding:10px 13px;min-height:44px;background:white;color:inherit;cursor:pointer;}
+.school-choice.active {border-color:#8cacde;background:#f2f6ff;color:#214b83;}
+.source-school-heading {display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-top:26px;}
+.source-school-heading h2 {margin:6px 0;}
+.source-coverage {line-height:1.8;color:var(--muted);}
+.school-source-grid {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));gap:16px;}
+.school-source-grid .school-source-card {border:1px solid var(--line);border-radius:6px;padding:20px;min-width:0;overflow-wrap:anywhere;}
+.school-source-card h3 {margin:14px 0 8px;font-size:17px;}
+.source-status {display:inline-block;border-radius:4px;background:#f1f4f8;color:#596b85;padding:5px 9px;font-size:12px;}
+.source-status-ready {background:#edf7ef;color:#326745;}
+.source-status-unavailable {background:#fff1ed;color:#98452f;}
+.source-display {display:flex;align-items:center;gap:9px;min-height:44px;margin:8px 0;font-size:14px;cursor:pointer;}
+.source-display input {width:18px;height:18px;accent-color:#235ed7;flex-shrink:0;}
+.source-display-controls {padding:12px 16px;border:1px solid var(--line);border-radius:5px;margin:12px 0;}
+.source-display-controls p {margin:5px 0;}
+.source-panels {border:0;margin:0;padding:0;min-width:0;}
+.source-display-controls .source-actions {margin:4px 0;gap:14px;}
+.source-diagnosis {padding:10px 12px;background:#fff7ec;border-left:3px solid #d4ab6a;line-height:1.8;}
+.hidden-sources-hint {margin-top:14px;padding:12px;border:1px solid var(--line);text-align:left;}
+.website-sources .source-actions button {min-height:44px;}
+.website-sources button:focus-visible,.website-sources a:focus-visible {outline:2px solid #235ed7;outline-offset:3px;}
+@media(max-width:600px){.school-source-grid{grid-template-columns:1fr;}.source-toolbar label{width:100%;}.source-toolbar input,.source-toolbar select{width:100%;}.website-sources .source-actions{gap:8px;}.website-sources .source-actions .primary{white-space:normal;}.source-form{padding:14px;}}
 .source-card {border-top:1px solid var(--line);padding:20px 0;}
 .source-card h2 {font-size:17px;}
 .source-card small {font-size:12px;color:#72839d;font-weight:400;}
@@ -937,4 +968,9 @@ select {
 .email-setting-main>div:first-child{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .reminder-email-settings>p{margin:8px 0 0}
 .reminder-channel-status p{margin:4px 0;overflow-wrap:anywhere}
+.material-files{border-top:1px solid var(--line);margin-top:24px;padding-top:18px;overflow-wrap:anywhere}
+.material-files h2{font-size:18px;margin:0 0 8px}
+.material-files ul{list-style:none;padding:0;margin:14px 0}
+.material-files li{padding:12px 0;border-bottom:1px solid var(--line)}
+.material-files li p{margin:6px 0 0}
 @media(max-width:650px){.email-setting-main{align-items:flex-start;flex-direction:column}.email-setting-main .action-row{flex-wrap:wrap}.reminder-email-settings{padding:12px}}
