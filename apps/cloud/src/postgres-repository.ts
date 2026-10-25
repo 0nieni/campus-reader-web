@@ -3,7 +3,7 @@ import type { Repository, ItemRow } from './repository';
 import type { SqlPool } from './postgres-storage';
 import { isPrivate, sourceVisible, type Resource } from './scope';
 import { reject } from './errors';
-import {hiddenFeedSources,saveFeedVisibility,feedDisplayState,saveAllFeedVisibility} from './source-feed-preferences';
+import {hiddenFeedSources,saveFeedVisibility,feedDisplayState,saveAllFeedVisibility,feedSourceSelection} from './source-feed-preferences';
 const bjtu: School = { id: 'bjtu', name: '北京交通大学', status: 'ready' };
 // Shared by feed queries and new-announcement watches. Parameters 1..4 are
 // owner, school, public sources and private sources, respectively.
@@ -34,6 +34,7 @@ export function postgresRepository(pool: SqlPool): Repository {
       await pool.query("INSERT INTO campus_documents(collection,id,body) VALUES('user_profiles',$1,$2::jsonb) ON CONFLICT(collection,id) DO UPDATE SET body=campus_documents.body || EXCLUDED.body", [owner, JSON.stringify({ _id: owner, selectedSchoolId: schoolId, updatedAt: new Date().toISOString() })]);
     },
     hiddenFeedSources:(owner,schoolId)=>hiddenFeedSources(pool,owner,schoolId),
+    async feedSourceSelection(owner,schoolId){const school=await this.school(schoolId);if(!school)reject('SCHOOL_NOT_FOUND','学校不在目录中。');return feedSourceSelection(pool,school,owner);},
     async sourceDisplayState(owner,schoolId){const school=await this.school(schoolId);if(!school)reject('SCHOOL_NOT_FOUND','学校不在目录中。');return feedDisplayState(pool,school,owner);},
     async setAllSourceFeedVisibility(owner,schoolId,visible){const school=await this.school(schoolId);if(!school)reject('SCHOOL_NOT_FOUND','学校不在目录中。');return saveAllFeedVisibility(pool,school,owner,visible);},
     async setSourceFeedVisibility(owner,schoolId,sourceId,visible){
@@ -65,6 +66,7 @@ export function postgresRepository(pool: SqlPool): Repository {
       const visible = visibleItemsSql;
       const where = ["collection='items'", "body->>'status'='published'", visible, "coalesce(nullif(body->>'publishedAt',''),nullif(body->>'discoveredAt',''),body->>'createdAt') >= $5"];
       if(feedOptions?.hiddenSourceIds.length)where.push(`NOT (coalesce(body->>'sourceId','')=ANY(${bind(feedOptions.hiddenSourceIds)}::text[]))`);
+      if(feedOptions?.shownSourceIds)where.push(`coalesce(body->>'sourceId','')=ANY(${bind(feedOptions.shownSourceIds)}::text[])`);
       if(filters.sourceId)where.push(`body->>'sourceId'=${bind(filters.sourceId)}`);
       where.push(`(body->>'aiSearchExpiresAt' IS NULL OR body->>'aiSearchExpiresAt'>${bind(new Date().toISOString())})`);
       if (filters.keyword) where.push(`strpos(lower(coalesce(body->>'title','') || E'\\n' || CASE WHEN body->>'materialExpiresAt'<=${bind(new Date().toISOString())} THEN '' ELSE coalesce(body->>'contentText','') END || E'\\n' || coalesce(body->'summary'->>'oneLine','')), lower(${bind(filters.keyword)}))>0`);

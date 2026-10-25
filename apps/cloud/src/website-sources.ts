@@ -154,5 +154,8 @@ export function websiteSources(pool:SqlPool,repo:Repository,reader:PageReader=re
       await pool.query("UPDATE campus_documents SET body=body || $3::jsonb WHERE collection='sources' AND id=$1 AND body->>'ownerOpenid'=$2",[id,owner,JSON.stringify({lastAttemptAt:iso(now()),lastErrorCode:error instanceof AppError?error.code:'SOURCE_UNAVAILABLE',...(action==='sources.refresh'?{lastCollection:{newCount:0,existingCount:0,failedSources:1,skippedCount:0}}:{}),message:error instanceof AppError?error.message:'本次未采集成功，已有公告保留。'})]);throw error;
     }finally{await pool.query("UPDATE campus_documents SET body=body || $2::jsonb WHERE collection='sources' AND id=$1",[id,JSON.stringify({requestAfter:iso(now()+1500)})]);}
   }
-  return{handle,material,materialSource,archivedMaterial,refreshSource:(id:string,owner:string,schoolId:string)=>operation('sources.refresh',{sourceId:id},owner,schoolId)};
+  return{handle,material,materialSource,archivedMaterial,
+    async publicPage(url:string,config:WebsiteSourceInput,id:string,owner?:string){if(owner)await budget(owner);return page(websiteUrl(url),config,id);},
+    async publicDownload(url:string,config:WebsiteSourceInput,id:string){const policy=await permitted(url,config,id);await reserve(url);return downloadMaterial(url,policy);},
+    refreshSource:(id:string,owner:string,schoolId:string)=>operation('sources.refresh',{sourceId:id},owner,schoolId)};
 }

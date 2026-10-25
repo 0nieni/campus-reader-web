@@ -13,6 +13,8 @@ export interface School {
 }
 export interface SourceCollectionStats {newCount:number;existingCount:number;failedSources:number;skippedCount:number}
 export interface SourceDisplayState {total:number;shown:number;hidden:number}
+export interface SourceCatalogueEntry {id:string;name:string;kind:'school'|'public'|'personal';schoolId:string;url:string|null;categories:string[];showInFeed:boolean;collectable:boolean;state:'unchecked'|'ready'|'unavailable';checkedAt:string|null;count:number|null;message:string;verifiedAt?:string;nextRefreshAt?:string|null;errorCode?:string|null}
+export interface SourceCatalogue {sources:SourceCatalogueEntry[];total:number;shown:number;hidden:number}
 export interface SchoolSync { state: 'ready' | 'checking' | 'unavailable'; count: number; checkedAt: string | null; message: string; changed?:boolean; coverage?:string;stats?:SourceCollectionStats; sources?:Array<{name:string;url:string;state:'ready'|'unavailable';count:number;message:string;errorCode?:string|null;stats?:SourceCollectionStats}> }
 export interface SchoolSourceCatalogue {
   school: School;
@@ -102,6 +104,8 @@ export interface GatewayActions extends AssistantActions {
   'reminders.email.test':{input:Record<string,never>;output:ReminderEmailState};
   'reminders.email.enable':{input:{enabled:boolean};output:ReminderEmailState};
   "sources.list":{input:{schoolId:string};output:{sources:WebsiteSource[]}};
+  "sources.catalogue":{input:{schoolId:string};output:SourceCatalogue};
+  "sources.public.refresh":{input:{schoolId:string;sourceId:string};output:{count:number;message:string;stats:SourceCollectionStats}};
   "sources.feedVisibility":{input:{schoolId:string;sourceId:string;visible:boolean};output:{visible:boolean}};
   "sources.displayState":{input:{schoolId:string};output:SourceDisplayState};
   "sources.feedVisibilityAll":{input:{schoolId:string;visible:boolean};output:SourceDisplayState};

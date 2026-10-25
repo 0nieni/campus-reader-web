@@ -18,7 +18,7 @@ export default async(request:Request)=>{
  const runtime=materialRuntime(pool,repo,{production:true,deployId:context.deploy.id});
  const directory=schoolDirectory(pool,repo,readLexmountPage,Date.now,{trackActivity:false});
  const jobs=materialJobs(pool,{school:directory.refresh,source:async(id,owner,school)=>{
-  try{return await runtime.websites.refreshSource(id,owner,school);}catch(error){if(error&&typeof error==='object'&&'code' in error&&error.code==='SOURCE_INTERVAL')return;throw error;}
+  try{if(!owner&&school==='global'){await runtime.publicSources.refreshSource(id);return;}return await runtime.websites.refreshSource(id,owner,school);}catch(error){if(error&&typeof error==='object'&&'code' in error&&error.code==='SOURCE_INTERVAL')return;throw error;}
  },material:(row,deadline)=>runtime.material(row,{force:true,deadline}),cleanup:()=>runtime.archive.cleanup(100)});
  await jobs.start();const result=await jobs.run(start+12*60000);
  console.info(JSON.stringify({event:'material-collection',...result}));
