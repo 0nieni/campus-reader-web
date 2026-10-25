@@ -43,6 +43,11 @@
 [context.AI_module.database.migrations]
   path = "netlify/database/pr14-migrations"
 
+# PR17's preview applied provider profiles before main's material archive.
+# Keep its applied versions; only that preview appends the archive afterward.
+[context."codex/ai-companion-model-settings".database.migrations]
+  path = "netlify/database/pr17-migrations"
+
 [[headers]]
   for = "/*"
   [headers.values]
