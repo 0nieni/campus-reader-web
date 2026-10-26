@@ -28,7 +28,7 @@ export interface Repository {
   schools(offset: number, limit: number): Promise<School[]>;
   selectSchool(ownerId: string, schoolId: string): Promise<void>;
   hiddenFeedSources?(ownerId:string,schoolId:string):Promise<string[]>;
-  feedSourceSelection?(ownerId:string,schoolId:string):Promise<{shownIds:string[];hiddenIds:string[]}>;
+  feedSourceSelection?(ownerId:string,schoolId:string):Promise<{shownIds:string[];hiddenIds:string[];noticeShownIds?:string[];noticeHiddenIds?:string[]}>;
   setSourceFeedVisibility?(ownerId:string,schoolId:string,sourceId:string,visible:boolean):Promise<{visible:boolean}>;
   sourceDisplayState?(ownerId:string,schoolId:string):Promise<SourceDisplayState>;
   setAllSourceFeedVisibility?(ownerId:string,schoolId:string,visible:boolean):Promise<SourceDisplayState>;

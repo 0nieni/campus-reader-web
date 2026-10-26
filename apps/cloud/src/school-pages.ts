@@ -134,7 +134,8 @@ export function extractNotices(page: SchoolPage, school: SchoolSource): Extracte
       return (!node.closest('a').length || heading.length>0 || el.tagName==='i') && text.length<=12 && !!dateMetadata(text);
     }).first();
     const dated=container.find(school.dateSelector || 'time,[class*="date"],[class*="time"],.Article_PublishDate,.sj,dl').first();
-    const dateText = container.find('time').attr('datetime') || (dated.length?metaText(dated):'') || (smallDate.length?metaText(smallDate):'') || metaText(container.clone().find('a,p').remove().end());
+    const precedingDate=school.dateSelector?container.prev(school.dateSelector):$('__no_date__');
+    const dateText = container.find('time').attr('datetime') || (dated.length?metaText(dated):'') || (smallDate.length?metaText(smallDate):'') || (precedingDate.length?metaText(precedingDate):'') || metaText(container.clone().find('a,p').remove().end());
     const publishedAt = dateMetadata(compact(dateText));
     seen.add(url.href);
     list.push({ id: noticeId(school.id,url.href), title, url: url.href, publishedAt });

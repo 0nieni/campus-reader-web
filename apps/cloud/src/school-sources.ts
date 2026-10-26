@@ -2,12 +2,13 @@ import type {School} from '@campus/contracts';
 import type {SchoolSource} from './school-pages';
 
 export interface PublicSchoolSource extends SchoolSource { key:string; label:string }
-interface Entry { key:string; label:string; url:string; listSelector?:string; articleSelector?:string; homepage?:string }
+interface Entry { key:string; label:string; url:string; listSelector?:string; articleSelector?:string; dateSelector?:string; homepage?:string }
 interface Coverage { note:string; entries:Entry[] }
 const entry=(key:string,label:string,url:string,articleSelector?:string):Entry=>({key,label,url,...(articleSelector?{articleSelector}:{})});
 // Reviewed official public columns, not a claim of access to the campus portal.
 // URLs and selectors are server constants; browser inputs cannot add fetch hosts.
 const reviewed:Record<string,Coverage>={
+ bjtu:{note:'覆盖学校主站、本科生院和计算机学院的公开通知；校内登录内容不在采集范围。',entries:[entry('directory','目录公开公告入口','https://www.bjtu.edu.cn/tzgg/'),{...entry('bjtu-bksy','北京交通大学 · 本科生院通知公告','https://bksy.bjtu.edu.cn/Admin/PageList.ashx?pc=271891'),dateSelector:'.spTime'},entry('bjtu-cs-tzgg','北京交通大学 · 计算机学院通知公告','https://cs.bjtu.edu.cn/tzgg/index.htm')]},
  school_001:{note:'覆盖教务部公开通知；学校主站旧公告数据较旧，校内门户内容不在采集范围。',entries:[entry('teaching','教务部 · 通知公告','https://dean.pku.edu.cn/web/notice.php','.newsinfo_box')]},
  school_002:{note:'覆盖以下院系的公开通知和学术活动；学校信息门户需要登录，未接入校内公告。',entries:[entry('statistics','统计与数据科学系 · 通知公告','https://www.stat.tsinghua.edu.cn/xwdt/tzgg.htm'),entry('psychology','心理与认知科学系 · 学术活动','https://www.pcs.tsinghua.edu.cn/xwdt/xshd.htm')]},
  school_003:{note:'覆盖本科生院公开通知，不包括需校内登录的内容。',entries:[entry('teaching','本科生院 · 通知公告','http://jiaowu.ruc.edu.cn/gnsz/sylb/tzggconfig/index.htm','.page-detail .content')]},
@@ -52,6 +53,14 @@ const articleSelectors:Record<string,string>={
 export function schoolSources(school:School):{note:string;sources:PublicSchoolSource[]} {
  const coverage=reviewed[school.id];
  const entries=coverage?.entries || (school.announcementUrl?[entry('directory','目录公开公告入口',school.announcementUrl)]:[]);
- return {note:coverage?.note || '当前仅接入目录所列入口，可能无法覆盖学校全部公告；正文和附件可用性以原站为准。',sources:entries.slice(0,3).map(e=>({id:school.id,name:school.name,key:e.key,label:e.label,announcementUrl:e.url,homepage:e.homepage||school.homepage||e.url,...(e.listSelector?{listSelector:e.listSelector}:{}),...((e.articleSelector||articleSelectors[school.id])?{articleSelector:e.articleSelector||articleSelectors[school.id]}:{})}))};
+ return {note:coverage?.note || '当前仅接入目录所列入口，可能无法覆盖学校全部公告；正文和附件可用性以原站为准。',sources:entries.slice(0,3).map(e=>({id:school.id,name:school.name,key:e.key,label:e.label,announcementUrl:e.url,homepage:e.homepage||school.homepage||e.url,...(e.listSelector?{listSelector:e.listSelector}:{}),...(e.dateSelector?{dateSelector:e.dateSelector}:{}),...((e.articleSelector||articleSelectors[school.id])?{articleSelector:e.articleSelector||articleSelectors[school.id]}:{})}))};
 }
-export const publicSourceId=(schoolId:string,key:string)=>key==='directory'?`directory_${schoolId}`:`directory_${schoolId}__${key}`;
+// Keep imported source identities so saved choices and historical notices survive.
+const bjtuLegacyIds:Record<string,string>={'bjtu-bksy':'1233ab626ac140af0003a85f00e57db2','bjtu-cs-tzgg':'15ff78a66acb889d000bcdb945e4c113'};
+export const publicSourceId=(schoolId:string,key:string)=>schoolId==='bjtu'&&bjtuLegacyIds[key]?bjtuLegacyIds[key]:key==='directory'?`directory_${schoolId}`:`directory_${schoolId}__${key}`;
+/** The old BJTU main-site card and directory card describe the same column.
+ * Only these server-reviewed identities are aliases; duplicate competitions are independent. */
+export function noticeSourceAliases(schoolId:string,sourceId:string):string[]{
+ const main=['directory_bjtu','15ff78a66ac1382a00034f3869d0aa1c'];
+ return schoolId==='bjtu'&&main.includes(sourceId)?main:[sourceId];
+}

@@ -1,6 +1,6 @@
 import type {School,SourceCatalogueEntry} from '@campus/contracts';
 import type {SqlPool} from './postgres-storage';
-import {schoolSources,publicSourceId} from './school-sources';
+import {schoolSources,publicSourceId,noticeSourceAliases} from './school-sources';
 import {competitionDirectory} from './competition-directory';
 import {sourceVisible,type Resource} from './scope';
 import {AppError} from './errors';
@@ -28,7 +28,9 @@ export async function feedSourceSelection(pool:SqlPool,school:School,owner:strin
  const row=(await pool.query("SELECT body->'hiddenFeedSources'->$2::text AS hidden,body->'sourceFeedVisibility'->$2::text AS choices FROM campus_documents WHERE collection='user_profiles' AND id=$1",[owner,school.id])).rows[0];
  const hidden=Array.isArray(row?.hidden)?row.hidden:[],choices=object(row?.choices);
  const shownIds=definitions.filter(source=>typeof choices[source.id]==='boolean'?choices[source.id]===true:!hidden.includes(source.id)&&source.kind==='school').map(source=>source.id);
- return{definitions,shownIds,hiddenIds:definitions.filter(source=>!shownIds.includes(source.id)).map(source=>source.id)};
+ const noticeShownIds=[...new Set(shownIds.flatMap(id=>noticeSourceAliases(school.id,id)))];
+ const noticeHiddenIds=[...new Set(definitions.flatMap(source=>noticeSourceAliases(school.id,source.id)))].filter(id=>!noticeShownIds.includes(id));
+ return{definitions,shownIds,hiddenIds:definitions.filter(source=>!shownIds.includes(source.id)).map(source=>source.id),noticeShownIds,noticeHiddenIds};
 }
 export async function hiddenFeedSources(pool:SqlPool,owner:string,schoolId:string):Promise<string[]> {
  const row=(await pool.query("SELECT body FROM campus_documents WHERE collection='schools' AND id=$1",[schoolId])).rows[0]?.body;

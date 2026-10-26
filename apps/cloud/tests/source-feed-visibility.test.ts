@@ -67,7 +67,8 @@ test('per-account source display preferences filter home pages before pagination
    assert.ok((await toggle('directory_school_002__statistics',true)).ok);assert.ok((await feed()).items.some((item:any)=>item.id==='visibility-00'));
    for(const input of [{schoolId:'school_002',sourceId:'directory_school_002__statistics',visible:'false'},{schoolId:'school_002',sourceId:'missing',visible:false},{schoolId:'school_002',sourceId:'directory_school_002__statistics',visible:false,ownerId:'bob'}])assert.equal((await action('sources.feedVisibility',input)).ok,false);
    assert.equal((await gateway({action:'sources.feedVisibility',input:{schoolId:'school_002',sourceId:'directory_school_002__statistics',visible:false}},{uid:'alice-uid',isAnonymous:true})).ok,false);
-   assert.equal(reads,0);assert.equal((await sql.query("SELECT id FROM campus_documents WHERE collection IN ('web_ai_accounts','web_ai_tasks')")).rows.length,0);
+   assert.equal(reads,2); // First restored current-school choice attempts the two reviewed columns once.
+   assert.equal((await sql.query("SELECT id FROM campus_documents WHERE collection IN ('web_ai_accounts','web_ai_tasks')")).rows.length,0);
   });
   await t.test('concurrent per-school changes preserve selection and unrelated profile data without duplicate hidden IDs',async()=>{
    await sql.query("UPDATE campus_documents SET body=body || $2::jsonb WHERE collection='user_profiles' AND id=$1",['alice',JSON.stringify({testKeep:{memory:'keep',bookmarks:['keep']}})]);
@@ -87,7 +88,7 @@ test('per-account source display preferences filter home pages before pagination
    const profile=(await sql.query("SELECT body FROM campus_documents WHERE collection='user_profiles' AND id='alice'")).rows[0]!.body;assert.deepEqual(profile.hiddenFeedSources.school_001,['directory_school_001__teaching']);
    for(const input of [{schoolId:'school_002',visible:'no'},{schoolId:'school_002',visible:false,ownerId:'bob'}])assert.equal((await action('sources.feedVisibilityAll',input)).ok,false);
    assert.equal((await action('feed.list',{schoolId:'school_002',sourceId:'bad/id'})).ok,false);
-   assert.equal(reads,0);
+   assert.equal(reads,2); // Rechecking does not repeat the first collection attempt.
   });
  }finally{await pool.end();await server.stop();}
 });

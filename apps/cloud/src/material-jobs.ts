@@ -3,6 +3,8 @@ import type {SqlPool} from './postgres-storage';
 import type {ItemRow} from './repository';
 import {AppError} from './errors';
 import {competitionSources} from './competition-sources';
+import {schoolSources,publicSourceId,noticeSourceAliases} from './school-sources';
+import type {School} from '@campus/contracts';
 const iso=(at:number)=>new Date(at).toISOString();
 export const MATERIAL_JOB_PATH='/.netlify/functions/material-collect-background';
 export function jobSignature(secret:string,at:string,body:string){return createHmac('sha256',secret).update(`POST\n${MATERIAL_JOB_PATH}\n${at}\n${body}`).digest('hex');}
@@ -22,6 +24,11 @@ export function materialJobs(pool:SqlPool,actions:{school(id:string):Promise<unk
   const sources=await pool.query("SELECT id,body FROM campus_documents WHERE collection='sources' AND body->>'importKind'='website' AND body->>'deleted' IS DISTINCT FROM 'true' AND body->>'enabled' IS DISTINCT FROM 'false' ORDER BY id");
   for(const row of sources.rows)if(row.body.ownerOpenid&&row.body.schoolIds?.[0])await enqueue(day,'source',row.body.schoolIds[0],row.body.ownerOpenid,row.id);
   const profiles=await pool.query("SELECT body->'sourceFeedVisibility' AS choices FROM campus_documents WHERE collection='user_profiles' AND body ? 'sourceFeedVisibility'");
+  const directory=await pool.query("SELECT id,body FROM campus_documents WHERE collection='schools'");
+  const schoolSourceIds=new Map(directory.rows.map(row=>[row.id,new Set(schoolSources({...row.body,id:row.id} as School).sources.flatMap(source=>noticeSourceAliases(row.id,publicSourceId(row.id,source.key))))]));
+  const subscribedSchools=new Set<string>();
+  for(const row of profiles.rows)if(row.choices&&typeof row.choices==='object'&&!Array.isArray(row.choices))for(const [schoolId,choices] of Object.entries(row.choices))if(choices&&typeof choices==='object'&&!Array.isArray(choices)&&Object.entries(choices).some(([id,value])=>value===true&&schoolSourceIds.get(schoolId)?.has(id)))subscribedSchools.add(schoolId);
+  for(const id of subscribedSchools)await enqueue(day,'school',id,'',id);
   const optedIn=new Set<string>();
   for(const row of profiles.rows)if(row.choices&&typeof row.choices==='object'&&!Array.isArray(row.choices))for(const choices of Object.values(row.choices))if(choices&&typeof choices==='object'&&!Array.isArray(choices))for(const [id,value] of Object.entries(choices))if(value===true&&competitionSources.some(source=>source.id===id))optedIn.add(id);
   for(const id of optedIn)await enqueue(day,'source','global','',id);
