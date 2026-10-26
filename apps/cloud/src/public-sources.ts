@@ -6,6 +6,7 @@ import type {IdentityContext} from './identity';
 import type {websiteSources} from './website-sources';
 import type {MaterialArchive} from './material-archive';
 import {competitionSources,competitionConfig} from './competition-sources';
+import {competitionDirectory,directoryCollectionStatus} from './competition-directory';
 import {feedSourceSelection} from './source-feed-preferences';
 import {authorizeSchool,identifier} from './access';
 import {AppError} from './errors';
@@ -20,10 +21,13 @@ export function publicSources(pool:SqlPool,repo:Repository,readers:Readers,schoo
   const records=await pool.query("SELECT id,body FROM campus_documents WHERE (collection='sources' AND id=ANY($1::text[])) OR (collection='school_sync' AND id=ANY($2::text[]))",[selection.definitions.map(source=>source.id),competitionSources.map(source=>syncId(source.id))]);
   const recordsById=new Map(records.rows.map(row=>[row.id,row.body]));
   const sources:SourceCatalogueEntry[]=selection.definitions.map(definition=>{
+   const directory=competitionDirectory.find(source=>source.id===definition.id);
    const schoolSource=schools.sources.find(source=>source.id===definition.id),publicSource=competitionSources.find(source=>source.id===definition.id),record=recordsById.get(publicSource?syncId(definition.id):definition.id);
    const ready=publicSource?record?.version===hash(JSON.stringify(competitionConfig(publicSource))):true;
    const state:SourceCatalogueEntry['state']=schoolSource?.state||(ready&&(record?.state==='unavailable'||record?.lastErrorCode)?'unavailable':ready&&record?.lastSuccessAt?'ready':'unchecked');
-   return{...definition,schoolId,showInFeed:selection.shownIds.includes(definition.id),collectable:Boolean(schoolSource||publicSource||definition.kind==='personal'&&record?.importKind==='website'&&record.enabled!==false),state,checkedAt:schoolSource?.checkedAt||ready&&(record?.checkedAt||record?.lastAttemptAt)||null,count:schoolSource?.count??(ready&&record?.count!==undefined?Number(record.count):null),message:schoolSource?.message||(ready&&record?.message?String(record.message):publicSource?'接入前已通过列表和正文验证，本环境尚未采集。':'尚无采集记录。'),...(publicSource?{verifiedAt:publicSource.verifiedAt}:{}),nextRefreshAt:record?.retryAt||record?.nextRefreshAt||null,errorCode:record?.lastErrorCode||null};
+   const collectionStatus=publicSource?'verified':directory?directoryCollectionStatus(directory):undefined;
+   const fallback=publicSource?'接入前已通过列表和正文验证，本环境尚未采集。':collectionStatus==='entry_only'?'已收录原站链接；此入口为单篇通知、文件或需单独适配的页面，暂不自动采集。':directory?'已收录原站链接，公告列表和正文尚待验证，暂不自动采集。':'尚无采集记录。';
+   return{...definition,schoolId,showInFeed:selection.shownIds.includes(definition.id),collectable:Boolean(schoolSource||publicSource||definition.kind==='personal'&&record?.importKind==='website'&&record.enabled!==false),state,checkedAt:schoolSource?.checkedAt||ready&&(record?.checkedAt||record?.lastAttemptAt)||null,count:schoolSource?.count??(ready&&record?.count!==undefined?Number(record.count):null),message:schoolSource?.message||(ready&&record?.message?String(record.message):fallback),...(publicSource?{verifiedAt:publicSource.verifiedAt}:{}),...(directory?{collectionStatus,directory:{number:directory.number,entryType:directory.entryType,note:directory.note}}:{}),nextRefreshAt:record?.retryAt||record?.nextRefreshAt||null,errorCode:record?.lastErrorCode||null};
   });
   return{sources,total:sources.length,shown:selection.shownIds.length,hidden:selection.hiddenIds.length};
  }

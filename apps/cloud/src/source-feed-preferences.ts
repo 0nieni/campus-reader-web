@@ -1,7 +1,7 @@
 import type {School,SourceCatalogueEntry} from '@campus/contracts';
 import type {SqlPool} from './postgres-storage';
 import {schoolSources,publicSourceId} from './school-sources';
-import {competitionSources} from './competition-sources';
+import {competitionDirectory} from './competition-directory';
 import {sourceVisible,type Resource} from './scope';
 import {AppError} from './errors';
 type Definition=Pick<SourceCatalogueEntry,'id'|'name'|'kind'|'url'|'categories'>;
@@ -11,7 +11,7 @@ function publicUrl(value:unknown){try{const url=new URL(String(value));return ['
 export async function feedSourceDefinitions(pool:SqlPool,school:School,owner:string):Promise<Definition[]> {
  const definitions=new Map<string,Definition>();
  for(const source of schoolSources(school).sources)definitions.set(publicSourceId(school.id,source.key),{id:publicSourceId(school.id,source.key),name:source.label,kind:'school',url:source.announcementUrl,categories:[/学院|系[ ·]|院系/.test(source.label)?'college':'school']});
- for(const source of competitionSources)definitions.set(source.id,{id:source.id,name:source.name,kind:'public',url:source.entryUrl,categories:source.categories});
+ for(const source of competitionDirectory)definitions.set(source.id,{id:source.id,name:source.name,kind:'public',url:source.entryUrl,categories:['competition']});
  const result=await pool.query("SELECT id,body FROM campus_documents WHERE collection='sources' AND body->>'deleted' IS DISTINCT FROM 'true' AND (coalesce(body->>'ownerOpenid','')='' OR body->>'ownerOpenid'=$1) ORDER BY id LIMIT 2001",[owner]);
  if(result.rows.length>2000)throw new AppError('SOURCE_LIMIT_EXCEEDED','来源目录超过当前读取范围。');
  for(const row of result.rows){

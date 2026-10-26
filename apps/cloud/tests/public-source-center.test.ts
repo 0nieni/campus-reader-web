@@ -7,6 +7,7 @@ import {postgresRepository} from '../src/postgres-repository';
 import type {SqlPool} from '../src/postgres-storage';
 import {createGateway} from '../src/gateway';
 import {competitionSources} from '../src/competition-sources';
+import {competitionDirectory} from '../src/competition-directory';
 import {publicSources} from '../src/public-sources';
 import {schoolDirectory} from '../src/school-directory';
 import {materialArchive} from '../src/material-archive';
@@ -43,9 +44,20 @@ test('public catalogue is read-only, collection is scoped/deduplicated, and reta
  try{
   await server.applyMigrations(fileURLToPath(new URL('../../../netlify/database/migrations',import.meta.url)));await repo.selectSchool(owner,'school_002');
   const catalogue=await service.catalogue('school_002',owner);assert.ok(catalogue.sources.filter(row=>row.kind==='school').every(row=>row.showInFeed));assert.ok(catalogue.sources.filter(row=>row.kind!=='school').every(row=>!row.showInFeed));assert.equal(reads,0);
+  assert.equal(catalogue.sources.filter(row=>row.directory).length,203);
+  for(const entry of competitionDirectory){const actual=catalogue.sources.find(row=>row.id===entry.id)!;assert.ok(actual);assert.equal(actual.name,entry.name);assert.equal(actual.url,entry.entryUrl);assert.equal(actual.collectable,competitionSources.some(row=>row.id===entry.id));}
+  const pending=catalogue.sources.find(row=>row.id==='competition_001')!;assert.equal(pending.collectionStatus,'pending');assert.equal(pending.checkedAt,null);assert.equal(pending.state,'unchecked');
+  const file=catalogue.sources.find(row=>row.id==='competition_020')!;assert.equal(file.collectionStatus,'entry_only');assert.equal(file.collectable,false);
+  await repo.setSourceFeedVisibility!(owner,'school_002','competition_207',true);
+  await repo.setSourceFeedVisibility!(owner,'school_002','competition_001',true);
+  const selected=await service.catalogue('school_002',owner),another=await service.catalogue('school_002','different-owner');
+  assert.equal(selected.sources.find(row=>row.id==='competition_207')!.showInFeed,true);assert.equal(selected.sources.find(row=>row.id==='competition_208')!.showInFeed,false);
+  assert.equal(another.sources.filter(row=>row.directory).length,203);assert.equal(another.sources.find(row=>row.id==='competition_207')!.showInFeed,false);
+  await repo.setSourceFeedVisibility!(owner,'school_002','competition_207',false);
   const first=await service.refreshSource(source.id,owner);assert.deepEqual(first.stats,{newCount:2,existingCount:0,failedSources:0,skippedCount:0});assert.equal(reads,1);
   await assert.rejects(()=>service.refreshSource(source.id,owner),{code:'SOURCE_INTERVAL'});assert.equal(reads,1);
   await assert.rejects(()=>service.refreshSource('unverified-site',owner),{code:'NOT_FOUND'});assert.equal(reads,1);
+  await assert.rejects(()=>service.refreshSource('competition_001',owner),{code:'NOT_FOUND'});assert.equal(reads,1);
   const record=(await sql.query("SELECT body FROM campus_documents WHERE collection='sources' AND id=$1",[source.id])).rows[0]!.body;assert.equal(record.scope,'global');assert.equal(record.ownerOpenid,undefined);
   const row=(await sql.query("SELECT id,body FROM campus_documents WHERE collection='items' AND body->>'sourceId'=$1 ORDER BY id",[source.id])).rows[0]!;
   const material=await service.material({...row.body,_id:row.id});assert.match(material.contentText!,/合成的公开竞赛公告正文/);assert.equal(objects.size,1);const expiry=material.materialExpiresAt;
