@@ -3,6 +3,7 @@ import type {
   Notice,
   NoticeDetail,
   WorkspaceSession,
+  SchoolSourceCatalogue, SchoolSync, InitialSchoolCollection,
 } from "@campus/contracts";
 import { AppError, reject } from "./errors";
 import {noticeExcerpt} from './notice-excerpt';
@@ -16,6 +17,7 @@ import { itemVisible } from "./scope";
 import type { Repository, ItemRow } from "./repository";
 import { filtersOf, filterSince, matchesFilters } from "./filters";
 import { checkedLabels, displayedCategories, originalCategories } from './notice-labels';
+import {noticeSourceAliases} from './school-sources';
 
 const fields: Record<string, string[]> = {
   'ai.providers.list': [],
@@ -184,6 +186,18 @@ export function createGateway(
   now: () => number = Date.now,
   features?: { reminders?:{handle(action:string,input:Record<string,unknown>,identity:IdentityContext):Promise<unknown>}; websites?:{handle(action:string,input:Record<string,unknown>,identity:IdentityContext):Promise<unknown>}; bookmarks?: { handle(action: string, input: Record<string, unknown>, identity: IdentityContext): Promise<unknown>; has(ownerId: string, schoolId: string, itemId: string): Promise<boolean> }; ai?: { handle(action: string, input: Record<string, unknown>, identity: IdentityContext): Promise<unknown> }; directory?: { refresh(schoolId:string):Promise<unknown>; sources?(schoolId:string,ownerId?:string):Promise<unknown>; request(name:unknown,identity:IdentityContext):Promise<unknown> } },
 ) {
+  // Saving a choice succeeds independently of the first public school read.
+  // Only the current reading school and its reviewed columns can trigger it.
+  async function initialSchoolCollection(owner:string,schoolId:string,sourceId?:string):Promise<InitialSchoolCollection>{
+    if(!features?.directory?.sources||await repo.selectedSchool(owner)!==schoolId)return{};
+    try{
+      const catalogue=await features.directory.sources(schoolId,owner) as SchoolSourceCatalogue;
+      const candidates=sourceId?noticeSourceAliases(schoolId,sourceId):null;
+      if(!catalogue.sources.some(source=>(candidates?candidates.includes(source.id):source.showInFeed!==false)&&source.state==='unchecked'&&source.checkedAt===null))return{};
+      const result=await features.directory.refresh(schoolId) as SchoolSync;
+      return{initialCollection:{state:result.state,message:result.message}};
+    }catch{return{initialCollection:{state:'unavailable',message:'勾选已保存，首次学校采集暂未完成。可稍后点击“刷新本校公告”重试，已有公告保留。'}};}
+  }
   return async (
     event: unknown,
     caller: Caller,
@@ -201,7 +215,8 @@ export function createGateway(
       if(action==='sources.feedVisibilityAll'){
         if(!repo.setAllSourceFeedVisibility)reject('SERVICE_UNAVAILABLE','来源批量显示设置尚未接通。');
         if(typeof input.visible!=='boolean')reject('VALIDATION_FAILED','请选择显示或隐藏。');
-        return{ok:true,data:await repo.setAllSourceFeedVisibility(identity.dataOwnerId,text(input,'schoolId'),input.visible)};
+        const schoolId=text(input,'schoolId'),saved=await repo.setAllSourceFeedVisibility(identity.dataOwnerId,schoolId,input.visible);
+        return{ok:true,data:{...saved,...(input.visible?await initialSchoolCollection(identity.dataOwnerId,schoolId):{})}};
       }
       if(action.startsWith('reminders.')){
         if(!features?.reminders)reject('SERVICE_UNAVAILABLE','此环境尚未接通提醒服务。');
@@ -210,7 +225,8 @@ export function createGateway(
       if(action==='sources.feedVisibility'){
         if(!repo.setSourceFeedVisibility)reject('SERVICE_UNAVAILABLE','此环境尚未接通来源显示设置。');
         if(typeof input.visible!=='boolean')reject('VALIDATION_FAILED','请选择是否在主页公告中显示。');
-        return{ok:true,data:await repo.setSourceFeedVisibility(identity.dataOwnerId,text(input,'schoolId'),text(input,'sourceId'),input.visible)};
+        const schoolId=text(input,'schoolId'),sourceId=text(input,'sourceId'),saved=await repo.setSourceFeedVisibility(identity.dataOwnerId,schoolId,sourceId,input.visible);
+        return{ok:true,data:{...saved,...(input.visible?await initialSchoolCollection(identity.dataOwnerId,schoolId,sourceId):{})}};
       }
       if(action.startsWith('sources.')){
         if(!features?.websites)reject('SERVICE_UNAVAILABLE','网站来源管理尚未接通。');
@@ -264,19 +280,22 @@ export function createGateway(
         const offset = offsetOf(input.cursor);
         const selection=await repo.feedSourceSelection?.(identity.dataOwnerId,schoolId);
         const hiddenSourceIds=selection?.hiddenIds??await repo.hiddenFeedSources?.(identity.dataOwnerId,schoolId)??[];
-        const excluded=hiddenSourceIds;
+        const excluded=selection?.noticeHiddenIds??hiddenSourceIds;
+        const shownSourceIds=selection?.noticeShownIds??selection?.shownIds;
+        const sourceFilterIds=filters.sourceId?noticeSourceAliases(schoolId,filters.sourceId):null;
         if (filters.categories?.length === 0) return {ok:true,data:{items:[],nextCursor:null,...(hiddenSourceIds.length?{hiddenSourceCount:hiddenSourceIds.length}:{})}};
-        const rows = await repo.items(scope, offset, 21, since, filters,{hiddenSourceIds:excluded,...(selection?{shownSourceIds:selection.shownIds}:{})});
+        const rows = await repo.items(scope, offset, 21, since, filters,{hiddenSourceIds:excluded,...(shownSourceIds?{shownSourceIds}:{})});
         // DB predicates operate before pagination; recheck every returned row for defense in depth.
         if (
           rows.some(
             (row) =>
               !itemVisible(row, scope) ||
               excluded.includes(row.sourceId||'') ||
-              (selection&&!selection.shownIds.includes(row.sourceId||'')) ||
+              (shownSourceIds&&!shownSourceIds.includes(row.sourceId||'')) ||
               row.status !== "published" ||
               !isRetained(row, since) ||
-              !matchesFilters(row, filters),
+              (sourceFilterIds&&!sourceFilterIds.includes(row.sourceId||'')) ||
+              !matchesFilters(row, {...filters,sourceId:undefined}),
           )
         )
           reject(

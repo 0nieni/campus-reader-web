@@ -4,13 +4,14 @@ import type {SourceCatalogueEntry} from '@campus/contracts';
 import WebsiteSourcesPanel from '../src/components/WebsiteSourcesPanel.vue';
 import type {Transport} from '../src/lib/transport';
 import {ClientError} from '../src/lib/errors';
-function fixture(options:{failSave?:boolean;failCollect?:boolean;directory?:boolean}={}){
+function fixture(options:{failSave?:boolean;failCollect?:boolean;directory?:boolean;personal?:boolean;initialCollection?:boolean}={}){
  const sources:SourceCatalogueEntry[]=[{id:'school',name:'本校教务通知',kind:'school',schoolId:'bjtu',url:'https://school.example.edu.cn/notices',categories:['school'],showInFeed:true,collectable:true,state:'unchecked',checkedAt:null,count:null,message:'尚未检查'},{id:'public',name:'计算机竞赛公告',kind:'public',schoolId:'bjtu',url:'https://contest.example.org/notices',categories:['competition'],showInFeed:false,collectable:true,state:'unchecked',checkedAt:null,count:null,message:'接入前已验证'},{id:'personal',name:'我的学院来源',kind:'personal',schoolId:'bjtu',url:'https://mine.example.edu.cn/notices',categories:['college'],showInFeed:false,collectable:true,state:'unchecked',checkedAt:null,count:null,message:'尚未采集'}];
  if(options.directory)sources.push({id:'pending',name:'等待接入的竞赛',kind:'public',schoolId:'bjtu',url:'https://contest.example.org/',categories:['competition'],showInFeed:false,collectable:false,state:'unchecked',checkedAt:null,count:null,message:'尚待验证，暂不自动采集。',collectionStatus:'pending',directory:{number:1,entryType:'官网',note:'导航原始备注'}},{id:'file',name:'竞赛文件入口',kind:'public',schoolId:'bjtu',url:'http://contest.example.org/notice.pdf',categories:['competition'],showInFeed:false,collectable:false,state:'unchecked',checkedAt:null,count:null,message:'已收录原站链接，暂不自动采集。',collectionStatus:'entry_only',directory:{number:20,entryType:'高校通知',note:'往届通知，不代表当届报名时间'}});
  const call=vi.fn(async(action:string,input:Record<string,unknown>)=>{
   if(action==='sources.catalogue')return{sources:sources.map(row=>({...row})),total:sources.length,shown:sources.filter(row=>row.showInFeed).length,hidden:sources.filter(row=>!row.showInFeed).length};
-  if(action==='sources.feedVisibility'){if(options.failSave)throw new ClientError('SAVE_FAILED','保存未完成');sources.find(row=>row.id===input.sourceId)!.showInFeed=Boolean(input.visible);return{visible:input.visible};}
+  if(action==='sources.feedVisibility'){if(options.failSave)throw new ClientError('SAVE_FAILED','保存未完成');const row=sources.find(row=>row.id===input.sourceId)!;row.showInFeed=Boolean(input.visible);if(options.initialCollection&&row.kind==='school'&&input.visible){row.state='ready';row.count=3;return{visible:true,initialCollection:{state:'ready',message:'首次采集完成，共 3 条公告。'}};}return{visible:input.visible};}
   if(action==='sources.feedVisibilityAll'){sources.forEach(row=>row.showInFeed=Boolean(input.visible));return{total:sources.length,shown:input.visible?sources.length:0,hidden:input.visible?0:sources.length};}
+  if(action==='sources.list')return{sources:options.personal?[{id:'personal',name:'我的学院来源',entryUrl:'https://mine.example.edu.cn/notices',type:'html_list',categories:['college'],intervalMinutes:60,selectors:{},allowAi:true,authorized:true,enabled:true,lastSuccessAt:null,message:'尚未采集',count:0,showInFeed:sources.find(row=>row.id==='personal')!.showInFeed}]:[]};
   if(action==='sources.public.refresh'){if(options.failCollect)throw new ClientError('LEXMOUNT_NOT_CONFIGURED','Lexmount 尚未正确配置');return{count:2,message:'已采集 2 条',stats:{newCount:2,existingCount:0,failedSources:0,skippedCount:0}};}
   throw new Error('Unexpected action '+action);
  });
@@ -50,4 +51,23 @@ it('keeps unverified and document entries visible and checkable without presenti
  await button(wrapper,'清除筛选').trigger('click');expect(wrapper.findAll('[data-source-id]')).toHaveLength(5);
  await wrapper.get('select[aria-label="来源采集能力"]').setValue('collectable');expect(wrapper.findAll('[data-source-id]')).toHaveLength(3);
  expect(call.mock.calls.every(([action])=>['sources.catalogue','sources.feedVisibility'].includes(action))).toBe(true);wrapper.unmount();
+});
+it('includes checked school and public sources in manage-my-sources alongside personal management',async()=>{
+ const {transport,call}=fixture({directory:true,personal:true}),wrapper=mount(WebsiteSourcesPanel,{props:{transport,schoolId:'bjtu',schoolName:'北京交通大学',openSchool:vi.fn()}});await flushPromises();
+ await wrapper.get('[data-source-id=public] input').setValue(true);await flushPromises();
+ await button(wrapper,'管理我的来源').trigger('click');await flushPromises();
+ const checked=wrapper.get('section[aria-label="已勾选来源"]');
+ expect(checked.findAll('[data-source-id]')).toHaveLength(2);expect(checked.text()).toContain('本校教务通知');expect(checked.text()).toContain('计算机竞赛公告');
+ expect(checked.text()).not.toContain('等待接入的竞赛');expect(checked.text()).not.toContain('编辑');expect(checked.text()).not.toContain('移除');
+ expect(wrapper.find('section[aria-label="个人来源管理"]').exists()).toBe(true);
+ expect(wrapper.get('section[aria-label="个人来源管理"]').text()).toContain('我的学院来源');expect(checked.text()).not.toContain('我的学院来源');
+ await checked.get('[data-source-id=public] input').setValue(false);await flushPromises();expect(checked.findAll('[data-source-id]')).toHaveLength(1);
+ expect(call).toHaveBeenCalledWith('sources.feedVisibility',{schoolId:'bjtu',sourceId:'public',visible:false});wrapper.unmount();
+});
+it('reloads school collection status after the first checked choice completes and exposes it in management',async()=>{
+ const {transport,call}=fixture({initialCollection:true}),wrapper=mount(WebsiteSourcesPanel,{props:{transport,schoolId:'bjtu',schoolName:'北京交通大学'}});await flushPromises();
+ await wrapper.get('[data-source-id=school] input').setValue(false);await flushPromises();await wrapper.get('[data-source-id=school] input').setValue(true);await flushPromises();
+ expect(wrapper.get('[role=status]').text()).toContain('首次采集完成');await button(wrapper,'管理我的来源').trigger('click');await flushPromises();
+ expect(wrapper.get('[data-source-id=school]').text()).toContain('最近读取成功');expect(wrapper.get('[data-source-id=school]').text()).toContain('上次读取 3 条');
+ expect(call.mock.calls.filter(([action])=>action==='school.refresh')).toHaveLength(0);wrapper.unmount();
 });

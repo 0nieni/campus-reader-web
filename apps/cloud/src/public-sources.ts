@@ -8,6 +8,7 @@ import type {MaterialArchive} from './material-archive';
 import {competitionSources,competitionConfig} from './competition-sources';
 import {competitionDirectory,directoryCollectionStatus} from './competition-directory';
 import {feedSourceSelection} from './source-feed-preferences';
+import {noticeSourceAliases} from './school-sources';
 import {authorizeSchool,identifier} from './access';
 import {AppError} from './errors';
 import {hash,parserSource,parseWebsite} from './website-parser';
@@ -22,7 +23,7 @@ export function publicSources(pool:SqlPool,repo:Repository,readers:Readers,schoo
   const recordsById=new Map(records.rows.map(row=>[row.id,row.body]));
   const sources:SourceCatalogueEntry[]=selection.definitions.map(definition=>{
    const directory=competitionDirectory.find(source=>source.id===definition.id);
-   const schoolSource=schools.sources.find(source=>source.id===definition.id),publicSource=competitionSources.find(source=>source.id===definition.id),record=recordsById.get(publicSource?syncId(definition.id):definition.id);
+   const schoolSource=schools.sources.find(source=>noticeSourceAliases(schoolId,definition.id).includes(source.id)),publicSource=competitionSources.find(source=>source.id===definition.id),record=recordsById.get(publicSource?syncId(definition.id):definition.id);
    const ready=publicSource?record?.version===hash(JSON.stringify(competitionConfig(publicSource))):true;
    const state:SourceCatalogueEntry['state']=schoolSource?.state||(ready&&(record?.state==='unavailable'||record?.lastErrorCode)?'unavailable':ready&&record?.lastSuccessAt?'ready':'unchecked');
    const collectionStatus=publicSource?'verified':directory?directoryCollectionStatus(directory):undefined;
