@@ -98,13 +98,12 @@ onUnmounted(()=>{active=false;request++;});
      <span class="source-status" :class="`source-status-${source.state}`">{{stateNames[source.state]}}</span>
      <h3>{{source.name}}</h3><p class="muted small">{{catalogue.school.name}} · 已配置</p>
      <label class="source-display"><input type="checkbox" aria-label="在主页公告中显示" :checked="source.showInFeed!==false" :disabled="acting" @change="setFeedVisibility(source,$event)">在主页公告中显示</label>
-     <a v-if="safeOriginal(source.url)" class="source-url" :href="safeOriginal(source.url)!" target="_blank" rel="noopener noreferrer">查看原站 ↗</a>
-     <button v-if="openSchool" class="text-button" :disabled="acting||source.showInFeed===false" @click="open(source)">查看该来源公告</button>
      <p class="small">{{catalogue.coverage}}</p><p class="muted small">{{source.message}}</p>
      <p v-if="sourceDiagnosis(source.errorCode)" class="source-diagnosis small"><strong>{{sourceDiagnosis(source.errorCode)!.title}}</strong> · {{sourceDiagnosis(source.errorCode)!.advice}}</p>
      <p v-if="source.stats" class="small">本次新增 {{source.stats.newCount}} 条 · 已有 {{source.stats.existingCount}} 条 · 失败 {{source.stats.failedSources}} 个来源</p>
      <p class="muted small">最近检查：{{displaySourceTime(source.checkedAt)}}<template v-if="source.count!==null"> · 上次读取 {{source.count}} 条</template></p>
      <p v-if="source.nextRefreshAt" class="muted small">下次可重新检查：{{displaySourceTime(source.nextRefreshAt)}}（此前刷新使用缓存）</p>
+     <div class="source-actions"><a v-if="safeOriginal(source.url)" :href="safeOriginal(source.url)!" target="_blank" rel="noopener noreferrer">查看原站</a><button class="text-button" :disabled="acting||!openSchool||source.showInFeed===false" @click="open(source)">查看该来源下公告</button><button class="text-button" :disabled="acting||source.showInFeed===false||browsing!==schoolId" :title="browsing!==schoolId?'先切换到该校，再更新来源':source.showInFeed===false?'先勾选此来源，再更新':undefined" @click="refresh">更新来源</button></div>
     </article>
    </div>
    <p class="muted small">读取状态来自已有检查记录，不代表实时可用；列表读取成功也不保证每篇正文和附件可读。学校内置来源由项目维护者统一配置。</p>

@@ -22,7 +22,7 @@ function fixture(extra?:(action:string,input:any)=>unknown){
  });
  return{call,transport:{call} as unknown as Transport};
 }
-const button=(wrapper:any,label:string)=>wrapper.findAll('button').find((b:any)=>b.text()===label)!;
+const button=(wrapper:any,label:string)=>wrapper.findAll('button').find((b:any)=>b.text()===label&&b.isVisible())!;
 async function browseSchools(wrapper:any){await button(wrapper,'浏览学校').trigger('click');await flushPromises();}
 it('browses schools without selecting or collecting, then explicitly requests a school switch',async()=>{
  const {call,transport}=fixture();const open=vi.fn(async()=>{});
@@ -91,8 +91,8 @@ it('edits, toggles and confirms removal of personal sources while keeping the sc
  expect(button(wrapper,'编辑')).toBeUndefined();await button(wrapper,'管理我的来源').trigger('click');await flushPromises();
  await button(wrapper,'编辑').trigger('click');expect(wrapper.get('input[type=url]').attributes('readonly')).toBeDefined();
  await wrapper.get('input[placeholder="例如：某学院通知公告"]').setValue('更新后的个人通知');await wrapper.get('form').trigger('submit.prevent');await flushPromises();expect(wrapper.text()).toContain('更新后的个人通知');
- await button(wrapper,'停用').trigger('click');await flushPromises();expect(button(wrapper,'立即采集').attributes('disabled')).toBeDefined();
- await button(wrapper,'启用').trigger('click');await flushPromises();expect(button(wrapper,'立即采集').attributes('disabled')).toBeUndefined();
+ await button(wrapper,'停用').trigger('click');await flushPromises();expect(button(wrapper.get('section[aria-label=个人来源管理]'),'更新来源').attributes('disabled')).toBeDefined();
+ await button(wrapper,'启用').trigger('click');await flushPromises();expect(button(wrapper.get('section[aria-label=个人来源管理]'),'更新来源').attributes('disabled')).toBeUndefined();
  await button(wrapper,'移除').trigger('click');expect(call.mock.calls.some(([a])=>a==='sources.remove')).toBe(false);
  await button(wrapper,'确认移除').trigger('click');await flushPromises();expect(wrapper.text()).toContain('还没有添加网站来源');wrapper.unmount();
 });
@@ -101,7 +101,7 @@ it('keeps collection completion and draft state when switching source tabs durin
  const source={id:'mine',name:'个人通知',enabled:true,type:'rss',entryUrl:'https://mine.example.edu.cn/',categories:['school'],intervalMinutes:60,selectors:{},allowAi:true,authorized:true,lastSuccessAt:null,count:0,message:'尚未采集'};
  const {transport}=fixture(a=>a==='sources.list'?{sources:[source]}:a==='sources.refresh'?pending:undefined);
  const wrapper=mount(WebsiteSourcesPanel,{props:{transport,schoolId:'bjtu',schoolName:'北京交通大学'}});await flushPromises();await browseSchools(wrapper);
- await button(wrapper,'管理我的来源').trigger('click');await flushPromises();await button(wrapper,'立即采集').trigger('click');await button(wrapper,'浏览学校').trigger('click');
+ await button(wrapper,'管理我的来源').trigger('click');await flushPromises();await button(wrapper.get('section[aria-label=个人来源管理]'),'更新来源').trigger('click');await button(wrapper,'浏览学校').trigger('click');
  resolve({count:1,message:'采集完成'});await flushPromises();expect(wrapper.emitted('changed')).toHaveLength(1);
  await button(wrapper,'管理我的来源').trigger('click');await flushPromises();expect(wrapper.text()).toContain('采集完成');wrapper.unmount();
 });
@@ -188,7 +188,7 @@ it('shows a school-wide display count and sends one bulk mutation for all source
 });
 it('opens an individual source without changing its home display preference',async()=>{
  const open=vi.fn(async()=>{});const {transport,call}=fixture();const wrapper=mount(WebsiteSourcesPanel,{props:{transport,schoolId:'bjtu',schoolName:'北京交通大学',openSchool:open}});await flushPromises();await browseSchools(wrapper);
- await button(wrapper,'查看该来源公告').trigger('click');await flushPromises();expect(open).toHaveBeenCalledExactlyOnceWith('bjtu',{id:'public_bjtu',name:'本校教务通知'});expect(call.mock.calls.some(([a])=>a==='sources.feedVisibility')).toBe(false);wrapper.unmount();
+ await button(wrapper,'查看该来源下公告').trigger('click');await flushPromises();expect(open).toHaveBeenCalledExactlyOnceWith('bjtu',{id:'public_bjtu',name:'本校教务通知'});expect(call.mock.calls.some(([a])=>a==='sources.feedVisibility')).toBe(false);wrapper.unmount();
 });
 it('explains verified source failures and displays collection details and minute-level check time',async()=>{
  const {transport}=fixture(a=>a==='school.sources'?{...catalogue('bjtu'),sources:[{...catalogue('bjtu').sources[0],state:'unavailable',errorCode:'SOURCE_LOGIN_REQUIRED',checkedAt:'2026-10-24T03:03:00Z',stats:{newCount:0,existingCount:0,failedSources:1,skippedCount:0}}]}:undefined);
@@ -210,7 +210,7 @@ it('App preserves an explicit source filter when searching and clears it when vi
   if(a==='feed.list')return{items:[],nextCursor:null,hiddenSourceCount:1};
  });Object.assign(transport,{restore:async()=>({uid:'source-test',username:null}),onSessionChange:()=>()=>{}});
  const pinia=createPinia(),wrapper=mount(App,{props:{transport,configurationIssues:[]},global:{plugins:[pinia]}});await flushPromises();
- await button(wrapper,'管理来源').trigger('click');await vi.waitFor(()=>expect(wrapper.find('.website-sources').exists()).toBe(true));await browseSchools(wrapper);await flushPromises();await button(wrapper,'查看该来源公告').trigger('click');await flushPromises();
+ await button(wrapper,'管理来源').trigger('click');await vi.waitFor(()=>expect(wrapper.find('.website-sources').exists()).toBe(true));await browseSchools(wrapper);await flushPromises();await button(wrapper,'查看该来源下公告').trigger('click');await flushPromises();
  expect(wrapper.get('.source-filter-banner').text()).toContain('本校教务通知');expect(wrapper.text()).toContain('主页显示设置不变');
  await wrapper.get('#notice-keyword').setValue('竞赛');await wrapper.get('form.feed-filters').trigger('submit.prevent');await flushPromises();expect(call.mock.calls.filter(([a])=>a==='feed.list').at(-1)![1]).toMatchObject({sourceId:'public_bjtu',keyword:'竞赛'});
  await button(wrapper,'查看全部来源').trigger('click');await flushPromises();expect(wrapper.find('.source-filter-banner').exists()).toBe(false);expect(call.mock.calls.filter(([a])=>a==='feed.list').at(-1)![1]).not.toHaveProperty('sourceId');
@@ -220,7 +220,7 @@ it('keeps a personal source collection button disabled only until the advertised
  vi.useFakeTimers();vi.setSystemTime(new Date('2026-10-24T03:00:00Z'));
  const {transport}=fixture(a=>a==='sources.list'?{sources:[{id:'mine',name:'个人通知',enabled:true,type:'rss',entryUrl:'https://mine.example.edu.cn/',categories:['school'],intervalMinutes:60,selectors:{},allowAi:true,authorized:true,lastSuccessAt:null,count:0,message:'尚未采集',nextRefreshAt:'2026-10-24T03:00:02Z'}]}:undefined);
  const wrapper=mount(WebsiteSourcesPanel,{props:{transport,schoolId:'bjtu',schoolName:'北京交通大学'}});
- try{await flushPromises();await button(wrapper,'管理我的来源').trigger('click');await flushPromises();expect(button(wrapper,'立即采集').attributes('disabled')).toBeDefined();expect(wrapper.text()).toContain('11:00');await vi.advanceTimersByTimeAsync(3000);expect(button(wrapper,'立即采集').attributes('disabled')).toBeUndefined();}
+ try{await flushPromises();await button(wrapper,'管理我的来源').trigger('click');await flushPromises();expect(button(wrapper.get('section[aria-label=个人来源管理]'),'更新来源').attributes('disabled')).toBeDefined();expect(wrapper.text()).toContain('11:00');await vi.advanceTimersByTimeAsync(3000);expect(button(wrapper.get('section[aria-label=个人来源管理]'),'更新来源').attributes('disabled')).toBeUndefined();}
  finally{wrapper.unmount();vi.useRealTimers();}
 });
 it('keeps the previous summary and source choices after bulk saving fails',async()=>{

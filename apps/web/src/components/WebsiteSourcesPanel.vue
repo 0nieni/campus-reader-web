@@ -18,7 +18,7 @@ const locked=computed(()=>busy.value||schoolBusy.value||personalBusy.value);
 const shown=computed(()=>catalogue.value?.sources.filter(row=>row.showInFeed).length||0);
 const checkedShared=computed(()=>catalogue.value?.sources.filter(row=>row.showInFeed&&row.kind!=='personal')||[]);
 const directoryCount=computed(()=>catalogue.value?.sources.filter(row=>row.directory).length||0);
-const directoryCollectable=computed(()=>catalogue.value?.sources.filter(row=>row.directory&&row.collectable).length||0);
+const directoryCollectable=computed(()=>catalogue.value?.sources.filter(row=>row.directory&&row.collectionStatus==='verified').length||0);
 const filtered=computed(()=>catalogue.value?.sources.filter(row=>
  categories.value.some(category=>row.categories.includes(category))&&
  (kind.value==='all'||row.kind===kind.value)&&
@@ -48,7 +48,7 @@ async function setAll(visible:boolean){
  finally{if(active)busy.value=false;}
 }
 async function collect(row:SourceCatalogueEntry){
- if(locked.value||!props.schoolId||!row.showInFeed||!row.collectable)return;busy.value=true;error.value='';message.value='';
+ if(locked.value||!props.schoolId||!row.showInFeed||!row.url)return;busy.value=true;error.value='';message.value='';
  try{
   const result=row.kind==='school'?await props.transport.call('school.refresh',{schoolId:props.schoolId}):row.kind==='public'?await props.transport.call('sources.public.refresh',{schoolId:props.schoolId,sourceId:row.id}):await props.transport.call('sources.refresh',{schoolId:props.schoolId,sourceId:row.id});
   if(!active)return;message.value=result.message;emit('changed');await load();
@@ -70,7 +70,7 @@ onMounted(()=>void load());onUnmounted(()=>{active=false;request++;});
   <p class="source-reading-school">当前阅读学校：{{schoolName||'尚未选择'}}<template v-if="catalogue"> · 已勾选 {{shown}}/{{catalogue.sources.length}} 个来源</template></p>
   <p class="muted">学校来源默认勾选，公共来源和我的来源默认不勾选。只有勾选的来源才会在公告页显示，设置仅对本人当前阅读学校生效。</p>
   <p class="muted small">当前学校来源首次勾选时会采集一次，之后每日更新。浏览和筛选不会触发采集；可随时用“刷新本校公告”检查更新。</p>
-  <p v-if="directoryCount" class="muted small">已收录竞赛导航中 {{directoryCount}} 个有链接的项目，每个竞赛独立显示，重复网址保留。其中 {{directoryCollectable}} 个项目已接入采集；其余可访问原站，接入前不会自动产生公告。勾选和浏览目录不会触发采集。</p>
+  <p v-if="directoryCount" class="muted small">已收录竞赛导航中 {{directoryCount}} 个有链接的项目，每个竞赛独立显示，重复网址保留。其中 {{directoryCollectable}} 个项目已验证接入；其他来源可勾选后点击“更新来源”手动尝试识别，失败会显示原因。仅勾选或浏览竞赛目录不会触发采集。</p>
   <div class="source-tabs" role="group" aria-label="来源视图">
    <button :aria-pressed="tab==='all'" :class="{active:tab==='all'}" @click="tab='all'">全部来源</button>
    <button :aria-pressed="tab==='schools'" :class="{active:tab==='schools'}" @click="tab='schools';schoolVisited=true">浏览学校</button>

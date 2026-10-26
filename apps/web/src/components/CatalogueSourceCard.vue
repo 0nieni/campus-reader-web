@@ -6,7 +6,7 @@ const emit=defineEmits<{toggle:[row:SourceCatalogueEntry,event:Event];collect:[r
 const sourceKinds={school:'学校来源',public:'公共来源',personal:'我的来源'};
 const states={unchecked:'尚未采集',ready:'最近读取成功',unavailable:'暂未读取成功'};
 function categoryLabel(values:readonly string[]){return values.map(category=>categoryNames[category]||category).join(' · ');}
-function statusLabel(row:SourceCatalogueEntry){return row.collectionStatus==='pending'?'待验证':row.collectionStatus==='entry_only'?'仅原站入口':states[row.state];}
+function statusLabel(row:SourceCatalogueEntry){return row.state==='unchecked'&&row.collectionStatus==='pending'?'待验证':row.state==='unchecked'&&row.collectionStatus==='entry_only'?'仅原站入口':states[row.state];}
 </script>
 <template>
  <article class="source-card" :data-source-id="row.id">
@@ -20,6 +20,6 @@ function statusLabel(row:SourceCatalogueEntry){return row.collectionStatus==='pe
   <p class="muted small">最近检查：{{displaySourceTime(row.checkedAt)}}<template v-if="row.count!==null"> · 上次读取 {{row.count}} 条</template></p>
   <p v-if="row.verifiedAt" class="muted small">接入验证：{{displaySourceTime(row.verifiedAt)}}。读取状态可能随原站变化。</p>
   <p v-if="row.nextRefreshAt" class="muted small">下次可采集：{{displaySourceTime(row.nextRefreshAt)}}</p>
-  <div class="source-actions"><a v-if="safeOriginal(row.url)" :href="safeOriginal(row.url)!" target="_blank" rel="noopener noreferrer">查看原站</a><button v-if="canInspect&&(row.collectable||!row.directory)" class="text-button" :disabled="locked||!row.showInFeed" @click="emit('inspect',row)">查看该来源公告</button><button v-if="row.collectable" class="text-button" :disabled="locked||!row.showInFeed" @click="emit('collect',row)">{{row.kind==='school'?'刷新本校公告':'立即采集'}}</button></div>
+  <div class="source-actions"><a v-if="safeOriginal(row.url)" :href="safeOriginal(row.url)!" target="_blank" rel="noopener noreferrer">查看原站</a><span v-else class="muted" aria-disabled="true" title="此来源没有可用的公开网址">查看原站</span><button class="text-button" :disabled="locked||!row.showInFeed||!canInspect" :title="!row.showInFeed?'先勾选此来源，再查看公告':undefined" @click="emit('inspect',row)">查看该来源下公告</button><button class="text-button" :disabled="locked||!row.showInFeed||!safeOriginal(row.url)" :title="!row.showInFeed?'先勾选此来源，再更新':!row.url?'此来源没有可用的公开网址':undefined" @click="emit('collect',row)">更新来源</button></div>
  </article>
 </template>

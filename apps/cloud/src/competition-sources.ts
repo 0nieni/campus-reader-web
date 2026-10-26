@@ -8,4 +8,4 @@ export const competitionSources:readonly CompetitionSource[]=[
  {id:'competition_207',name:'“挑战杯”全国大学生课外学术科技作品竞赛',entryUrl:'https://www.tiaozhanbei.net/tzb/notice',categories:['competition'],projects:[{number:207,name:'“挑战杯”全国大学生课外学术科技作品竞赛'}],verifiedAt:'2026-10-25T12:48:42.569Z',verifiedCount:15},
  {id:'competition_208',name:'“挑战杯”全国大学生创业计划大赛',entryUrl:'https://www.tiaozhanbei.net/tzb/notice',categories:['competition'],projects:[{number:208,name:'“挑战杯”全国大学生创业计划大赛'}],verifiedAt:'2026-10-25T12:48:42.569Z',verifiedCount:15},
 ];
-export function competitionConfig(source:CompetitionSource):WebsiteSourceInput{return{name:source.name,entryUrl:source.entryUrl,type:'html_list',categories:source.categories,intervalMinutes:60,selectors:source.selectors||{},allowAi:true,authorized:true};}
+export function competitionConfig(source:Pick<CompetitionSource,'name'|'entryUrl'|'categories'|'selectors'>):WebsiteSourceInput{return{name:source.name,entryUrl:source.entryUrl,type:'html_list',categories:source.categories,intervalMinutes:60,selectors:source.selectors||{},allowAi:true,authorized:true};}
