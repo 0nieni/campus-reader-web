@@ -8,7 +8,7 @@ import {isPrivate,itemVisible,sourceVisible,type Resource,type Scope} from './sc
 import {isRetained} from './gateway';
 import type {ItemRow} from './repository';
 import {reject} from './errors';
-import {checkedSubscription,endpointHash,sendBrowserPush,type PushConfig} from './browser-push';
+import {checkedSubscription,endpointHash,sendBrowserPush,reminderPushMessage,type PushConfig} from './browser-push';
 import {reminderCalendar} from './reminder-calendar';
 import {syncReminderJobs,flushReminderJobs,reminderDeliveryState,type ReminderPublisher} from './reminder-jobs';
 import {aliyunJobs,type AliyunOptions} from './aliyun-reminder-jobs';
@@ -136,9 +136,21 @@ export function reminderService(pool:SqlPool,options:Options={}){
     if(action==='reminders.push.test'){
       if(!options.push)reject('PUSH_UNAVAILABLE','当前环境尚未启用浏览器推送。');
       if(typeof input.endpoint!=='string'||input.endpoint.length>2048)reject('VALIDATION_FAILED','推送设备信息无效。');
-      const {rows}=await pool.query("UPDATE campus_push_devices SET last_test_at=$3 WHERE owner_id=$1 AND endpoint_hash=$2 AND (last_test_at IS NULL OR last_test_at < $3::timestamptz - interval '1 minute') RETURNING subscription",[owner,endpointHash(input.endpoint),new Date(now()).toISOString()]);
-      if(!rows.length)reject('PUSH_NOT_READY','请先开启此浏览器推送；测试每分钟最多一次。');
-      try{await send(checkedSubscription(rows[0].subscription),options.push,'campus-reader-test');}catch{reject('PUSH_FAILED','推送服务未确认接收，请检查网络与系统通知权限后重试。');}
+      const hash=endpointHash(input.endpoint);
+      const {rows}=await pool.query("UPDATE campus_push_devices SET last_test_at=$3 WHERE owner_id=$1 AND endpoint_hash=$2 AND (last_test_at IS NULL OR last_test_at <= $3::timestamptz - interval '1 minute') RETURNING subscription,binding_id",[owner,hash,new Date(now()).toISOString()]);
+      if(!rows.length){
+        const binding=await pool.query('SELECT last_test_at FROM campus_push_devices WHERE owner_id=$1 AND endpoint_hash=$2',[owner,hash]);
+        if(binding.rows.length)reject('PUSH_RATE_LIMIT','测试通知每分钟最多一次，请等待60秒后重试。');
+        reject('PUSH_NOT_READY','此设备的推送订阅已失效，请重新开启此浏览器推送。');
+      }
+      try{await send(checkedSubscription(rows[0].subscription),options.push,'campus-reader-test',{title:'校园阅览室｜测试通知',body:'这是一条推送测试消息。看到此通知，表示当前设备可以显示网站推送。'});}
+      catch(error){
+        if([404,410].includes(Number((error as {statusCode?:number})?.statusCode))){
+          await pool.query('DELETE FROM campus_push_devices WHERE owner_id=$1 AND endpoint_hash=$2 AND binding_id=$3',[owner,hash,rows[0].binding_id]);
+          reject('PUSH_NOT_READY','此设备的推送订阅已失效，请重新开启此浏览器推送。');
+        }
+        reject('PUSH_FAILED','推送服务未确认接收，请检查网络与系统通知权限后重试。');
+      }
       return{accepted:true};
     }
     return transaction(owner,async(state,client)=>{
@@ -278,11 +290,11 @@ export function reminderService(pool:SqlPool,options:Options={}){
       try{
         const allowed=await transaction(owner,async(state,client)=>{
           await synchronize(state,client,owner);
-          if(!state.reminders.some(r=>r.id===job.reminderId&&r.generation===job.generation))return false;
-          const binding=await client.query('SELECT endpoint_hash FROM campus_push_devices WHERE endpoint_hash=$1 AND owner_id=$2 AND binding_id=$3',[job.endpoint_hash,owner,job.binding_id]);return Boolean(binding.rows.length);
+          const reminder=state.reminders.find(r=>r.id===job.reminderId&&r.generation===job.generation);if(!reminder)return false;
+          const binding=await client.query('SELECT endpoint_hash FROM campus_push_devices WHERE endpoint_hash=$1 AND owner_id=$2 AND binding_id=$3',[job.endpoint_hash,owner,job.binding_id]);return binding.rows.length?reminder:false;
         });
         if(allowed){
-          try{await send(checkedSubscription(job.subscription),push,jobId);outcome='sent';accepted++;}
+          try{await send(checkedSubscription(job.subscription),push,jobId,reminderPushMessage(allowed));outcome='sent';accepted++;}
           catch(error){const code=Number((error as {statusCode?:number})?.statusCode);outcome=Number.isFinite(code)&&code>0?'failed':'unknown';expired=[404,410].includes(code);failed++;}
         }
         await transaction(owner,async(_state,client)=>{

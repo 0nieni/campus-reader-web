@@ -8,13 +8,17 @@ import {postgresStorage,type SqlPool} from '../src/postgres-storage';
 import {postgresRepository} from '../src/postgres-repository';
 import {createGateway} from '../src/gateway';
 import {reminderService,runReminderTick} from '../src/reminders';
-import {checkedSubscription,createPushRequest,type PushConfig} from '../src/browser-push';
+import {checkedSubscription,createPushRequest,reminderPushMessage,type PushConfig} from '../src/browser-push';
 import webpush from 'web-push';
 import {foldCalendarLine} from '../src/reminder-calendar';
 import {cleanupReminderData} from '../src/reminder-cleanup';
 
 const device=(token:string)=>{const key=createECDH('prime256v1');key.generateKeys();return{endpoint:`https://fcm.googleapis.com/fcm/send/${token}`,keys:{p256dh:key.getPublicKey().toString('base64url'),auth:randomBytes(16).toString('base64url')}};};
 const push:PushConfig={publicKey:'synthetic-public',privateKey:'synthetic-private',subject:'https://example.test'};
+test('deadline notifications show the announcement title and actual deadline in Beijing time',()=>{
+ const message=reminderPushMessage({title:'合成竞赛报名公告',label:'报名截止',dueAt:'2027-01-20T01:30:00.000Z'});
+ assert.equal(message.title,'合成竞赛报名公告');assert.equal(message.body,'报名截止\n到期时间：2027-01-20 09:30（北京时间）');
+});
 test('push subscriptions validate vendor URLs and EC keys without allowing arbitrary requests',()=>{
  const valid=device('fake-device');assert.deepEqual(checkedSubscription(valid),valid);
  for(const endpoint of ['https://127.0.0.1/x','https://fcm.googleapis.com.evil.example/x','http://fcm.googleapis.com/x','https://user:pass@fcm.googleapis.com/x','https://fcm.googleapis.com:8443/x','https://evil.example/x','file:///C:/secret'])assert.throws(()=>checkedSubscription({...valid,endpoint}));
@@ -119,7 +123,7 @@ test('reminders and watches use real local SQL, isolated owners and a durable de
    assert.equal((await call('reminder_b','reminders.push.test',{endpoint:dev.endpoint})).ok,false);
    await service.dispatch('reminder_a');assert.equal(sent,0);
    assert.equal((await data('reminder_a','reminders.push.test',{endpoint:dev.endpoint})).accepted,true);
-   assert.equal((await call('reminder_a','reminders.push.test',{endpoint:dev.endpoint})).ok,false);assert.equal(sent,1);
+   const limited=await call('reminder_a','reminders.push.test',{endpoint:dev.endpoint});assert.equal(limited.ok,false);if(!limited.ok)assert.equal(limited.code,'PUSH_RATE_LIMIT');assert.equal(sent,1);
   });
   await t.test('dispatch persists the inbox first, sends one generic digest and does not repeat attempts',async()=>{
    advance(61000);await put('push_new','比赛隐私标题不得出现在推送内容中');advance(61000);

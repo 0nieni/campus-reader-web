@@ -11,6 +11,7 @@ const props=defineProps<{transport:Transport;schoolId:string|null;schoolName:str
 const emit=defineEmits<{unread:[count:number];changed:[state:ReminderState];open:[event:ReminderNotification];back:[]}>();
 const state=ref<ReminderState|null>(null),busy=ref(false),error=ref(''),message=ref(''),editing=ref<Reminder|null>(null),pushOn=ref(false),onlyUnread=ref(false),tab=ref<'notifications'|'schedule'>('notifications');
 const clock=ref(Date.now()),support=ref('');
+const installed=ref(false),testCooldown=ref(0);
 const notices=computed(()=>state.value?.notifications.filter(n=>!onlyUnread.value||!n.read)||[]);
 const schedule=computed(()=>[...(state.value?.reminders||[])].sort((a,b)=>a.dueAt===null?b.dueAt===null?b.createdAt.localeCompare(a.createdAt):-1:b.dueAt===null?1:a.dueAt.localeCompare(b.dueAt)));
 const futureCount=computed(()=>schedule.value.filter(r=>r.dueAt!==null&&Date.parse(r.dueAt)>clock.value).length);
@@ -30,7 +31,17 @@ function deliveryText(reminder:Reminder){
  const labels={unconfigured:'分钟提醒服务待配置，站内提醒与日历仍可使用。',no_device:'尚未开启设备推送，请先点击上方“开启此浏览器推送”。',pending:'提醒已保存，正在等待后台登记。',scheduled:'已登记后台提醒，关闭页面后也可接收系统推送。',later:'远期提醒已保存，将在临近时自动登记。',registration_failed:'后台登记尚未成功，稍后点击“检查提醒”重试。',sent:'推送服务已接收；是否弹出请以设备通知为准。',failed:'最近一次发送失败，请检查设备订阅并发送测试通知。',unknown:'发送结果暂未确认，为避免重复打扰未自动重发。',finished:'本次后台提醒已结束。'};
  return reminder.delivery?labels[reminder.delivery.status]:'';
 }
-let active=true,ticket=0,timer:ReturnType<typeof setTimeout>|undefined,lastCheck=0;
+let active=true,ticket=0,pushTicket=0,timer:ReturnType<typeof setTimeout>|undefined,testTimer:ReturnType<typeof setTimeout>|undefined,lastCheck=0;
+function startTestCooldown(){
+ clearTimeout(testTimer);const until=Date.now()+60000;
+ function tick(){if(!active)return;testCooldown.value=Math.max(0,Math.ceil((until-Date.now())/1000));if(testCooldown.value)testTimer=setTimeout(tick,1000);}
+ tick();
+}
+async function refreshPush(){
+ const current=++pushTicket;
+ try{const subscription=await currentPush();const result=subscription?await props.transport.call('reminders.push.status',{endpoint:subscription.endpoint}):{active:false};if(active&&current===pushTicket)pushOn.value=result.active&&(!('Notification' in window)||Notification.permission!=='denied');}
+ catch{if(active&&current===pushTicket)pushOn.value=false;}
+}
 const time=(value:string)=>new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(value));
 function apply(result:ReminderState){if(!active)return;ticket++;state.value=result;clock.value=Date.now();lastCheck=Date.now();emit('unread',result.unread);emit('changed',result);planNext();}
 function planNext(){
@@ -41,7 +52,7 @@ function planNext(){
 }
 async function load(){
  if(busy.value)return;const current=++ticket;
- try{const result=await props.transport.call('reminders.state',{});if(active&&ticket===current){error.value='';apply(result);}}
+ try{const [result]=await Promise.all([props.transport.call('reminders.state',{}),refreshPush()]);if(active&&ticket===current){error.value='';apply(result);}}
  catch(caught){if(active&&ticket===current)error.value=safeError(caught);}
  finally{if(active)planNext();}
 }
@@ -63,21 +74,25 @@ async function download(id?:string){await run(async()=>{
  }
 });}
 async function togglePush(){await run(async()=>{
- if(pushOn.value){try{await disablePush(props.transport);if(active)message.value='此浏览器推送已关闭，站内提醒保留。';}finally{if(active)pushOn.value=Boolean(await currentPush());}}
+ if(pushOn.value){try{await disablePush(props.transport);if(active){message.value='此浏览器推送已关闭，站内提醒保留。';clearTimeout(testTimer);testCooldown.value=0;}}finally{await refreshPush();}}
  else if(state.value?.publicKey){await enablePush(props.transport,state.value.publicKey);if(active){pushOn.value=true;message.value='此浏览器已订阅，请发送测试通知并确认系统是否显示。';}}
  try{apply(await props.transport.call('reminders.state',{}));}catch{if(active)message.value+=' 请点击“检查提醒”刷新设备与登记状态。';}
 });}
-async function testPush(){await run(async()=>{const subscription=await currentPush();if(!subscription)throw new Error('当前浏览器订阅已失效，请重新开启推送。');await props.transport.call('reminders.push.test',{endpoint:subscription.endpoint});if(active)message.value='推送服务已接收测试请求，请检查系统通知；接收请求不代表设备已显示。';});}
-function wake(){clock.value=Date.now();if(document.visibilityState==='visible'&&Date.now()-lastCheck>=60000)void load();}
+async function testPush(){if(testCooldown.value)return;await run(async()=>{
+ const subscription=await currentPush();if(!subscription){pushOn.value=false;throw new Error('当前应用的订阅已失效，请重新开启此浏览器推送。');}
+ try{await props.transport.call('reminders.push.test',{endpoint:subscription.endpoint});if(active){startTestCooldown();message.value='推送服务已接收测试请求。请查找标题为“校园阅览室｜测试通知”的系统通知；“复制该应用的网址”是浏览器提示，不是提醒送达。';}}
+ catch(caught){if(active){if((caught as {code?:string})?.code==='PUSH_RATE_LIMIT')startTestCooldown();if((caught as {code?:string})?.code==='PUSH_NOT_READY')pushOn.value=false;}throw caught;}
+});}
+function wake(){clock.value=Date.now();if(document.visibilityState!=='visible')return;if(Date.now()-lastCheck>=60000)void load();else if(!busy.value)void refreshPush();}
 watch(()=>props.revision,()=>void load());
 watch(()=>props.visible,visible=>{if(visible)void load();});
-onMounted(()=>{support.value=pushSupport();void load();void currentPush().then(async value=>{if(value){const result=await props.transport.call('reminders.push.status',{endpoint:value.endpoint});if(active)pushOn.value=result.active;}}).catch(()=>{});document.addEventListener('visibilitychange',wake);window.addEventListener('focus',wake);});
-onUnmounted(()=>{active=false;ticket++;clearTimeout(timer);document.removeEventListener('visibilitychange',wake);window.removeEventListener('focus',wake);state.value=null;});
+onMounted(()=>{support.value=pushSupport();installed.value=Boolean(window.matchMedia?.('(display-mode: standalone)').matches);void load();document.addEventListener('visibilitychange',wake);window.addEventListener('focus',wake);});
+onUnmounted(()=>{active=false;ticket++;pushTicket++;clearTimeout(timer);clearTimeout(testTimer);document.removeEventListener('visibilitychange',wake);window.removeEventListener('focus',wake);state.value=null;});
 </script>
 <template>
  <section class="feature-surface reminders-center" aria-labelledby="reminders-title">
   <header class="feature-heading reminder-heading"><div><h1 id="reminders-title">提醒中心 <span v-if="state?.unread" class="unread-count">{{state.unread}}条未读</span></h1><p class="muted">勾选公告后逐篇设置时间 · 当前账号独立保存 · 北京时间</p></div><button class="text-button" @click="emit('back')">返回公告</button></header>
-  <aside class="reminder-delivery compact-delivery"><div class="delivery-copy"><strong>浏览器通知</strong><span class="small muted">{{deliverySummary}}</span><details><summary>说明与设备设置</summary><p v-if="state?.deliveryMode==='minute'">设定时间后请确认事项显示“已登记”。后台按设定时间发起推送；网络、系统权限或省电设置可能延迟显示。推送仅显示通用提示，登录后查看内容。</p><p v-else>网页打开时检查到期提醒；关闭后每天09:00、20:00后台检查。推送只显示通用提示，登录后查看内容。</p><ul><li>Windows：使用 Chrome 或 Edge，允许网站和系统通知；建议安装为应用，保留浏览器后台运行。</li><li>iPhone／iPad：在 Safari 中“添加到主屏幕”，从图标进入后开启推送。</li><li>安卓：使用支持网页推送的浏览器，允许通知及后台活动，以测试通知实测为准。</li></ul><p>每台设备都需登录后单独开启。退出账号会解绑当前浏览器；每账号最多5个浏览器。</p><p v-if="state?.deviceCount!==undefined">当前账号已开启 {{state.deviceCount}} 个浏览器。</p><p v-if="support">{{support}}</p><p v-else-if="state&&!state.pushConfigured">此环境暂未开启浏览器推送。预览环境仅验证站内提醒与日历。</p></details></div><div class="action-row"><button class="secondary" :disabled="busy||(!pushOn&&Boolean(support||!state?.pushConfigured))" @click="togglePush">{{pushOn?'关闭此浏览器推送':'开启此浏览器推送'}}</button><button v-if="pushOn&&state?.pushConfigured" class="text-button" :disabled="busy" @click="testPush">发送测试通知</button></div></aside>
+  <aside class="reminder-delivery compact-delivery"><div class="delivery-copy"><strong>浏览器通知</strong><span class="small muted">{{deliverySummary}}</span><span class="small muted">{{installed?'当前桌面应用':'当前浏览器'}}：{{pushOn?'推送已绑定':'推送未绑定'}}</span><details><summary>说明与设备设置</summary><p v-if="state?.deliveryMode==='minute'">设定时间后请确认事项显示“已登记”。后台按设定时间发起推送；网络、系统权限或省电设置可能延迟显示。</p><p v-else>网页打开时检查到期提醒；关闭后每天09:00、20:00后台检查。</p><p>正式通知显示公告标题、事项名称和到期时间（北京时间）。锁屏是否显示内容由设备设置决定。测试通知的标题为“校园阅览室｜测试通知”。</p><ul><li>Windows：使用 Chrome 或 Edge，允许网站和系统通知；建议安装为应用，保留浏览器后台运行。</li><li>iPhone／iPad：在 Safari 中“添加到主屏幕”，从图标进入后开启推送。</li><li>安卓：使用支持网页推送的浏览器，允许通知及后台活动；从桌面图标打开后也请核对此应用的推送绑定状态。</li></ul><p>每台设备都需登录后单独开启。退出账号会解绑当前浏览器；每账号最多5个浏览器。</p><p v-if="state?.deviceCount!==undefined">当前账号已开启 {{state.deviceCount}} 个浏览器；总数不代表当前应用已绑定。</p><p v-if="support">{{support}}</p><p v-else-if="state&&!state.pushConfigured">此环境暂未开启浏览器推送。预览环境仅验证站内提醒与日历。</p></details></div><div class="action-row"><button class="secondary" :disabled="busy||(!pushOn&&Boolean(support||!state?.pushConfigured))" @click="togglePush">{{pushOn?'关闭此浏览器推送':'开启此浏览器推送'}}</button><button v-if="pushOn&&state?.pushConfigured" class="text-button" :disabled="busy||testCooldown>0" @click="testPush">{{testCooldown?`等待 ${testCooldown} 秒后重试`:'发送测试通知'}}</button></div></aside>
   <ReminderEmailSettings v-if="state?.email" :transport="transport" :state="state.email" @changed="emailChanged" />
   <p v-if="support" class="small muted push-support-note">{{support}}</p>
   <p v-if="error" class="error-message" role="alert">{{error}}</p><p v-if="message" class="reminder-feedback" role="status">{{message}}</p>

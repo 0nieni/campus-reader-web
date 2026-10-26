@@ -4,10 +4,11 @@ import ReminderForm from '../src/components/ReminderForm.vue';
 import ReminderCenter from '../src/components/ReminderCenter.vue';
 import type {Transport} from '../src/lib/transport';
 import type {ReminderState} from '@campus/contracts';
+import {ClientError} from '../src/lib/errors';
 const browser=vi.hoisted(()=>({pushSupport:vi.fn(()=>''),currentPush:vi.fn(async()=>null),enablePush:vi.fn(async()=>({endpoint:'https://fcm.googleapis.com/fake'})),disablePush:vi.fn(async()=>{})}));
 vi.mock('../src/lib/browser-push',()=>browser);
 const fresh=():ReminderState=>({reminders:[],watches:[],notifications:[],unread:0,checkedAt:new Date().toISOString(),more:false,pushConfigured:true,publicKey:'synthetic-public'});
-afterEach(()=>{vi.clearAllMocks();});
+afterEach(()=>{vi.clearAllMocks();browser.currentPush.mockResolvedValue(null);vi.useRealTimers();});
 it('requires manual Beijing date confirmation and does not start AI or request notification permission',async()=>{
  const state=fresh(),call=vi.fn(async()=>state),wrapper=mount(ReminderForm,{props:{transport:{call} as unknown as Transport,schoolId:'bjtu',itemId:'public_fixture',title:'报名公告'}});
  expect(call).not.toHaveBeenCalled();await wrapper.get('button.secondary').trigger('click');
@@ -75,4 +76,32 @@ it('labels minute registration honestly and provides setup instructions for all 
  expect(wrapper.text()).toContain('按设定时间登记后台提醒');expect(wrapper.text()).toContain('Windows');expect(wrapper.text()).toContain('iPhone／iPad');expect(wrapper.text()).toContain('安卓');expect(wrapper.text()).toContain('3 个浏览器');
  await wrapper.findAll('button').find(b=>b.text()==='时间提醒（1）')!.trigger('click');expect(wrapper.text()).toContain('已登记后台提醒');expect(wrapper.text()).not.toContain('09:00、20:00');
  state.queueConfigured=false;state.reminders[0]!.delivery!.status='unconfigured';await wrapper.findAll('button').find(b=>b.text()==='检查提醒')!.trigger('click');await flushPromises();expect(wrapper.text()).toContain('分钟提醒服务待配置');wrapper.unmount();
+});
+it('shows a separate cooldown instead of claiming the installed app is unsubscribed after a repeat test',async()=>{
+ vi.useFakeTimers();browser.currentPush.mockResolvedValue({endpoint:'https://fcm.googleapis.com/app'} as any);
+ const call=vi.fn(async(action:string)=>action==='feed.list'?{items:[],nextCursor:null}:action==='reminders.push.status'?{active:true}:action==='reminders.push.test'?{accepted:true}:fresh());
+ const wrapper=mount(ReminderCenter,{props:{transport:{call} as unknown as Transport,schoolId:null,schoolName:'',revision:0,visible:true}});await flushPromises();
+ const button=()=>wrapper.findAll('button').find(b=>b.text()==='发送测试通知')!;
+ await button().trigger('click');await flushPromises();
+ expect(wrapper.text()).toContain('校园阅览室｜测试通知');expect(wrapper.text()).toContain('等待 60 秒后重试');expect(wrapper.text()).not.toContain('请先开启');
+ await vi.advanceTimersByTimeAsync(60000);await flushPromises();expect(button().attributes('disabled')).toBeUndefined();
+ expect(call.mock.calls.filter(([action])=>action==='reminders.push.test')).toHaveLength(1);wrapper.unmount();
+});
+it('refreshes the current app binding on focus even within the state polling interval',async()=>{
+ browser.currentPush.mockResolvedValue({endpoint:'https://fcm.googleapis.com/app'} as any);let bound=true;
+ const call=vi.fn(async(action:string)=>action==='feed.list'?{items:[],nextCursor:null}:action==='reminders.push.status'?{active:bound}:fresh());
+ const wrapper=mount(ReminderCenter,{props:{transport:{call} as unknown as Transport,schoolId:null,schoolName:'',revision:0,visible:true}});await flushPromises();expect(wrapper.text()).toContain('关闭此浏览器推送');
+ bound=false;window.dispatchEvent(new Event('focus'));await flushPromises();expect(wrapper.text()).toContain('开启此浏览器推送');expect(wrapper.text()).not.toContain('发送测试通知');wrapper.unmount();
+});
+it('clears a stale binding after the server rejects a test, keeping the repair button available',async()=>{
+ browser.currentPush.mockResolvedValue({endpoint:'https://fcm.googleapis.com/app'} as any);
+ const call=vi.fn(async(action:string)=>{if(action==='feed.list')return{items:[],nextCursor:null};if(action==='reminders.push.status')return{active:true};if(action==='reminders.push.test')throw new ClientError('PUSH_NOT_READY','此设备的推送订阅已失效，请重新开启此浏览器推送。');return fresh();});
+ const wrapper=mount(ReminderCenter,{props:{transport:{call} as unknown as Transport,schoolId:null,schoolName:'',revision:0,visible:true}});await flushPromises();
+ await wrapper.findAll('button').find(b=>b.text()==='发送测试通知')!.trigger('click');await flushPromises();expect(wrapper.text()).toContain('推送订阅已失效');expect(wrapper.text()).toContain('开启此浏览器推送');expect(wrapper.text()).not.toContain('关闭此浏览器推送');wrapper.unmount();
+});
+it('retains an active binding when the server rate limits a test from another surface',async()=>{
+ browser.currentPush.mockResolvedValue({endpoint:'https://fcm.googleapis.com/app'} as any);
+ const call=vi.fn(async(action:string)=>{if(action==='feed.list')return{items:[],nextCursor:null};if(action==='reminders.push.status')return{active:true};if(action==='reminders.push.test')throw new ClientError('PUSH_RATE_LIMIT','测试通知每分钟最多一次，请等待60秒后重试。');return fresh();});
+ const wrapper=mount(ReminderCenter,{props:{transport:{call} as unknown as Transport,schoolId:null,schoolName:'',revision:0,visible:true}});await flushPromises();
+ await wrapper.findAll('button').find(b=>b.text()==='发送测试通知')!.trigger('click');await flushPromises();expect(wrapper.text()).toContain('关闭此浏览器推送');expect(wrapper.text()).toContain('等待 60 秒后重试');expect(wrapper.text()).not.toContain('推送订阅已失效');wrapper.unmount();
 });
