@@ -33,8 +33,8 @@ it('leaving registration discards the draft and ignores a later response',async(
   const form=w.getComponent(RegistrationForm);w.unmount();finish({verificationRequired:true});await flushPromises();expect(form.emitted('sent')).toBeUndefined();expect(t.call).not.toHaveBeenCalled();
 });
 it('confirmation tokens are stripped from the URL and block workspace requests until verification succeeds',async()=>{
-  history.replaceState(null,'','/#confirmation_token=synthetic-confirmation');const t=transport();let finish!:(value:typeof session)=>void;t.confirmEmail=vi.fn(()=>new Promise<typeof session>(resolve=>{finish=resolve;}));const w=open(t);await flushPromises();
-  expect(location.hash).toBe('');expect(w.text()).not.toContain('synthetic-confirmation');expect(t.confirmEmail).toHaveBeenCalledWith('synthetic-confirmation');expect(t.restore).not.toHaveBeenCalled();expect(t.call).not.toHaveBeenCalled();
+  history.replaceState(null,'','/#confirmation_token=synthetic-confirmation');const t=transport();let finish!:(value:typeof session)=>void;let capturedHash='';t.confirmEmail=vi.fn(()=>{capturedHash=location.hash;return new Promise<typeof session>(resolve=>{finish=resolve;});});const w=open(t);await flushPromises();
+  expect(capturedHash).toBe('#confirmation_token=synthetic-confirmation');expect(location.hash).toBe('');expect(w.text()).not.toContain('synthetic-confirmation');expect(t.confirmEmail).toHaveBeenCalledExactlyOnceWith('synthetic-confirmation');expect(t.restore).not.toHaveBeenCalled();expect(t.call).not.toHaveBeenCalled();
   vi.mocked(t.restore).mockResolvedValue(session);finish(session);await flushPromises();expect(t.call).toHaveBeenCalledWith('session.get',{});expect(w.text()).toContain('先选择你的学校');
 });
 it('invalid confirmation stops at a controlled message and returns to login without loading data',async()=>{
