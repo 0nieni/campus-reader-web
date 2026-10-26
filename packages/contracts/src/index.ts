@@ -35,6 +35,7 @@ export interface Notice {
   publishedAt: string | null;
   categories: string[];
   summary: string | null;
+  excerpt?: string | null;
 }
 export interface NoticePage {
   items: Notice[];

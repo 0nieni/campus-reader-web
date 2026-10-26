@@ -35,6 +35,7 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,su
 .portal-template .notice-open{display:flex;align-items:center;width:100%;min-width:0;gap:inherit;border:0;padding:0;background:transparent;color:inherit;text-align:left;cursor:pointer;}
 .portal-template .notice-title{display:block;white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere;line-height:1.65;}
 .portal-template .notice-origin{display:flex;align-items:center;flex-wrap:wrap;gap:8px;}
+.portal-template .notice-excerpt{display:block;margin-top:8px;font-size:12px;line-height:1.7;font-weight:400;color:var(--muted);white-space:normal;overflow-wrap:anywhere;}
 .portal-template .notice-card-footer{display:flex;align-items:center;justify-content:space-between;gap:8px 16px;flex-wrap:wrap;width:100%;padding-left:56px;}
 .portal-template .notice-quick-actions{display:flex;align-items:center;gap:14px;padding:0;}
 .portal-template .notice-quick-actions .text-button{font-size:11px;margin:0;padding:0;}

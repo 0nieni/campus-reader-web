@@ -5,6 +5,7 @@ import type {
   WorkspaceSession,
 } from "@campus/contracts";
 import { AppError, reject } from "./errors";
+import {noticeExcerpt} from './notice-excerpt';
 import {
   identify,
   type Caller,
@@ -128,6 +129,7 @@ function offsetOf(value: unknown): number {
   return Number(value);
 }
 export function toNotice(row: ItemRow): Notice {
+  const excerpt=noticeExcerpt(row);
   return {
     id: row._id,
     title: String(row.title || "未命名公告"),
@@ -135,6 +137,7 @@ export function toNotice(row: ItemRow): Notice {
     publishedAt: row.publishedAt || null,
     categories: displayedCategories(row),
     summary: null,
+    ...(excerpt?{excerpt}:{}),
   };
 }
 export function originalUrl(row: ItemRow): string | null {

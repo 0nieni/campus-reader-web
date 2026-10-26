@@ -3,7 +3,7 @@ import {isIP} from 'node:net';
 import {load} from 'cheerio/slim';
 import type {WebsiteSourceInput} from '@campus/contracts';
 import {AppError} from './errors';
-import {approvedSchoolUrl,extractArticle,extractNotices,fullDate,type SchoolPage,type SchoolSource} from './school-pages';
+import {approvedSchoolUrl,extractArticle,extractArticleTitle,extractNotices,fullDate,type SchoolPage,type SchoolSource} from './school-pages';
 const bad=()=>new AppError('VALIDATION_FAILED','请检查来源名称、公开网址、类型和解析设置。');
 export const hash=(text:string)=>createHash('sha256').update(text).digest('hex');
 export function websiteUrl(value:unknown):string {
@@ -46,7 +46,7 @@ export function parseWebsite(page:SchoolPage,config:WebsiteSourceInput,id:string
   };
   try {
     if(config.type==='html_detail') {
-      const $=load(page.html),title=$(config.selectors.title||'h1').first().text()||$('title').text();
+      const $=load(page.html),title=extractArticleTitle(page,config.selectors.title);
       const contentText=extractArticle(page,school);push(title,page.url,config.selectors.publishedAt?$(config.selectors.publishedAt).first().text():'',contentText);
     }else if(config.type==='html_list') {
       if(!config.selectors.detailLink&&!config.selectors.title){

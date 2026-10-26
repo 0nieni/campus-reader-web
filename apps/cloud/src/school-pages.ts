@@ -155,3 +155,12 @@ export function extractArticle(page: SchoolPage, school?: SchoolSource): string 
   if (text.length < 30 || text.length > 60000 || /请输入密码|统一身份认证登录/.test(text)) throw fail();
   return text;
 }
+/** Article pages can place a column heading before the actual headline. */
+export function extractArticleTitle(page:SchoolPage,selector?:string):string {
+  const $=preparedPage(page.html);
+  const column=/^(?:研究生招生|本科生招生|招生就业|本科生教育|研究生教育|人才培养|通知公告|通知通告|学院概况|首页)$/;
+  const valid=(value:string)=>value.length>=4&&value.length<=220&&!column.test(value);
+  const candidates=[selector?$(selector).first().text():'', $('meta[name="ArticleTitle"]').attr('content')||'', $('meta[property="og:title"]').attr('content')||'', $('.article-title,.article_title,.news-title,.news_title,.content-title,.arc-title').first().text(),$('title').text(),...$('h1,h2,h3').toArray().map(el=>$(el).text())];
+  for(const candidate of candidates){const title=compact(candidate);if(valid(title))return title;}
+  throw new AppError('SOURCE_PARSE_FAILED','未能核实此公告的具体标题，请查看原文。');
+}
