@@ -18,6 +18,15 @@ function fixture(options:{failSave?:boolean;failCollect?:boolean;directory?:bool
  return{sources,call,transport:{call} as unknown as Transport};
 }
 const button=(wrapper:VueWrapper,label:string)=>wrapper.findAll('button').find(node=>node.text()===label)!;
+it('shows the same three actions for unverified competitions and lets a checked entry attempt a manual update',async()=>{
+ const {transport,call}=fixture({directory:true}),open=vi.fn(async()=>{}),wrapper=mount(WebsiteSourcesPanel,{props:{transport,schoolId:'bjtu',schoolName:'北京交通大学',openSchool:open}});await flushPromises();
+ const pending=wrapper.get('[data-source-id=pending]');expect(pending.get('a').text()).toBe('查看原站');
+ expect(pending.findAll('button').map(node=>node.text())).toEqual(['查看该来源下公告','更新来源']);
+ await pending.get('input').setValue(true);await flushPromises();await button(wrapper,'管理我的来源').trigger('click');await flushPromises();
+ const managed=wrapper.get('[data-source-id=pending]');await managed.findAll('button').find(node=>node.text()==='更新来源')!.trigger('click');await flushPromises();
+ expect(call).toHaveBeenCalledWith('sources.public.refresh',{schoolId:'bjtu',sourceId:'pending'});expect(wrapper.get('[role=status]').text()).toContain('已采集');
+ await wrapper.get('[data-source-id=pending]').findAll('button').find(node=>node.text()==='查看该来源下公告')!.trigger('click');await flushPromises();expect(open).toHaveBeenCalledWith('bjtu',{id:'pending',name:'等待接入的竞赛'});wrapper.unmount();
+});
 it('shows school, public and personal sources together, with shared categories and keyword/checked filters',async()=>{
  const {transport,call}=fixture(),wrapper=mount(WebsiteSourcesPanel,{props:{transport,schoolId:'bjtu',schoolName:'北京交通大学'}});await flushPromises();
  expect(wrapper.findAll('[data-source-id]')).toHaveLength(3);expect(wrapper.text()).toContain('已勾选 1/3');
@@ -30,21 +39,21 @@ it('shows school, public and personal sources together, with shared categories a
 });
 it('requires an explicit check before opening a public source and saves the independent display preference',async()=>{
  const {transport,call}=fixture(),open=vi.fn(async()=>{}),wrapper=mount(WebsiteSourcesPanel,{props:{transport,schoolId:'bjtu',schoolName:'北京交通大学',openSchool:open}});await flushPromises();
- const card=wrapper.get('[data-source-id=public]');expect(card.findAll('button').find(node=>node.text()==='查看该来源公告')!.attributes('disabled')).toBeDefined();
+ const card=wrapper.get('[data-source-id=public]');expect(card.findAll('button').find(node=>node.text()==='查看该来源下公告')!.attributes('disabled')).toBeDefined();
  await card.get('input').setValue(true);await flushPromises();expect(call).toHaveBeenCalledWith('sources.feedVisibility',{schoolId:'bjtu',sourceId:'public',visible:true});
- await card.findAll('button').find(node=>node.text()==='查看该来源公告')!.trigger('click');await flushPromises();expect(open).toHaveBeenCalledWith('bjtu',{id:'public',name:'计算机竞赛公告'});expect(wrapper.emitted('changed')).toHaveLength(1);wrapper.unmount();
+ await card.findAll('button').find(node=>node.text()==='查看该来源下公告')!.trigger('click');await flushPromises();expect(open).toHaveBeenCalledWith('bjtu',{id:'public',name:'计算机竞赛公告'});expect(wrapper.emitted('changed')).toHaveLength(1);wrapper.unmount();
 });
 it('restores the checkbox after a failed save and preserves a configuration error after reloading collection state',async()=>{
  const failing=fixture({failSave:true}),first=mount(WebsiteSourcesPanel,{props:{transport:failing.transport,schoolId:'bjtu',schoolName:'北京交通大学'}});await flushPromises();await first.get('[data-source-id=public] input').setValue(true);await flushPromises();expect((first.get('[data-source-id=public] input').element as HTMLInputElement).checked).toBe(false);expect(first.emitted('changed')).toBeUndefined();first.unmount();
- const {transport}=fixture({failCollect:true}),wrapper=mount(WebsiteSourcesPanel,{props:{transport,schoolId:'bjtu',schoolName:'北京交通大学'}});await flushPromises();await wrapper.get('[data-source-id=public] input').setValue(true);await flushPromises();await wrapper.get('[data-source-id=public]').findAll('button').find(node=>node.text()==='立即采集')!.trigger('click');await flushPromises();expect(wrapper.get('[role=alert]').text()).toContain('Lexmount 尚未正确配置');wrapper.unmount();
+ const {transport}=fixture({failCollect:true}),wrapper=mount(WebsiteSourcesPanel,{props:{transport,schoolId:'bjtu',schoolName:'北京交通大学'}});await flushPromises();await wrapper.get('[data-source-id=public] input').setValue(true);await flushPromises();await wrapper.get('[data-source-id=public]').findAll('button').find(node=>node.text()==='更新来源')!.trigger('click');await flushPromises();expect(wrapper.get('[role=alert]').text()).toContain('Lexmount 尚未正确配置');wrapper.unmount();
 });
-it('keeps unverified and document entries visible and checkable without presenting collection actions',async()=>{
+it('keeps unverified and document entries visible with common actions and requires an explicit check before updating',async()=>{
  const {transport,call}=fixture({directory:true}),wrapper=mount(WebsiteSourcesPanel,{props:{transport,schoolId:'bjtu',schoolName:'北京交通大学',openSchool:vi.fn()}});await flushPromises();
  expect(wrapper.findAll('[data-source-id]')).toHaveLength(5);
  const pending=wrapper.get('[data-source-id=pending]'),file=wrapper.get('[data-source-id=file]');
  expect(pending.text()).toContain('待验证');expect(file.text()).toContain('仅原站入口');expect(file.text()).toContain('未实时核验');
  expect(file.get('a').attributes('href')).toBe('http://contest.example.org/notice.pdf');
- expect(pending.findAll('button')).toHaveLength(0);expect(file.findAll('button')).toHaveLength(0);
+ expect(pending.findAll('button')).toHaveLength(2);expect(file.findAll('button')).toHaveLength(2);expect(pending.findAll('button').every(node=>node.attributes('disabled')!==undefined)).toBe(true);
  await pending.get('input').setValue(true);await flushPromises();expect(call).toHaveBeenCalledWith('sources.feedVisibility',{schoolId:'bjtu',sourceId:'pending',visible:true});
  await wrapper.get('select[aria-label="来源采集能力"]').setValue('directory');expect(wrapper.findAll('[data-source-id]')).toHaveLength(2);
  await wrapper.get('select[aria-label="来源勾选状态"]').setValue('shown');expect(wrapper.findAll('[data-source-id]')).toHaveLength(1);
