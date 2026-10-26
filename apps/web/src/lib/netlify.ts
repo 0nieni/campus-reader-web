@@ -12,7 +12,7 @@ function confirmationError(caught:unknown):ClientError {
     if(typeof candidate.status==='number'&&Number.isInteger(candidate.status)){status=candidate.status;break;}
     error=candidate.cause;
   }
-  if(status===400||status===404||status===410)return new ClientError('CONFIRMATION_INVALID','邮件确认链接无效或已使用。请返回登录；若仍无法登录，请联系站点管理员重新发送确认邮件。');
+  if(status===400||status===404||status===410||status===422)return new ClientError('CONFIRMATION_INVALID','邮件确认链接无效、已过期或已使用。请返回登录；若仍无法登录，请联系站点管理员重新发送确认邮件。');
   if(status===429)return new ClientError('CONFIRMATION_RATE_LIMITED','邮箱验证请求过于频繁，请稍后再试。');
   if(status!==undefined&&status>=500)return new ClientError('CONFIRMATION_UNAVAILABLE','邮箱验证服务暂时不可用，请稍后再试，或联系站点管理员。');
   if(status===401||status===403)return new ClientError('CONFIRMATION_REJECTED','邮箱验证未通过，请返回登录；若仍无法登录，请联系站点管理员。');

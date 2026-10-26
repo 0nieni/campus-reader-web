@@ -45,7 +45,7 @@ it('signup uses the same-origin auth endpoint and confirmation validates a serve
   fetcher.mockResolvedValueOnce({json:async()=>({ok:true,data:{uid:'verified',username:'new@example.test'}})});
   const value=await netlifyTransport.confirmEmail!('synthetic-token');expect(value.uid).toBe('verified');expect(sdk.handleAuthCallback).toHaveBeenCalledTimes(1);expect(sdk.confirmEmail).not.toHaveBeenCalled();expect(fetcher).toHaveBeenLastCalledWith('/.netlify/functions/auth',expect.objectContaining({method:'GET',credentials:'same-origin'}));
 });
-it.each([[404,'CONFIRMATION_INVALID'],[429,'CONFIRMATION_RATE_LIMITED'],[503,'CONFIRMATION_UNAVAILABLE'],[undefined,'CONFIRMATION_CONNECTION_FAILED']] as const)('confirmation classifies SDK failure %s without echoing a raw response or retrying',async(status,code)=>{
+it.each([[404,'CONFIRMATION_INVALID'],[422,'CONFIRMATION_INVALID'],[429,'CONFIRMATION_RATE_LIMITED'],[503,'CONFIRMATION_UNAVAILABLE'],[undefined,'CONFIRMATION_CONNECTION_FAILED']] as const)('confirmation classifies SDK failure %s without echoing a raw response or retrying',async(status,code)=>{
  const sdk=await import('@netlify/identity'),{netlifyTransport}=await import('../src/lib/netlify');
  history.replaceState(null,'','/#confirmation_token=synthetic-token');
  vi.mocked(sdk.handleAuthCallback).mockRejectedValueOnce(Object.assign(Error('raw-secret-token'),{cause:{status}}));
