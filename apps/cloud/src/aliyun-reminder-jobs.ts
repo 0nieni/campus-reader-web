@@ -1,7 +1,7 @@
 import {randomUUID} from 'node:crypto';
 import type {Reminder,ReminderChannelDelivery,ReminderState} from '@campus/contracts';
 import type {SqlClient,SqlPool,Row} from './postgres-storage';
-import {checkedSubscription,sendBrowserPush,type PushConfig} from './browser-push';
+import {checkedSubscription,sendBrowserPush,reminderPushMessage,type PushConfig} from './browser-push';
 import {reminderEmail,reserveEmail,reminderOrigin} from './reminder-email';
 import {refreshWake,type WakeStore} from './reminder-index';
 import type {MailResult} from './directmail';
@@ -80,16 +80,16 @@ export function aliyunJobs(pool:SqlPool,options:AliyunOptions&{now?:()=>number;p
       const latest=await client.query('SELECT binding_id FROM campus_reminder_email WHERE owner_id=$1 AND binding_id=$2 AND enabled=true AND suspended=false AND verified_at IS NOT NULL',[job.owner_id,target.binding]);if(!latest.rows.length)return false;
       await reserveEmail(client,job.owner_id,'reminder',now(),options.email!.dailyLimit);
      }
-     await client.query("UPDATE campus_reminder_channel_receipts SET state='sending',started_at=$5 WHERE job_id=$1 AND channel=$2 AND target_id=$3 AND binding_id=$4 AND state='ready'",[job.id,target.channel,target.target,target.binding,iso(now())]);return true;
+     await client.query("UPDATE campus_reminder_channel_receipts SET state='sending',started_at=$5 WHERE job_id=$1 AND channel=$2 AND target_id=$3 AND binding_id=$4 AND state='ready'",[job.id,target.channel,target.target,target.binding,iso(now())]);return r;
     });
     if(!allowed){skipped=true;}
     else if(target.channel==='browser'){
      attempted=true;
-     try{await send(checkedSubscription(target.subscription),options.push!,job.id);result={state:'accepted'};}
+     try{await send(checkedSubscription(target.subscription),options.push!,job.id,reminderPushMessage(allowed));result={state:'accepted'};}
      catch(error){const status=Number((error as {statusCode?:number})?.statusCode);result={state:!status?'unknown':[429,502,503,504].includes(status)?'temporary':'failed',code:!status?'network_unknown':'provider_rejected',invalid:[404,410].includes(status)};}
     }else{
      const unsubscribe=await options.email!.unsubscribeLink(job.owner_id,target.binding);
-     if(!unsubscribe){skipped=true;}else{attempted=true;result=await options.email!.sender!.send(target.address!,'校园阅览室｜你有一条到期提醒',`你设置的事项已到提醒时间。\n提醒时间：${new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',dateStyle:'medium',timeStyle:'short'}).format(new Date(job.run_at))}（北京时间）\n登录查看：${reminderOrigin}/?view=reminders\n关闭邮件：${unsubscribe}\n邮件不包含公告标题、正文或 AI 摘要。`);}
+     if(!unsubscribe){skipped=true;}else{const message=reminderPushMessage(allowed);attempted=true;result=await options.email!.sender!.send(target.address!,'校园阅览室｜事项提醒',`公告：${message.title}\n${message.body}\n本次提醒时间：${new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',dateStyle:'medium',timeStyle:'short'}).format(new Date(job.run_at))}（北京时间）\n登录查看：${reminderOrigin}/?view=reminders\n关闭邮件：${unsubscribe}`);}
     }
    }catch(error){result={state:attempted?'unknown':'temporary',code:attempted?'network_unknown':(error as {code?:string})?.code==='EMAIL_LIMIT'?'quota':'before_send_failed'};}
    let state=skipped?'skipped':result.state,retryAt:string|null=null;
