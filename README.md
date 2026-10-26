@@ -2,9 +2,11 @@
 
 侧栏底部“个人工作区”现在可打开账号设置：展示用户名、向当前邮箱请求密码重置邮件、修改学校、保存 API 与切换模型。公告标题完整显示，“加入ai搭子”只累计资料并继续浏览；旧勾选框已移除。详见 [个人工作区与密码重置](docs/account-settings-2026-10-25.md)。
 
-登录与公告页的新模板风格、邮箱注册功能位于本地 `codex/reader-theme-registration`：按用户最新提供的 `login(1).html` 与 `index(1).html` 迁入原始紫色样式，保留渐变、行星插画、顶栏、侧栏、卡片与详情弹窗。两份模板 CSS 原样保存，邮箱验证后进入独立工作区。注册需部署代码，并在 Netlify Identity 将注册改为 Open、保持邮箱验证开启。实现与验收见 [样式及注册说明](docs/template-theme-registration-2026-10-25.md)。当前未推送或上线。
+登录与公告页按用户最新提供的 `login(1).html` 与 `index(1).html` 迁入原始紫色样式，保留渐变、行星插画、顶栏、侧栏、卡片与详情弹窗。两份模板 CSS 原样保存，邮箱验证后进入独立工作区。已通过 PR #21 上线；Netlify Identity 已改为 Open、邮箱验证保持开启。实现与验收见 [样式及注册说明](docs/template-theme-registration-2026-10-25.md)，最终发布和真实联调边界见 [进度记录](PROGRESS.md)。
 
-个人服务商功能新增于 `codex/ai-companion-model-settings`：AI 阅读的“服务模型调整”支持每账号独立保存加密 API Key、多套配置、模型选择及四种接口协议，保留官方 AI 和临时 API。保存与启用分开，切换只影响新轮次；旧配置删改时停止未完成任务。接入需追加迁移与服务端 `AI_PROVIDER_ENCRYPTION_KEY`，见 [个人服务商使用与接入](docs/ai-provider-profiles.md) 和 [CC Switch 源码分析](docs/cc-switch-provider-analysis.md)。当前完成本地验证；功能分支供审核，正式启用仍需配置变量和部署迁移。
+AI 阅读的“服务模型调整”支持每账号独立保存加密 API Key、多套配置、模型选择及四种接口协议，保留官方 AI 和临时 API。保存与启用分开，切换只影响新轮次；旧配置删改时停止未完成任务。功能与迁移已合入 main，生产已配置服务端 `AI_PROVIDER_ENCRYPTION_KEY`；不得随意轮换该密钥。见 [个人服务商使用与接入](docs/ai-provider-profiles.md) 和 [CC Switch 源码分析](docs/cc-switch-provider-analysis.md)。代码上线不代表已完成真实服务商、模型和计费联调。
+
+公告列表在标签与来源下方展示已有正文的简短摘录，不调用 AI、也不消耗阅读次数；没有正文时明确提示，打开公告后同步更新。旧导入栏目标题通过独立迁移按官网核实标题修正，保留原资料。
 
 面向校园用户的公告、收藏与 AI 阅读网站，支持原有邀请与邮箱验证注册（需配置启用）。Vue 3 + TypeScript + Netlify Functions、Identity 和 Database。代码仓库保持私有，各账号的数据独立。
 

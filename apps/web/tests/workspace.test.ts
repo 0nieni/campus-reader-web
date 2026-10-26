@@ -63,6 +63,11 @@ function fixture() {
 }
 beforeEach(() => setActivePinia(createPinia()));
 describe("session and data race boundaries", () => {
+  it('shows body excerpts under notice metadata and refreshes them after opening, without showing legacy summaries',async()=>{
+    const {fake}=fixture(),original=vi.mocked(fake.call).getMockImplementation()!;
+    vi.mocked(fake.call).mockImplementation((async(action,input)=>action==='feed.list'?{items:[{...detail,excerpt:undefined}],nextCursor:null}:action==='feed.detail'?{...detail,title:'核实后的公告标题',excerpt:'这段摘录来自真实公告正文，只展示正文已有的内容，不是模型生成的概括。'}:original(action,input)) as Transport['call']);
+    const wrapper=mount(App,{props:{transport:fake,configurationIssues:[]},global:{plugins:[createPinia()]}});await flushPromises();expect(wrapper.get('.notice-excerpt').text()).toContain('尚未读取正文');await wrapper.get('.notice-open').trigger('click');await flushPromises();expect(wrapper.get('.notice-excerpt').text()).toContain('这段摘录来自真实公告正文');expect(wrapper.get('.notice-title').text()).toBe('核实后的公告标题');expect(vi.mocked(fake.call).mock.calls.some(([action])=>['ai.start','ai.chat.send','ai.chat.step'].includes(action))).toBe(false);wrapper.unmount();
+  });
   it('queues notices without leaving the feed or invoking a model, and removes the old checkbox',async()=>{
     const {fake}=fixture(),original=vi.mocked(fake.call).getMockImplementation()!;
     vi.mocked(fake.call).mockImplementation((async(action,input)=>action==='feed.list'?{items:[detail,{...detail,id:'two',title:'另一份公告的完整标题'}],nextCursor:null}:original(action,input)) as Transport['call']);

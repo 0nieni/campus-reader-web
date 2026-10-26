@@ -48,6 +48,11 @@ test('production and existing PR14/PR17 previews retain their applied migration 
         assert.ok(Number(file.split('_')[0]) > highest, `Out-of-order pending migration: ${file}`);
       }
       await server.applyMigrations(directory);
+      const repaired=(await pool.query("SELECT id,body FROM campus_documents WHERE collection='items' AND body->>'sourceId'='15ff78a66acb889d000bcdb945e4c113'")).rows as {id:string;body:{title:string;contentText:string;summary:{oneLine:string}}}[];
+      assert.equal(repaired.length,20);assert.ok(repaired.every(row=>!['研究生招生','通知公告','本科生教育','研究生教育'].includes(row.body.title)));
+      const example=repaired.find(row=>row.id==='1233ab626acb88ba001caa471772eda6')!;assert.equal(example.body.title,'2027年候补推免考生位次更新情况。');assert.match(example.body.contentText,/为方便候补考生查询/);assert.ok(example.body.summary.oneLine);
+      const repairSql=await readFile(join(directory,'20261026000200_verified_notice_titles.sql'),'utf8');await pool.query(repairSql);assert.deepEqual((await pool.query("SELECT body FROM campus_documents WHERE collection='items' AND id=$1",[example.id])).rows[0].body,example.body);
+      await pool.query("UPDATE campus_documents SET body=body || '{\"title\":\"研究生招生\",\"ownerOpenid\":\"private-owner\"}'::jsonb WHERE collection='items' AND id=$1",[example.id]);await pool.query(repairSql);assert.equal((await pool.query("SELECT body->>'title' AS title FROM campus_documents WHERE collection='items' AND id=$1",[example.id])).rows[0].title,'研究生招生');
       const saved = await pool.query("SELECT body FROM campus_documents WHERE id='migration-fixture-profile'");
       assert.equal(saved.rows[0].body.marker, 'preserve existing account data');
       if (history.directory === 'pr17-migrations') assert.equal((await pool.query("SELECT version FROM campus_ai_provider_accounts WHERE owner_id='existing-provider-owner'")).rows[0].version, 7);
