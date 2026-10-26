@@ -2,9 +2,22 @@ import type { AuthSession, GatewayResult } from '@campus/contracts';
 import type { Transport } from './transport';
 import {disablePush} from './browser-push';
 import { ClientError } from './errors';
-import { confirmEmail, hydrateSession, onAuthChange, recoverPassword, logout } from '@netlify/identity';
+import { handleAuthCallback, hydrateSession, onAuthChange, recoverPassword, logout } from '@netlify/identity';
 const listeners = new Set<(session: AuthSession | null) => void>();
 function notify(session: AuthSession | null) { for (const listener of listeners) listener(session); }
+function confirmationError(caught:unknown):ClientError {
+  let error=caught,status:number|undefined;
+  for(let depth=0;depth<4&&error&&typeof error==='object';depth++){
+    const candidate=error as {status?:unknown;cause?:unknown};
+    if(typeof candidate.status==='number'&&Number.isInteger(candidate.status)){status=candidate.status;break;}
+    error=candidate.cause;
+  }
+  if(status===400||status===404||status===410)return new ClientError('CONFIRMATION_INVALID','邮件确认链接无效或已使用。请返回登录；若仍无法登录，请联系站点管理员重新发送确认邮件。');
+  if(status===429)return new ClientError('CONFIRMATION_RATE_LIMITED','邮箱验证请求过于频繁，请稍后再试。');
+  if(status!==undefined&&status>=500)return new ClientError('CONFIRMATION_UNAVAILABLE','邮箱验证服务暂时不可用，请稍后再试，或联系站点管理员。');
+  if(status===401||status===403)return new ClientError('CONFIRMATION_REJECTED','邮箱验证未通过，请返回登录；若仍无法登录，请联系站点管理员。');
+  return new ClientError('CONFIRMATION_CONNECTION_FAILED','邮箱验证请求未能完成，请检查网络或浏览器限制后再试。链接可能已被处理，可先返回登录确认。');
+}
 async function request<T>(url: string, body?: unknown): Promise<T> {
   let result: GatewayResult<T>;
   try {
@@ -38,10 +51,20 @@ export const netlifyTransport: Transport = {
     notify(value); return value;
   },
   async confirmEmail(token) {
-    try { await confirmEmail(token); }
-    catch { throw new ClientError('CONFIRMATION_FAILED', '邮箱验证未完成，链接可能已过期或已使用。请返回登录；若仍未验证，请联系站点管理员重新发送确认邮件。'); }
-    const value = await request<AuthSession | null>('/.netlify/functions/auth');
-    if (!value) throw new ClientError('UNAUTHENTICATED', '邮箱已确认，请使用刚设置的密码登录。');
+    if(!token||new URLSearchParams(location.hash.slice(1)).get('confirmation_token')!==token)throw new ClientError('CONFIRMATION_INVALID','邮件确认链接无效，请重新打开确认邮件中的链接。');
+    let confirmedId:string;
+    try {
+      // Unlike confirmEmail(), the SDK callback also synchronizes the cookies
+      // that our same-origin Functions need to recognize the verified account.
+      const result=await handleAuthCallback();
+      if(!result||result.type!=='confirmation'||!result.user?.id)throw Error('Unexpected confirmation result');
+      confirmedId=result.user.id;
+    }
+    catch(caught){await logout().catch(()=>{});notify(null);throw confirmationError(caught);}
+    let value:AuthSession|null;
+    try{value=await request<AuthSession|null>('/.netlify/functions/auth');}
+    catch{await logout().catch(()=>{});notify(null);throw new ClientError('CONFIRMATION_SESSION_FAILED','邮箱确认后的登录状态未能核验，请返回登录，使用注册时设置的密码登录。');}
+    if(!value||value.uid!==confirmedId){await logout().catch(()=>{});notify(null);throw new ClientError('CONFIRMATION_SESSION_FAILED','邮箱已确认，请返回登录，使用注册时设置的密码登录。');}
     notify(value); return value;
   },
   async signOut() { await Promise.race([disablePush(netlifyTransport).catch(()=>{}),new Promise(resolve=>setTimeout(resolve,2500))]); await request('/.netlify/functions/auth?op=logout', {}); notify(null); },

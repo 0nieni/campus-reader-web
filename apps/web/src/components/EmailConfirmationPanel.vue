@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { onMounted,onUnmounted,ref } from 'vue';
+import type {AuthSession} from '@campus/contracts';
 import type {Transport} from '../lib/transport';
 import {safeError} from '../lib/errors';
-const props=defineProps<{token:string;transport:Transport}>();
+const props=defineProps<{token:string;attempt?:Promise<AuthSession>;transport:Transport}>();
 const emit=defineEmits<{complete:[];back:[]}>();
 const busy=ref(true),error=ref('');let active=true;
 onUnmounted(()=>{active=false;});
 onMounted(async()=>{
-  try{if(!props.transport.confirmEmail)throw Error('Unavailable');await props.transport.confirmEmail(props.token);if(active)emit('complete');}
+  try{if(props.attempt)await props.attempt;else{if(!props.transport.confirmEmail)throw Error('Unavailable');await props.transport.confirmEmail(props.token);}if(active)emit('complete');}
   catch(caught){if(active)error.value=safeError(caught);}
   finally{if(active)busy.value=false;}
 });

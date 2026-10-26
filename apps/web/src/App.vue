@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch, nextTick, defineAsyncComponent, defineComponent, h } from "vue";
-import { noticeCategories, type FeedFilters, type Notice, type Favorite } from "@campus/contracts";
+import { computed, onMounted, onUnmounted, ref, shallowRef, watch, nextTick, defineAsyncComponent, defineComponent, h } from "vue";
+import { noticeCategories, type AuthSession, type FeedFilters, type Notice, type Favorite } from "@campus/contracts";
 const featureLoading = defineComponent(() => () => h("section", { class: "feature-surface", role: "status" }, "正在打开功能页…"));
 const featureFailed = defineComponent(() => () => h("section", { class: "feature-surface", role: "alert" }, "功能页加载失败，请刷新网页后重试。"));
 const BookmarksPanel = defineAsyncComponent({ loader: () => import("./components/BookmarksPanel.vue"), loadingComponent: featureLoading, errorComponent: featureFailed });
@@ -138,12 +138,21 @@ const copied = ref("");
 const inviteToken = ref(isNetlify ? new URLSearchParams(location.hash.slice(1)).get('invite_token') || '' : '');
 const recoveryToken=ref((isNetlify||transport.recoverPassword)?new URLSearchParams(location.hash.slice(1)).get('recovery_token')||'':'');
 const confirmationToken=ref(!recoveryToken.value&&(isNetlify||transport.confirmEmail)?new URLSearchParams(location.hash.slice(1)).get('confirmation_token')||'':'');
+const confirmationAttempt=shallowRef<Promise<AuthSession>>();
+function beginEmailConfirmation(){
+  confirmationAttempt.value=confirmationToken.value&&transport.confirmEmail?transport.confirmEmail(confirmationToken.value):undefined;
+  // The SDK reads the callback hash synchronously. Strip it immediately below,
+  // while the confirmation panel later awaits this same single attempt.
+  void confirmationAttempt.value?.catch(()=>{});
+}
+beginEmailConfirmation();
 if (inviteToken.value||confirmationToken.value||recoveryToken.value) history.replaceState(null, '', location.pathname + location.search);
 function receiveConfirmationLink(){
   const params=new URLSearchParams(location.hash.slice(1));
   const recovery=transport.recoverPassword?params.get('recovery_token'):null,confirmation=transport.confirmEmail?params.get('confirmation_token'):null;
   if(!recovery&&!confirmation)return;
   password.value='';store.clear();recoveryToken.value=recovery||'';confirmationToken.value=recovery?'':confirmation||'';
+  beginEmailConfirmation();
   history.replaceState(null,'',location.pathname+location.search);
 }
 const keyword = ref("");
@@ -243,7 +252,7 @@ function schoolChanged(event: Event) {
     <main class="form-side">
       <div class="locale"><TemplateIcon name="globe" />简体中文</div>
       <PasswordRecoveryPanel v-if="recoveryToken" :key="recoveryToken" :token="recoveryToken" :transport="transport" @complete="recoveryToken='';store.connect()" @back="recoveryToken='';store.signOut();changeAuthMode('login')" />
-      <EmailConfirmationPanel v-else-if="confirmationToken" :key="confirmationToken" :token="confirmationToken" :transport="transport" @complete="confirmationToken='';store.connect()" @back="confirmationToken='';changeAuthMode('login')" />
+      <EmailConfirmationPanel v-else-if="confirmationToken" :key="confirmationToken" :token="confirmationToken" :attempt="confirmationAttempt" :transport="transport" @complete="confirmationToken='';confirmationAttempt=undefined;store.connect()" @back="confirmationToken='';confirmationAttempt=undefined;changeAuthMode('login')" />
       <InvitationPanel v-else-if="inviteToken" :token="inviteToken" @complete="inviteToken='';store.connect()" />
       <div v-else class="form-wrap">
         <div class="welcome">{{authMode==='register'?'CREATE ACCOUNT':'WELCOME BACK'}}</div><h2 id="login-title">{{authMode==='register'?'创建你的账号':'欢迎回来'}}</h2><p class="sub">{{authMode==='register'?'验证邮箱，开启你的独立校园阅览室。':'登录你的校园账号，继续探索校园。'}}</p>
