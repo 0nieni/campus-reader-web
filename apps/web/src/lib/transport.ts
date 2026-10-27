@@ -3,9 +3,11 @@ import type {
   AiProviderState,
   GatewayAction,
   GatewayActions,
+  AnonymousTransport,
 } from "@campus/contracts";
 
 export interface Transport {
+  anonymous?: AnonymousTransport;
   restore(): Promise<AuthSession | null>;
   signIn(username: string, password: string): Promise<AuthSession>;
   signUp?(email: string, password: string): Promise<{ verificationRequired: true }>;

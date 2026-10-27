@@ -2,7 +2,10 @@
 export interface AuthSession {
   uid: string;
   username: string | null;
+  kind?:'guest'|'account';
+  account?:{uid:string;username:string|null}|null;
 }
+export type {AnonymousState,AnonymousTransfer,AnonymousImport,AnonymousTransport} from './anonymous';
 export interface School {
   id: string;
   name: string;
@@ -89,7 +92,7 @@ export interface Reminder extends Omit<ReminderInput,'dueAt'> { id:string; title
 export type ScheduledReminder=Reminder&{dueAt:string};
 export interface NoticeWatch { id:string; schoolId:string; schoolName:string; keyword:string; createdAt:string }
 export interface ReminderNotification { id:string; kind:'deadline'|'new_notice'; title:string; message:string; schoolId:string; itemId:string; createdAt:string; read:boolean }
-export interface ReminderEmailState {configured:boolean;address:string|null;verified:boolean;enabled:boolean;suspended:boolean;usedToday:number;dailyLimit:number}
+export interface ReminderEmailState {configured:boolean;address:string|null;verified:boolean;enabled:boolean;suspended:boolean;usedToday:number;dailyLimit:number;identityKind?:'guest'|'account'}
 export interface ReminderState { reminders:Reminder[]; watches:NoticeWatch[]; notifications:ReminderNotification[]; unread:number; checkedAt:string; more:boolean; pushConfigured:boolean; publicKey:string|null;deliveryMode?:'minute'|'daily';queueConfigured?:boolean;deviceCount?:number;scheduler?:'aliyun-fc'|'qstash';schedulerHealth?:'unconfigured'|'waiting'|'active'|'stale'|'failed';schedulerCheckedAt?:string|null;email?:ReminderEmailState }
 export interface BrowserPushSubscription { endpoint:string; keys:{p256dh:string;auth:string} }
 export interface GatewayActions extends AssistantActions, AiProviderActions {
@@ -106,6 +109,7 @@ export interface GatewayActions extends AssistantActions, AiProviderActions {
   'reminders.push.unsubscribe':{input:{endpoint:string};output:{removed:boolean}};
   'reminders.push.test':{input:{endpoint:string};output:{accepted:boolean}};
   'reminders.email.verify':{input:Record<string,never>;output:ReminderEmailState};
+  'reminders.email.bind':{input:{email:string};output:ReminderEmailState};
   'reminders.email.test':{input:Record<string,never>;output:ReminderEmailState};
   'reminders.email.enable':{input:{enabled:boolean};output:ReminderEmailState};
   "sources.list":{input:{schoolId:string};output:{sources:WebsiteSource[]}};

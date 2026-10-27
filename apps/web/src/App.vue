@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, shallowRef, watch, nextTick, defineAsyncComponent, defineComponent, h } from "vue";
-import { noticeCategories, type AuthSession, type FeedFilters, type Notice, type Favorite } from "@campus/contracts";
+import { noticeCategories, type AuthSession, type FeedFilters, type Notice, type Favorite, type AnonymousImport } from "@campus/contracts";
 const featureLoading = defineComponent(() => () => h("section", { class: "feature-surface", role: "status" }, "正在打开功能页…"));
 const featureFailed = defineComponent(() => () => h("section", { class: "feature-surface", role: "alert" }, "功能页加载失败，请刷新网页后重试。"));
 const BookmarksPanel = defineAsyncComponent({ loader: () => import("./components/BookmarksPanel.vue"), loadingComponent: featureLoading, errorComponent: featureFailed });
@@ -22,7 +22,8 @@ import PasswordRecoveryPanel from './components/PasswordRecoveryPanel.vue';
 const AccountSettingsDialog=defineAsyncComponent(()=>import('./components/AccountSettingsDialog.vue'));
 const accountOpen=ref(false),providerChange=ref<ProviderChange|null>(null),assistantFeedback=ref('');
 const accountOpener=ref<HTMLElement|null>(null);
-function openAccount(event:MouseEvent){accountOpener.value=event.currentTarget instanceof HTMLElement?event.currentTarget:null;accountOpen.value=true;}
+const accountInitialTab=ref<'school'|undefined>();
+function openAccount(event:MouseEvent,tab?:'school'){accountOpener.value=event.currentTarget instanceof HTMLElement?event.currentTarget:null;accountInitialTab.value=tab;accountOpen.value=true;}
 const ReminderCenter=defineAsyncComponent({loader:()=>import('./components/ReminderCenter.vue'),loadingComponent:featureLoading,errorComponent:featureFailed});
 import type {ReminderNotification,ReminderState} from '@campus/contracts';
 
@@ -32,7 +33,9 @@ const props = defineProps<{
 }>();
 const store = workspaceStore(props.transport || cloudTransport)();
 const transport = props.transport || cloudTransport;
-usePageTemplate(computed(()=>Boolean(store.workspace)));
+const authScreen=ref(false),wantAi=ref(false),workspaceMessage=ref('');
+const actualAccount=computed(()=>store.auth?.kind==='guest'?store.auth.account:store.auth);
+usePageTemplate(computed(()=>Boolean(store.workspace)&&!authScreen.value));
 const sidebarCollapsed=ref(false),showPassword=ref(false),rememberAccount=ref(false),authHint=ref('');
 const searchInput=ref<HTMLInputElement|null>(null),readerDialog=ref<HTMLElement|null>(null);
 const avatarLetter=computed(()=>(store.auth?.username?.trim()[0]||'阅').toUpperCase());
@@ -88,7 +91,14 @@ function chooseNotice(item: Notice) {
 }
 let sourceNavigationEpoch=0;
 watch(()=>store.auth?.uid,()=>{sourceNavigationEpoch++;},{flush:'sync'});
-function navigate(target: "feed" | "favorites" | "ai" | "sources" | "reminders") { sourceNavigationEpoch++;store.closeNotice(); view.value = target; }
+function openLogin(ai=false){accountOpen.value=false;wantAi.value=ai;authScreen.value=true;store.closeNotice();changeAuthMode('login');}
+function navigate(target: "feed" | "favorites" | "ai" | "sources" | "reminders") { sourceNavigationEpoch++;store.closeNotice();if(target==='ai'&&store.auth?.kind==='guest'&&!store.workspace?.capabilities.ai){openLogin(true);return;} view.value = target; }
+watch(()=>actualAccount.value?.uid,(uid,prior)=>{if(uid!==prior){providerChange.value=null;assistantFeedback.value='';if(!uid&&view.value==='ai')view.value='feed';}});
+async function imported(result:AnonymousImport){
+ accountOpen.value=false;selection.value=[];navigate('feed');await store.connect();
+ workspaceMessage.value=`已导入 ${result.bookmarks} 条收藏、${result.tags} 条标签、${result.sources} 项来源设置和 ${result.reminders} 条提醒${result.skipped?`，跳过 ${result.skipped} 项失效或私有数据`:''}。邮箱需重新验证，推送需重新检查并授权。`;
+ reminderRevision.value++;
+}
 async function openSourceSchool(schoolId:string,source?:{id:string;name:string}) {
   const uid=store.auth?.uid,ticket=sourceNavigationEpoch;
   if(store.workspace?.school?.id!==schoolId)await store.selectSchool(schoolId);
@@ -217,7 +227,9 @@ async function login() {
   try{if(rememberAccount.value)localStorage.setItem('campus-reader:login-email',username.value.trim());else localStorage.removeItem('campus-reader:login-email');}catch{}
   password.value = "";
   await store.signIn(username.value.trim(), value);
+  if(actualAccount.value&&store.workspace){authScreen.value=false;if(wantAi.value){wantAi.value=false;navigate('ai');}}
 }
+async function confirmedAccount(){authScreen.value=false;await store.connect();if(wantAi.value&&store.workspace?.capabilities.ai){wantAi.value=false;navigate('ai');}}
 function changeAuthMode(mode:'login'|'register'){password.value='';showPassword.value=false;authHint.value='';store.error='';authMode.value=mode;}
 async function copyOriginal() {
   if (!original.value) return;
@@ -243,7 +255,7 @@ function schoolChanged(event: Event) {
 </script>
 
 <template>
-  <div v-if="!store.workspace" class="page login-template">
+  <div v-if="!store.workspace||authScreen" class="page login-template">
     <section class="visual" aria-label="校园阅览室介绍">
       <div class="brand"><div class="brandmark"><TemplateIcon name="planet" /></div><div><div class="brand-name">校园阅览室</div><div class="brand-sub">校园信息门户</div></div></div>
       <div class="visual-copy"><div class="overline">A CAMPUS CONNECTED</div><h1>让每一份热爱<br>都有回响。</h1><p>校园资讯、学术活动与成长机会，<br>从校园阅览室开始。</p><div class="visual-art"><span class="star s1">✦</span><span class="star s2">✧</span><span class="star s3">✦</span><div class="orbit"></div><div class="orbit two"></div><div class="planet"></div></div></div>
@@ -251,13 +263,14 @@ function schoolChanged(event: Event) {
     </section>
     <main class="form-side">
       <div class="locale"><TemplateIcon name="globe" />简体中文</div>
-      <PasswordRecoveryPanel v-if="recoveryToken" :key="recoveryToken" :token="recoveryToken" :transport="transport" @complete="recoveryToken='';store.connect()" @back="recoveryToken='';store.signOut();changeAuthMode('login')" />
-      <EmailConfirmationPanel v-else-if="confirmationToken" :key="confirmationToken" :token="confirmationToken" :attempt="confirmationAttempt" :transport="transport" @complete="confirmationToken='';confirmationAttempt=undefined;store.connect()" @back="confirmationToken='';confirmationAttempt=undefined;changeAuthMode('login')" />
-      <InvitationPanel v-else-if="inviteToken" :token="inviteToken" @complete="inviteToken='';store.connect()" />
+      <PasswordRecoveryPanel v-if="recoveryToken" :key="recoveryToken" :token="recoveryToken" :transport="transport" @complete="recoveryToken='';confirmedAccount()" @back="recoveryToken='';store.signOut();changeAuthMode('login')" />
+      <EmailConfirmationPanel v-else-if="confirmationToken" :key="confirmationToken" :token="confirmationToken" :attempt="confirmationAttempt" :transport="transport" @complete="confirmationToken='';confirmationAttempt=undefined;confirmedAccount()" @back="confirmationToken='';confirmationAttempt=undefined;changeAuthMode('login')" />
+      <InvitationPanel v-else-if="inviteToken" :token="inviteToken" @complete="inviteToken='';confirmedAccount()" />
       <div v-else class="form-wrap">
-        <div class="welcome">{{authMode==='register'?'CREATE ACCOUNT':'WELCOME BACK'}}</div><h2 id="login-title">{{authMode==='register'?'创建你的账号':'欢迎回来'}}</h2><p class="sub">{{authMode==='register'?'验证邮箱，开启你的独立校园阅览室。':'登录你的校园账号，继续探索校园。'}}</p>
+        <div class="welcome">{{authMode==='register'?'CREATE ACCOUNT':'WELCOME BACK'}}</div><h2 id="login-title">{{authMode==='register'?'创建你的账号':'欢迎回来'}}</h2><p class="sub">{{transport.anonymous?'账号用于 AI 阅读，公告、收藏和提醒可继续匿名使用。':authMode==='register'?'验证邮箱，开启你的独立校园阅览室。':'登录你的校园账号，继续探索校园。'}}</p>
+        <button v-if="store.auth?.kind==='guest'" type="button" class="text-button anonymous-back" @click="authScreen=false;wantAi=false">返回匿名浏览</button>
         <p v-if="!props.transport && regionNeedsVerification && !issues.length" class="account-help">暂按 SDK 默认上海地域连接，尚未验证。若环境连接失败，请核实地域与访问来源。</p>
-        <div v-if="store.auth" class="setup-note" role="status">
+        <div v-if="store.auth&&store.auth.kind!=='guest'" class="setup-note" role="status">
           <strong>云账号已登录，工作区仍待验证</strong>
           <p>登录账号 UID：<span class="identity-value">{{ store.auth.uid }}</span></p>
           <button class="text-button" :disabled="store.loading" @click="store.connect()">重新连接工作区</button>
@@ -275,7 +288,7 @@ function schoolChanged(event: Event) {
           </details>
         </div>
 
-        <RegistrationForm v-if="authMode==='register'&&canRegister&&!store.auth" :transport="transport" :disabled="issues.length>0||store.loading" @sent="username=$event" @back="changeAuthMode('login')" />
+        <RegistrationForm v-if="authMode==='register'&&canRegister&&(!store.auth||store.auth.kind==='guest')" :transport="transport" :disabled="issues.length>0||store.loading" @sent="username=$event" @back="changeAuthMode('login')" />
         <template v-else>
           <form @submit.prevent="login">
             <div class="field"><div class="field-head"><label for="username">{{canRegister||isNetlify?'登录邮箱':'账号'}}</label></div><div class="input-box"><TemplateIcon name="user" /><input id="username" v-model="username" :type="canRegister||isNetlify?'email':'text'" autocomplete="username" required maxlength="254" :disabled="issues.length>0||store.loading" :placeholder="canRegister||isNetlify?'请输入登录邮箱':'请输入账号'" /></div></div>
@@ -302,11 +315,12 @@ function schoolChanged(event: Event) {
           <button v-if="store.workspace.capabilities.reminders" class="nav-link" :class="{active:view==='reminders'}" @click="navigate('reminders')"><TemplateIcon name="bell" /><span class="nav-text">提醒中心<span v-if="unreadReminders">（{{unreadReminders}}）</span></span></button>
           <button v-if="store.workspace.capabilities.websiteSources" class="nav-link" :class="{active:view==='sources'}" @click="navigate('sources')"><TemplateIcon name="globe" /><span class="nav-text">公告来源</span></button>
           <button class="nav-link" :class="{active:view==='ai'}" @click="navigate('ai')"><TemplateIcon name="sparkle" /><span class="nav-text">AI 阅读{{selection.length?'（'+selection.length+'）':''}}</span></button>
-          <div class="sidebar-spacer"></div><button class="nav-link" @click="store.signOut()"><TemplateIcon name="logout" /><span class="nav-text">退出登录</span></button>
+          <div class="sidebar-spacer"></div><button v-if="actualAccount" class="nav-link" @click="store.signOut()"><TemplateIcon name="logout" /><span class="nav-text">退出登录</span></button><button v-else-if="store.auth?.kind==='guest'" class="nav-link" @click="openLogin()"><TemplateIcon name="user" /><span class="nav-text">登录以使用 AI</span></button>
         </nav>
         <div class="side-bottom"><button class="collapse-btn" :aria-label="sidebarCollapsed?'展开侧栏':'收起侧栏'" @click="sidebarCollapsed=!sidebarCollapsed"><TemplateIcon name="collapse" /><span class="collapse-text">{{sidebarCollapsed?'展开侧栏':'收起侧栏'}}</span></button><button type="button" class="profile-mini" aria-haspopup="dialog" :aria-expanded="accountOpen" aria-label="打开个人工作区设置" @click="openAccount"><div class="avatar">{{avatarLetter}}</div><div class="profile-meta"><strong>个人工作区</strong><span>{{store.workspace.school?.name||'请选择学校'}}</span></div></button></div>
       </aside>
       <main class="main">
+        <p v-if="workspaceMessage" class="feed-update" role="status">{{workspaceMessage}}<button type="button" class="text-button" @click="workspaceMessage=''">知道了</button></p>
         <template v-if="view==='feed'">
           <div class="main-head"><div><div class="eyebrow">校园门户 <span>/</span> <span>{{pageName}}</span></div><h1 class="page-title" id="notice-title">首页</h1><p class="page-desc">发现校园动态，连接学术与成长。</p></div><div class="head-date">北京时间<strong>{{date}}</strong></div></div>
           <form class="searchbar" @submit.prevent="search"><TemplateIcon name="search" /><input id="notice-keyword" ref="searchInput" v-model="keyword" type="search" aria-label="搜索校园信息" placeholder="搜索校园信息…" maxlength="100" :disabled="!store.workspace.school" /><kbd class="shortcut">⌘ K</kbd></form>
@@ -356,22 +370,22 @@ function schoolChanged(event: Event) {
           <div class="feed notice-scroll" :aria-busy="store.loading">
             <div v-if="store.loading&&!store.items.length" class="empty" role="status">正在读取真实公告…</div>
             <div v-else-if="!store.items.length&&store.refreshingSchool" class="empty" role="status">还没有匹配的已保存公告，正在检查学校公开来源…</div>
-            <div v-else-if="!store.items.length" class="empty"><TemplateIcon name="doc" /><span>{{store.workspace.school?(isFiltered?'没有匹配的公告':'当前暂无可显示的公告'):'先选择你的学校'}}</span><button v-if="!store.workspace.school" class="text-button" @click="openAccount">打开个人工作区选择学校</button><p>{{store.error?'请排查上方错误后重试。':store.workspace.school?(store.filters.categories?.length===0?'请勾选至少一个标签后查看公告。':'可修改筛选条件，或稍后刷新。'):'学校偏好会保存到本人账号。'}}</p><div v-if="store.hiddenSourceCount&&store.workspace.capabilities.websiteSources" class="hidden-sources-hint"><p>有 {{store.hiddenSourceCount}} 个来源已关闭主页显示，可前往来源中心检查设置。</p><button class="text-button" @click="navigate('sources')">管理来源</button></div></div>
+            <div v-else-if="!store.items.length" class="empty"><TemplateIcon name="doc" /><span>{{store.workspace.school?(isFiltered?'没有匹配的公告':'当前暂无可显示的公告'):'先选择你的学校'}}</span><button v-if="!store.workspace.school" class="text-button" @click="openAccount($event,'school')">打开个人工作区选择学校</button><p>{{store.error?'请排查上方错误后重试。':store.workspace.school?(store.filters.categories?.length===0?'请勾选至少一个标签后查看公告。':'可修改筛选条件，或稍后刷新。'):store.auth?.kind==='guest'?'学校偏好会保存到本设备匿名工作区。':'学校偏好会保存到本人账号。'}}</p><div v-if="store.hiddenSourceCount&&store.workspace.capabilities.websiteSources" class="hidden-sources-hint"><p>有 {{store.hiddenSourceCount}} 个来源已关闭主页显示，可前往来源中心检查设置。</p><button class="text-button" @click="navigate('sources')">管理来源</button></div></div>
             <article v-for="item in store.items" :key="item.id" class="notice notice-row">
               <button class="notice-open" @click="copied='';store.openNotice(item.id)"><span class="notice-icon"><TemplateIcon :name="noticeIcon(item)" /></span><span class="notice-copy"><span class="notice-title" role="heading" aria-level="2">{{item.title}}</span><span class="notice-meta"><span class="notice-origin"><span class="notice-category">{{categoryLabel(item.categories)||'公告'}}</span><span class="notice-source">{{item.sourceName}}</span></span></span><span class="notice-excerpt">{{item.excerpt?'正文摘录：'+item.excerpt:'尚未读取正文，打开公告后可查看摘录。'}}</span></span><time class="notice-date" :title="displayTime(item.publishedAt)">{{noticeDate(item.publishedAt)}}<span>{{noticeYear(item.publishedAt)}}</span></time></button>
               <div class="notice-card-footer"><div class="notice-quick-actions"><button v-if="store.workspace.capabilities.reminders" class="text-button notice-remind" :disabled="Boolean(addingReminder)||alreadyReminded(item.id)" @click="addReminder(item)">{{alreadyReminded(item.id)?'已加入提醒':addingReminder===item.id?'正在加入…':'加入提醒'}}</button><button class="text-button notice-read" :disabled="selection.some(row=>row.id===item.id)" @click="addToAssistant(item)">{{selection.some(row=>row.id===item.id)?'已加入ai搭子':'加入ai搭子'}}</button></div></div>
             </article>
             <button v-if="store.nextCursor" class="load-more" :disabled="store.loading||store.pendingUpdates" @click="store.loadFeed(true)">{{store.loading?'正在读取…':'加载更多公告'}}</button>
-          </div><div class="bottom-note">真实云端资料 · 北京时间 · 各账号数据独立</div>
+          </div><div class="bottom-note">真实云端资料 · 北京时间 · {{store.auth?.kind==='guest'?'本设备匿名工作区':'各账号数据独立'}}</div>
         </template>
       <BookmarksPanel v-if="view === 'favorites'" :transport="featureTransport" :school-id="store.workspace.school?.id || null" @open="openFavorite" />
-      <ReminderCenter v-if="store.workspace.capabilities.reminders" v-show="view==='reminders'" :key="`reminders:${store.auth?.uid}`" :transport="featureTransport" :school-id="store.workspace.school?.id||null" :school-name="store.workspace.school?.name||''" :revision="reminderRevision" :visible="view==='reminders'" @unread="unreadReminders=$event" @changed="applyReminderState" @open="openReminder" @back="navigate('feed')" />
-      <WebsiteSourcesPanel v-if="view === 'sources'" :key="`${store.auth?.uid}:${store.workspace.school?.id}`" :transport="featureTransport" :school-id="store.workspace.school?.id || null" :school-name="store.workspace.school?.name || ''" :open-school="openSourceSchool" @changed="sourceCenterChanged" @back="navigate('feed')" />
-      <AssistantPanel v-if="view === 'ai'" :key="`assistant:${store.auth?.uid}:${store.workspace.school?.id}`" :transport="featureTransport" :school-id="store.workspace.school?.id || null" :selection="selection" :provider-change="providerChange" @remove="selection = selection.filter(item => item.id !== $event)" @back="navigate('feed')" />
+      <ReminderCenter v-if="store.workspace.capabilities.reminders" v-show="view==='reminders'" :key="`reminders:${store.auth?.uid}`" :transport="featureTransport" :school-id="store.workspace.school?.id||null" :school-name="store.workspace.school?.name||''" :revision="reminderRevision" :anonymous="store.auth?.kind==='guest'" :visible="view==='reminders'" @unread="unreadReminders=$event" @changed="applyReminderState" @open="openReminder" @back="navigate('feed')" />
+      <WebsiteSourcesPanel v-if="view === 'sources'" :key="`${store.auth?.uid}:${store.workspace.school?.id}`" :transport="featureTransport" :public-only="store.auth?.kind==='guest'" :school-id="store.workspace.school?.id || null" :school-name="store.workspace.school?.name || ''" :open-school="openSourceSchool" @changed="sourceCenterChanged" @back="navigate('feed')" />
+      <AssistantPanel v-if="view === 'ai'" :key="`assistant:${actualAccount?.uid}:${store.workspace.school?.id}`" :transport="featureTransport" :school-id="store.workspace.school?.id || null" :selection="selection" :provider-change="providerChange" @remove="selection = selection.filter(item => item.id !== $event)" @back="navigate('feed')" />
 
       </main>
     </div>
-    <AccountSettingsDialog v-if="accountOpen" :key="store.auth?.uid" :transport="featureTransport" :username="store.auth?.username||null" :opener="accountOpener" @close="accountOpen=false" @providers-changed="providerChange=$event"><template #school>        <label class="school-label" for="school">我的学校</label>
+    <AccountSettingsDialog v-if="accountOpen" :key="`${store.auth?.uid}:${actualAccount?.uid||''}`" :transport="featureTransport" :anonymous="store.auth?.kind==='guest'" :username="actualAccount?.username||null" :opener="accountOpener" :initial-tab="accountInitialTab" @close="accountOpen=false" @login="openLogin()" @imported="imported" @providers-changed="providerChange=$event"><template #school>        <label class="school-label" for="school">我的学校</label>
         <input v-if="store.schools.length > 10" v-model="schoolQuery" aria-label="搜索学校" placeholder="输入学校名称筛选" maxlength="80" class="school-search">
         <select
           id="school"
@@ -449,7 +463,7 @@ function schoolChanged(event: Event) {
             <p class="small muted">最早到期：{{ displayTime(store.detail.materialArchive.expiresAt) }} · 北京时间。到期后按来源许可重新采集。</p>
             <ul>
               <li v-for="file in store.detail.materialArchive.files" :key="file.id">
-                <a v-if="file.available && store.workspace.school" :href="`/.netlify/functions/material-file?schoolId=${encodeURIComponent(store.workspace.school.id)}&itemId=${encodeURIComponent(store.detail.id)}&fileId=${encodeURIComponent(file.id)}`">{{ file.filename }} ↓</a>
+                <a v-if="file.available && store.workspace.school" :href="`/.netlify/functions/material-file?schoolId=${encodeURIComponent(store.workspace.school.id)}&itemId=${encodeURIComponent(store.detail.id)}&fileId=${encodeURIComponent(file.id)}${transport.anonymous&&store.auth?.kind!=='guest'?'&workspace=account':''}`">{{ file.filename }} ↓</a>
                 <span v-else>{{ file.filename }}</span>
                 <p class="small muted">{{ file.message }}<template v-if="file.expiresAt"> · 保存至 {{ displayTime(file.expiresAt) }}</template></p>
               </li>

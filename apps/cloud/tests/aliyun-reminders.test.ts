@@ -40,7 +40,9 @@ test('email links do not consume tokens on GET or in preview and require a same-
 test('FC scheduling, independent channels, verification, quota and recovery use only synthetic SQL and senders',async t=>{
  const server=new NetlifyDB({logger(){}}),connectionString=await server.start(),database=getDatabase({connectionString}),native=database.pool;
  (native as any).options.max=1;const pool=native as unknown as SqlPool,repo=postgresRepository(pool),db=postgresStorage(pool),index=memoryWake();
- let clock=Math.floor(Date.now()/60000)*60000,counter=0,mode:MailResult['state']='accepted',invalid=false,pushMode='accepted',suppressed=false,identityAvailable=true,throwMail=false;
+ // Start at Beijing noon: this test advances seven minutes while asserting a
+ // same-day budget, so wall-clock runs near midnight must not reset that budget.
+ let clock=Date.parse(new Date().toISOString().slice(0,10)+'T04:00:00.000Z'),counter=0,mode:MailResult['state']='accepted',invalid=false,pushMode='accepted',suppressed=false,identityAvailable=true,throwMail=false;
  const addresses=new Map([['fc_a','a@example.test'],['fc_b','b@example.test']]),messages:{to:string;subject:string;text:string}[]=[],pushes:string[]=[],pushMessages:(PushMessage|undefined)[]=[];
  const mail=reminderEmail(pool,{now:()=>clock,resolveIdentity:async id=>{if(!identityAvailable)throw Error('synthetic outage');return{email:addresses.get(id)};},sender:{send:async(to,subject,text)=>{messages.push({to,subject,text});if(throwMail)throw Error('synthetic interruption after request');return{state:mode,id:mode==='accepted'?'synthetic-env-'+messages.length:undefined,invalid};},suppressed:async()=>suppressed}});
  const options={now:()=>clock,minuteMode:true,aliyun:{index,email:mail},push:{publicKey:'synthetic-public',privateKey:'synthetic-private',subject:reminderOrigin},send:async(subscription:any,_config:unknown,_tag:string,message?:PushMessage)=>{pushes.push(subscription.endpoint);pushMessages.push(message);if(pushMode!=='accepted')throw Object.assign(Error('synthetic push'),pushMode==='temporary'?{statusCode:503}:{});}};

@@ -109,6 +109,10 @@ export function reminderService(pool:SqlPool,options:Options={}){
     const owner=identity.dataOwnerId;
     if(action.startsWith('reminders.email.')){
       if(!options.aliyun?.email)reject('EMAIL_UNAVAILABLE','邮件提醒待配置。');
+      if(action==='reminders.email.bind'){
+        if(identity.kind!=='guest')reject('FORBIDDEN','账号提醒邮箱来自登录会话，不能由客户端指定。');
+        return options.aliyun.email.bindGuest(owner,input.email);
+      }
       return options.aliyun.email.handle(action,input,owner);
     }
     if(options.minuteMode&&action.startsWith('reminders.watch.'))reject('ACTION_NOT_ALLOWED','学校与关键词关注已移除。');
