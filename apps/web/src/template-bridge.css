@@ -104,3 +104,15 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,su
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{transition:none!important;animation:none!important;}}
 @media(max-width:800px){.portal-template{--portal-topbar-height:70px;}}
 @media(max-width:640px){.portal-template .account-modal{padding:20px;}.portal-template .account-dialog .provider-row{grid-template-columns:minmax(0,1fr);}.portal-template .account-tabs{gap:4px;}.portal-template .account-tabs button{padding:9px 11px;}.portal-template .account-model-heading{align-items:flex-start;}.portal-template .account-dialog .provider-heading{display:block;}}
+.portal-template .anonymous-id{display:grid;gap:8px;padding:16px;background:var(--purple-soft);border-radius:10px;}
+.portal-template .anonymous-id code{font-size:14px;overflow-wrap:anywhere;}
+.portal-template .anonymous-transfer{margin-top:24px;padding-top:20px;border-top:1px solid var(--purple-line);}
+.portal-template .anonymous-transfer h4{margin:0 0 12px;font-size:16px;}
+.portal-template .anonymous-transfer label,.portal-template .anonymous-email-form label{display:block;margin:14px 0 8px;font-weight:600;font-size:14px;}
+.portal-template .anonymous-code-row{display:flex;gap:10px;align-items:center;}
+.portal-template .anonymous-transfer input,.portal-template .anonymous-email-form input{min-width:0;width:100%;box-sizing:border-box;border:1px solid var(--purple-line);border-radius:8px;padding:12px;background:var(--paper);color:var(--ink);font-size:14px;}
+.portal-template .anonymous-code-row button{flex-shrink:0;}
+.portal-template .anonymous-transfer input:focus-visible,.portal-template .anonymous-email-form input:focus-visible{outline:2px solid var(--purple);outline-offset:2px;}
+.portal-template .anonymous-email-form{margin-top:14px;}
+.login-template .anonymous-back{margin-bottom:20px;color:var(--purple);}
+@media(max-width:520px){.portal-template .anonymous-code-row{flex-direction:column;align-items:stretch;}.portal-template .anonymous-id code{font-size:12px;}.portal-template .account-tabs{flex-wrap:wrap;}}

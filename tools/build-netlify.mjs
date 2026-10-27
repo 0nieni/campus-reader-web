@@ -28,7 +28,7 @@ async function copyDirectory(from, to) {
 }
 await copyDirectory(join(root, 'apps/web/dist'), join(output, 'public'))
 await mkdir(join(output, 'functions'))
-for (const name of ['api', 'auth', 'cleanup', 'identity', 'reminders','reminder-delivery','reminder-tick','reminder-email','material-file','material-schedule','material-collect-background']) {
+for (const name of ['api', 'auth', 'guest', 'cleanup', 'identity', 'reminders','reminder-delivery','reminder-tick','reminder-email','material-file','material-schedule','material-collect-background']) {
   const compiled = await bundle({ entryPoints: [join(root, `netlify/functions/${name}.mts`)], outfile: join(output, `functions/${name}.mjs`), bundle: true, external: ['unpdf','word-extractor','xlsx','yauzl'], platform: 'node', format: 'esm', target: 'node22', sourcemap: false, logLevel: 'info', metafile: true, banner: { js: "import { createRequire as __deployCreateRequire } from 'node:module'; const require = __deployCreateRequire(import.meta.url);" } })
   execFileSync(process.execPath,['--check',join(output,`functions/${name}.mjs`)],{stdio:'inherit'})
   if (Object.keys(compiled.metafile.inputs).some(path => /(?:@cloudbase\/(?:node-sdk|database)|node_modules\/(?:axios|lodash\.set|lodash\.unset))\//.test(path.replaceAll('\\', '/')))) throw new Error('全 Netlify 函数不得包含旧 CloudBase SDK 依赖')
@@ -39,7 +39,7 @@ await writeFile(join(output, 'verify.mjs'), "import { access } from 'node:fs/pro
 await writeFile(join(output, 'netlify.toml'), '[build]\n  command = "node verify.mjs"\n  publish = "public"\n  functions = "functions"\n[build.environment]\n  NODE_VERSION = "22"\n[functions]\n  node_bundler = "esbuild"\n[functions.cleanup]\n  schedule = "17 18 * * *"\n[functions.reminders]\n  schedule = "0 1,12 * * *"\n[functions.api]\n  external_node_modules = ["unpdf","word-extractor","xlsx","yauzl"]\n[functions.material-file]\n  external_node_modules = ["unpdf","word-extractor","xlsx","yauzl"]\n[functions.material-collect-background]\n  external_node_modules = ["unpdf","word-extractor","xlsx","yauzl"]\n[functions.material-schedule]\n  schedule = "45 18 * * *"\n[[headers]]\n  for = "/*"\n  [headers.values]\n    X-Content-Type-Options = "nosniff"\n    Referrer-Policy = "strict-origin-when-cross-origin"\n')
 await writeFile(join(output, '.gitignore'), '.netlify/\n.env\n.env.*\n')
 const { default: handler } = await import(pathToFileURL(join(output, 'functions/api.mjs')).href)
-const denied = await handler(new Request('https://localhost/.netlify/functions/api', { method: 'POST', headers: { origin: 'https://localhost' } }))
+const denied = await handler(new Request('https://localhost/.netlify/functions/api', { method: 'POST', headers: { origin: 'https://localhost','content-type':'application/json' }, body:JSON.stringify({action:'ai.status',input:{}}) }))
 if (denied.status !== 401 || denied.headers.get('cache-control') !== 'no-store') throw new Error('部署函数的未登录拒绝检查失败')
 console.log(`Netlify 部署产物：${output}`)
-console.log(`仅包含网页、11 个 Netlify 函数与 SQL 迁移；不含本地环境文件，未上传、未调用模型。`)
+console.log(`仅包含网页、12 个 Netlify 函数与 SQL 迁移；不含本地环境文件，未上传、未调用模型。`)

@@ -31,6 +31,23 @@ it('platform HTML failures are sanitized and never retried', async () => {
   const { netlifyTransport } = await import('../src/lib/netlify');
   await expect(netlifyTransport.call('ai.status', {})).rejects.toMatchObject({ code: 'CONNECTION_FAILED' }); expect(fetcher).toHaveBeenCalledTimes(1);
 });
+it('default restoration opens an anonymous workspace while explicit account mode restores the original account',async()=>{
+ const {netlifyTransport}=await import('../src/lib/netlify');
+ fetcher.mockResolvedValueOnce({json:async()=>({ok:true,data:{id:'fixture',identity:{uid:'guest_fixture',kind:'guest',account:null},transferExpiresAt:null}})});
+ expect((await netlifyTransport.restore())?.kind).toBe('guest');expect(fetcher).toHaveBeenLastCalledWith('/.netlify/functions/guest',expect.objectContaining({body:'{"op":"session"}',credentials:'same-origin'}));
+ history.replaceState(null,'','/?workspace=account');fetcher.mockResolvedValueOnce({json:async()=>({ok:true,data:{uid:'account',username:'member@example.test'}})});
+ expect((await netlifyTransport.restore())?.uid).toBe('account');expect(fetcher).toHaveBeenLastCalledWith('/.netlify/functions/auth',expect.objectContaining({method:'GET'}));
+ fetcher.mockResolvedValueOnce({json:async()=>({ok:true,data:{}})});await netlifyTransport.call('session.get',{});expect(fetcher).toHaveBeenLastCalledWith('/.netlify/functions/api',expect.objectContaining({headers:{'content-type':'application/json','x-campus-workspace':'account'}}));
+});
+it('guest AI logout keeps the device push subscription and only removes the account session',async()=>{
+ const {netlifyTransport}=await import('../src/lib/netlify');fetcher.mockResolvedValue({json:async()=>({ok:true,data:null})});await netlifyTransport.signOut();
+ expect(fetcher).toHaveBeenCalledTimes(1);expect(fetcher).toHaveBeenLastCalledWith('/.netlify/functions/auth?op=logout',expect.objectContaining({body:'{}'}));
+});
+it('an Identity hydration failure does not block anonymous public browsing',async()=>{
+ const sdk=await import('@netlify/identity'),{netlifyTransport}=await import('../src/lib/netlify');vi.mocked(sdk.hydrateSession).mockRejectedValueOnce(Error('synthetic identity outage'));
+ fetcher.mockResolvedValueOnce({json:async()=>({ok:true,data:{id:'fixture',identity:{uid:'guest_fixture',kind:'guest',account:null},transferExpiresAt:null}})});
+ expect((await netlifyTransport.restore())?.uid).toBe('guest_fixture');
+});
 it('expired sessions clear subscribers before an application error is returned', async () => {
   fetcher.mockResolvedValue({ json: async () => ({ ok: false, code: 'UNAUTHENTICATED', message: '请登录' }) });
   const { netlifyTransport } = await import('../src/lib/netlify'), changed = vi.fn(), stop = netlifyTransport.onSessionChange(changed);

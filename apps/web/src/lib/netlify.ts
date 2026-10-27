@@ -1,9 +1,15 @@
-import type { AuthSession, GatewayResult } from '@campus/contracts';
+import type { AuthSession, GatewayResult, AnonymousState } from '@campus/contracts';
 import type { Transport } from './transport';
 import {disablePush} from './browser-push';
 import { ClientError } from './errors';
 import { handleAuthCallback, hydrateSession, onAuthChange, recoverPassword, logout } from '@netlify/identity';
 const listeners = new Set<(session: AuthSession | null) => void>();
+const legacyWorkspace=()=>new URLSearchParams(location.search).get('workspace')==='account';
+let startingGuest:Promise<AnonymousState>|undefined;
+function guestState(){
+ if(!startingGuest){startingGuest=request<AnonymousState>('/.netlify/functions/guest',{op:'session'});void startingGuest.finally(()=>{startingGuest=undefined;}).catch(()=>{});}
+ return startingGuest;
+}
 function notify(session: AuthSession | null) { for (const listener of listeners) listener(session); }
 function confirmationError(caught:unknown):ClientError {
   let error=caught,status:number|undefined;
@@ -21,7 +27,7 @@ function confirmationError(caught:unknown):ClientError {
 async function request<T>(url: string, body?: unknown): Promise<T> {
   let result: GatewayResult<T>;
   try {
-    const response = await fetch(url, { method: body === undefined ? 'GET' : 'POST', credentials: 'same-origin', cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(55000), ...(body === undefined ? {} : { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }) });
+    const response = await fetch(url, { method: body === undefined ? 'GET' : 'POST', credentials: 'same-origin', cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(55000), ...(body === undefined ? {} : { headers: { 'content-type': 'application/json',...(url==='/.netlify/functions/api'&&legacyWorkspace()?{'x-campus-workspace':'account'}:{}) }, body: JSON.stringify(body) }) });
     result = await response.json();
     if (!result || typeof result !== 'object' || typeof result.ok !== 'boolean') throw new Error('Invalid envelope');
   } catch {
@@ -36,7 +42,8 @@ async function request<T>(url: string, body?: unknown): Promise<T> {
   return result.data;
 }
 export const netlifyTransport: Transport = {
-  async restore() { await hydrateSession(); return request<AuthSession | null>('/.netlify/functions/auth'); },
+  anonymous:{state:guestState,createTransfer:()=>request('/.netlify/functions/guest',{op:'transfer.create'}),cancelTransfer:()=>request('/.netlify/functions/guest',{op:'transfer.cancel'}),importTransfer:code=>request('/.netlify/functions/guest',{op:'transfer.import',code})},
+  async restore() { if(legacyWorkspace()){await hydrateSession();return request<AuthSession|null>('/.netlify/functions/auth');}await hydrateSession().catch(()=>null);return(await guestState()).identity; },
   async signIn(email, password) { const value = await request<AuthSession>('/.netlify/functions/auth?op=login', { email: email.trim(), password }); await hydrateSession(); notify(value); return value; },
   signUp: (email, password) => request('/.netlify/functions/auth?op=signup', { email: email.trim(), password }),
   async requestPasswordRecovery() { await request('/.netlify/functions/auth?op=password-recovery', {}); },
@@ -67,7 +74,7 @@ export const netlifyTransport: Transport = {
     if(!value||value.uid!==confirmedId){await logout().catch(()=>{});notify(null);throw new ClientError('CONFIRMATION_SESSION_FAILED','邮箱已确认，请返回登录，使用注册时设置的密码登录。');}
     notify(value); return value;
   },
-  async signOut() { await Promise.race([disablePush(netlifyTransport).catch(()=>{}),new Promise(resolve=>setTimeout(resolve,2500))]); await request('/.netlify/functions/auth?op=logout', {}); notify(null); },
+  async signOut() { if(legacyWorkspace())await Promise.race([disablePush(netlifyTransport).catch(()=>{}),new Promise(resolve=>setTimeout(resolve,2500))]); await request('/.netlify/functions/auth?op=logout', {}); notify(null); },
   onSessionChange(listener) {
     listeners.add(listener);
     const stop = onAuthChange((_event, user) => { if (!user) listener(null); else listener({ uid: user.id, username: user.email || null }); });

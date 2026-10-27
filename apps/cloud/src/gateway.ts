@@ -18,6 +18,7 @@ import type { Repository, ItemRow } from "./repository";
 import { filtersOf, filterSince, matchesFilters } from "./filters";
 import { checkedLabels, displayedCategories, originalCategories } from './notice-labels';
 import {noticeSourceAliases} from './school-sources';
+import {guestActionAllowed} from './guest-access';
 
 const fields: Record<string, string[]> = {
   'ai.providers.list': [],
@@ -55,6 +56,7 @@ const fields: Record<string, string[]> = {
   'reminders.push.unsubscribe':['endpoint'],
   'reminders.push.test':['endpoint'],
   'reminders.email.verify':[],
+  'reminders.email.bind':['email'],
   'reminders.email.test':[],
   'reminders.email.enable':['enabled'],
   'sources.list':['schoolId'],
@@ -176,7 +178,7 @@ async function session(
     identity: { uid: identity.uid, username: null },
     school: id ? await repo.school(id) : null,
     legacyLinked: identity.legacyLinked,
-    capabilities: { reading: true, ai: true, operations: false, ...(directory ? { schoolDirectory:true } : {}), ...(websites?{websiteSources:true}:{}), ...(reminders?{reminders:true}:{}), ...(repo.setLabels ? {noticeLabels:true} : {}) },
+    capabilities: { reading: true, ai: identity.kind!=='guest', operations: false, ...(directory ? { schoolDirectory:true } : {}), ...(websites?{websiteSources:true}:{}), ...(reminders?{reminders:true}:{}), ...(repo.setLabels ? {noticeLabels:true} : {}) },
   };
 }
 
@@ -206,6 +208,7 @@ export function createGateway(
     try {
       const identity = identify(caller, config);
       const { action, input } = inputOf(event);
+      if(identity.kind==='guest'&&!guestActionAllowed(action))reject('LOGIN_REQUIRED','此操作需要登录AI账号或打开原账号工作区。');
       operation = action;
       const filters = action === "feed.list" ? filtersOf(input) : {};
       if(action==='sources.displayState'){

@@ -7,7 +7,7 @@ import {categoryNames} from '../lib/presentation';
 import CatalogueSourceCard from './CatalogueSourceCard.vue';
 import SchoolSourcesPanel from './SchoolSourcesPanel.vue';
 import PersonalSourcesPanel from './PersonalSourcesPanel.vue';
-const props=defineProps<{transport:Transport;schoolId:string|null;schoolName:string;openSchool?:(schoolId:string,source?:{id:string;name:string})=>Promise<void>}>();
+const props=defineProps<{transport:Transport;schoolId:string|null;schoolName:string;publicOnly?:boolean;openSchool?:(schoolId:string,source?:{id:string;name:string})=>Promise<void>}>();
 const emit=defineEmits<{changed:[kind?:'visibility'];back:[]}>();
 const tab=ref<'all'|'schools'|'personal'>('all'),schoolVisited=ref(false),personalVisited=ref(false);
 const catalogue=ref<SourceCatalogue|null>(null),loading=ref(false),busy=ref(false),schoolBusy=ref(false),personalBusy=ref(false);
@@ -74,7 +74,7 @@ onMounted(()=>void load());onUnmounted(()=>{active=false;request++;});
   <div class="source-tabs" role="group" aria-label="来源视图">
    <button :aria-pressed="tab==='all'" :class="{active:tab==='all'}" @click="tab='all'">全部来源</button>
    <button :aria-pressed="tab==='schools'" :class="{active:tab==='schools'}" @click="tab='schools';schoolVisited=true">浏览学校</button>
-   <button :aria-pressed="tab==='personal'" :class="{active:tab==='personal'}" @click="tab='personal';personalVisited=true">管理我的来源</button>
+   <button v-if="!publicOnly" :aria-pressed="tab==='personal'" :class="{active:tab==='personal'}" @click="tab='personal';personalVisited=true">管理我的来源</button>
   </div>
   <div class="source-actions"><button class="text-button" :disabled="locked||!catalogue?.sources.length" @click="setAll(true)">全部勾选</button><button class="text-button" :disabled="locked||!catalogue?.sources.length" @click="setAll(false)">全部取消勾选</button><button class="text-button" :disabled="locked||loading" @click="load">重新读取目录</button></div>
   <p v-if="error" class="error-message" role="alert">{{error}}</p><p v-if="message" role="status">{{message}}</p>

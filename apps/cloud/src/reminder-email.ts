@@ -42,10 +42,26 @@ export function reminderEmail(pool:SqlPool,options:EmailOptions={}){
   const {rows}=await pool.query('SELECT email,verified_at,enabled,suspended,last_verify_at FROM campus_reminder_email WHERE owner_id=$1',[owner]);const row=rows[0];
   const used=await pool.query("SELECT used FROM campus_reminder_email_budget WHERE day=$1 AND owner_id=$2 AND kind='all'",[new Date(now()+8*3600000).toISOString().slice(0,10),owner]);
   const address=String(row?.email||''),at=address.indexOf('@');
-  return{configured:Boolean(options.sender),address:at>0?address.slice(0,Math.min(at,2))+'***'+address.slice(at):null,verified:Boolean(row?.verified_at),enabled:Boolean(row?.enabled),suspended:Boolean(row?.suspended),usedToday:Number(used.rows[0]?.used||0),dailyLimit:20};
+  return{configured:Boolean(options.sender),address:at>0?address.slice(0,Math.min(at,2))+'***'+address.slice(at):null,verified:Boolean(row?.verified_at),enabled:Boolean(row?.enabled),suspended:Boolean(row?.suspended),usedToday:Number(used.rows[0]?.used||0),dailyLimit:20,...(owner.startsWith('guest_')?{identityKind:'guest' as const}:{})};
+ }
+ async function bindGuest(owner:string,email:unknown){
+  if(!/^guest_[a-f0-9]{32}$/.test(owner))reject('FORBIDDEN','只能为当前匿名工作区设置提醒邮箱。');
+  const address=normalizedEmail(email);if(!address)reject('VALIDATION_FAILED','请输入有效的提醒邮箱。');
+  const identityId=owner.slice(6);
+  if(!(await pool.query('SELECT id FROM campus_guest_workspaces WHERE id=$1',[identityId])).rows.length)reject('UNAUTHENTICATED','匿名身份已失效。');
+  await transaction(owner,async(client,row)=>{
+   if(row?.email===address&&row.identity_kind==='guest')return;
+   if(row?.last_verify_at&&now()-Date.parse(row.last_verify_at)<60000)reject('EMAIL_RATE_LIMIT','请间隔至少60秒再更换或验证邮箱。');
+   if(!row)await client.query("INSERT INTO campus_reminder_email(owner_id,identity_id,email,binding_id,created_at,updated_at,identity_kind) VALUES($1,$2,$3,$4,$5,$5,'guest')",[owner,identityId,address,uuid(),iso(now())]);
+   else await client.query("UPDATE campus_reminder_email SET identity_id=$2,email=$3,binding_id=$4,identity_kind='guest',verified_at=NULL,enabled=false,suspended=false,token_hash=NULL,token_expires=NULL,unsubscribe_hash=NULL,feedback_due_at=NULL,feedback_until=NULL,updated_at=$5 WHERE owner_id=$1",[owner,identityId,address,uuid(),iso(now())]);
+  });return state(owner);
  }
  async function current(owner:string,binding?:string){
   const {rows}=await pool.query('SELECT * FROM campus_reminder_email WHERE owner_id=$1',[owner]);const row=rows[0];if(!row||binding&&row.binding_id!==binding)return;
+  if(row.identity_kind==='guest'){
+   if(owner!=='guest_'+row.identity_id||!(await pool.query('SELECT id FROM campus_guest_workspaces WHERE id=$1',[row.identity_id])).rows.length)return;
+   return row;
+  }
   // Never trust an old copied login address. Background sends re-read the
   // authoritative Identity user; failures postpone sending instead of using it.
   if(!options.resolveIdentity)throw Error('Identity resolver unavailable');
@@ -72,6 +88,10 @@ export function reminderEmail(pool:SqlPool,options:EmailOptions={}){
    if(!verification&&(!row.enabled||!row.verified_at||row.suspended))reject('EMAIL_NOT_READY','请先验证并主动开启邮件提醒，再发送测试邮件。');
    const field=verification?'last_verify_at':'last_test_at';if(row[field]&&now()-Date.parse(row[field])<60000)reject('EMAIL_RATE_LIMIT','请间隔至少60秒再发送。');
    await reserveEmail(client,owner,verification?'verify':'test',now(),options.dailyLimit);
+   if(verification&&row.identity_kind==='guest'){
+    const recipient=await client.query("INSERT INTO campus_reminder_email_budget(day,owner_id,kind,used) VALUES($1,$2,'verify',1) ON CONFLICT(day,owner_id,kind) DO UPDATE SET used=campus_reminder_email_budget.used+1 WHERE campus_reminder_email_budget.used<3 RETURNING used",[new Date(now()+8*3600000).toISOString().slice(0,10),'recipient:'+hash(row.email)]);
+    if(!recipient.rows.length)reject('EMAIL_LIMIT','该邮箱今日验证邮件已达上限，请明天再试。');
+   }
    if(verification)await client.query('UPDATE campus_reminder_email SET token_hash=$2,token_expires=$3,last_verify_at=$4,updated_at=$4 WHERE owner_id=$1',[owner,hash(token),iso(now()+1800000),iso(now())]);
    else await client.query('UPDATE campus_reminder_email SET last_test_at=$2,unsubscribe_hash=$3,updated_at=$2 WHERE owner_id=$1',[owner,iso(now()),hash(unsubscribe)]);
    return row;
@@ -120,5 +140,6 @@ export function reminderEmail(pool:SqlPool,options:EmailOptions={}){
     WHERE owner_id=$1 AND binding_id=$2 AND feedback_due_at IS NOT DISTINCT FROM $6::timestamptz AND feedback_until IS NOT DISTINCT FROM $7::timestamptz`,[row.owner_id,row.binding_id,iso(now()),next,failures,row.feedback_due_at,row.feedback_until]);
   }));if(rows.length)console.info(JSON.stringify({event:'reminder-mail-feedback',checked,suspended,failed}));return{checked,suspended,failed};
  }
- return{bind,state,current,handle,consume,suspend,unsubscribeLink,feedback,noteAccepted,sender:options.sender,dailyLimit:options.dailyLimit??150};
+ async function verifiedAddress(owner:string){const row=await current(owner);return row?.verified_at&&!row.suspended?row.email as string:null;}
+ return{bind,bindGuest,state,current,verifiedAddress,handle,consume,suspend,unsubscribeLink,feedback,noteAccepted,sender:options.sender,dailyLimit:options.dailyLimit??150};
 }

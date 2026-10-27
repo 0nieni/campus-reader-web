@@ -23,7 +23,7 @@ export async function boundedJson(request: Request, max = 12000): Promise<Record
     return value;
   } catch (error) { if (error instanceof AppError) throw error; throw new AppError('VALIDATION_FAILED', '请求参数无效。'); }
 }
-function sameOrigin(request: Request) {
+export function sameOrigin(request: Request) {
   if (request.headers.get('origin') !== new URL(request.url).origin || request.headers.get('sec-fetch-site') === 'cross-site') throw new AppError('FORBIDDEN', '请从本站页面提交操作。');
 }
 const session = (user: NetlifyUser): AuthSession => ({ uid: user.id, username: user.email });
