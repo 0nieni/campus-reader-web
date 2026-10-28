@@ -16,7 +16,7 @@ import {aliyunJobs,type AliyunOptions} from './aliyun-reminder-jobs';
 type Notification=ReminderNotification&{reminderId?:string;watchId?:string;sent:Record<string,'sending'|'sent'|'failed'|'skipped'>};
 type StoredReminder=Reminder&{generation:string;fired:number[]};
 interface State {reminders:StoredReminder[];watches:NoticeWatch[];notifications:Notification[];lastScan?:number;more?:boolean;lastTest?:number}
-interface Options {now?:()=>number;push?:PushConfig;send?:typeof sendBrowserPush;minuteMode?:boolean;queue?:ReminderPublisher;aliyun?:AliyunOptions}
+interface Options {now?:()=>number;push?:PushConfig;send?:typeof sendBrowserPush;minuteMode?:boolean;queue?:ReminderPublisher;aliyun?:AliyunOptions;currentSchoolRequired?:boolean}
 const day=86400000;
 const cleanText=(value:unknown,max:number,fallback='')=>{
   if(typeof value!=='string'||value.length>max||/[\x00-\x1f\x7f]/.test(value))reject('VALIDATION_FAILED','提醒文字过长或包含无效字符。');
@@ -161,13 +161,13 @@ export function reminderService(pool:SqlPool,options:Options={}){
       const repo=repoFor(client),time=now();
       if(action==='reminders.add'){
         const schoolId=identifier(input.schoolId);
-        const school=await authorizeSchool(repo,owner,schoolId);
+        const school=await authorizeSchool(repo,owner,schoolId,options.currentSchoolRequired!==false);
         if(!Array.isArray(input.itemIds)||!input.itemIds.length||input.itemIds.length>20)reject('VALIDATION_FAILED','一次请选择1至20篇公告。');
         const itemIds=[...new Set(input.itemIds.map(identifier))];
         // Validate the entire selection before writing any draft. Added notices
         // do not acquire a guessed time or create notifications/AI requests.
         const rows=[];
-        for(const itemId of itemIds)rows.push(await authorizedItem(repo,owner,schoolId,itemId,time));
+        for(const itemId of itemIds)rows.push(await authorizedItem(repo,owner,schoolId,itemId,time,options.currentSchoolRequired!==false));
         const additions=rows.filter(row=>!state.reminders.some(r=>r.schoolId===schoolId&&r.itemId===row._id));
         if(state.reminders.length+additions.length>100)reject('REMINDER_LIMIT','每个账号最多保存100条提醒，请先移除已完成事项。');
         state.reminders.unshift(...additions.map(row=>({id:id(),schoolId,itemId:row._id,label:'报名／事项截止',dueAt:null,days:[],title:String(row.title||'未命名公告').slice(0,300),schoolName:school.name,createdAt:new Date(time).toISOString(),generation:id(),fired:[]})));
@@ -175,7 +175,7 @@ export function reminderService(pool:SqlPool,options:Options={}){
         if(input.channels!==undefined&&(input.channels===null||typeof input.channels!=='object'||Array.isArray(input.channels)||Object.keys(input.channels).some(k=>!['browser','email'].includes(k))||typeof (input.channels as any).browser!=='boolean'||typeof (input.channels as any).email!=='boolean'))reject('VALIDATION_FAILED','请选择有效的提醒发送方式。');
         const existing=input.id===undefined?undefined:state.reminders.find(r=>r.id===identifier(input.id));
         if(input.id&&!existing)reject('NOT_FOUND','提醒不存在或不属于当前账号。');
-        const schoolId=identifier(input.schoolId),itemId=identifier(input.itemId),row=await authorizedItem(repo,owner,schoolId,itemId,time,!existing);
+        const schoolId=identifier(input.schoolId),itemId=identifier(input.itemId),row=await authorizedItem(repo,owner,schoolId,itemId,time,!existing&&options.currentSchoolRequired!==false);
         const school=await repo.school(schoolId),label=cleanText(input.label,80,'事项截止');
         if(typeof input.dueAt!=='string'||!/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.000Z$/.test(input.dueAt)||!Number.isFinite(Date.parse(input.dueAt))||new Date(input.dueAt).toISOString()!==input.dueAt||Date.parse(input.dueAt)<=time||Date.parse(input.dueAt)>time+2*366*day)reject('VALIDATION_FAILED','请选择未来两年内的有效日期和具体时间。');
         if(!Array.isArray(input.days)||!input.days.length||input.days.some(value=>![0,1,3,7].includes(value)))reject('VALIDATION_FAILED','请选择提前7天、3天、1天或到时提醒。');

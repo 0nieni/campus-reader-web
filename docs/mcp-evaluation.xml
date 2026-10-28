@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Fixed local synthetic dataset in mcp-evaluation.test.ts; never production. -->
+<evaluation>
+  <qa_pair><question>查找“MCP评估北校”的课程项目报名公告，读取正文，报名最终截止日是哪一天？只答正文中的日期。</question><answer>2027-05-20</answer></qa_pair>
+  <qa_pair><question>找到“MCP评估北校”的课程项目报名公告，核对正文后给出原文地址。</question><answer>https://example.test/evaluation/north-project</answer></qa_pair>
+  <qa_pair><question>逐页检查我的收藏，找到北校课程项目报名，正文要求向哪个办公室交材料？</question><answer>北楼203室</answer></qa_pair>
+  <qa_pair><question>检查北校课程项目的正文与我设置的提醒，提醒日期早于正文截止日几天？按北京时间的自然日计算。</question><answer>2</answer></qa_pair>
+  <qa_pair><question>查找我的全部提醒并读取相关公告，北校课程项目和南校团队赛哪一项的提醒更早？只答公告标题。</question><answer>南校团队赛报名</answer></qa_pair>
+  <qa_pair><question>逐页核对收藏与提醒，三条评估收藏中，有几条已设置具体提醒时间？</question><answer>2</answer></qa_pair>
+  <qa_pair><question>逐页读取收藏并尝试读取正文，哪一条收藏明确没有可用正文？只答标题。</question><answer>北校材料补充通知</answer></qa_pair>
+  <qa_pair><question>找到北校课程项目和南校团队赛两篇公告，读取并核对两者显示的来源名称。共同来源叫什么？</question><answer>MCP评估教务处</answer></qa_pair>
+  <qa_pair><question>查找“MCP评估南校”的团队赛公告，读取正文并排除每队人数的干扰，比赛总名额是多少？只答数字。</question><answer>64</answer></qa_pair>
+  <qa_pair><question>逐页检查收藏并读取每篇正文，统计同时具有可用正文和原文地址的评估收藏数量。</question><answer>2</answer></qa_pair>
+</evaluation>

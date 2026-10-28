@@ -14,6 +14,7 @@
     "@campus/contracts": "0.1.0",
     "@cloudbase/node-sdk": "3.18.3",
     "@darabonba/typescript": "1.0.5",
+    "@modelcontextprotocol/server": "2.4.0",
     "@netlify/blobs": "11.1.5",
     "@netlify/database": "2.0.1",
     "@netlify/functions": "6.0.2",
@@ -24,9 +25,11 @@
     "web-push": "3.6.7",
     "word-extractor": "1.0.4",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
-    "yauzl": "3.4.0"
+    "yauzl": "3.4.0",
+    "zod": "4.6.7"
   },
   "devDependencies": {
+    "@modelcontextprotocol/client": "2.4.0",
     "@netlify/database-dev": "1.0.1",
     "@types/node": "22.10.2",
     "@types/web-push": "3.6.4",

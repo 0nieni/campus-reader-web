@@ -42,6 +42,7 @@ async function request<T>(url: string, body?: unknown): Promise<T> {
   return result.data;
 }
 export const netlifyTransport: Transport = {
+  mcp:{list:()=>request('/.netlify/functions/mcp-management',{op:'list'}),create:input=>request('/.netlify/functions/mcp-management',{op:'create',...input}),revoke:id=>request('/.netlify/functions/mcp-management',{op:'revoke',id}),consent:ticket=>request('/.netlify/functions/mcp-management',{op:'consent.info',ticket}),decide:input=>request('/.netlify/functions/mcp-management',{op:'consent.decide',...input})},
   anonymous:{state:guestState,createTransfer:()=>request('/.netlify/functions/guest',{op:'transfer.create'}),cancelTransfer:()=>request('/.netlify/functions/guest',{op:'transfer.cancel'}),importTransfer:code=>request('/.netlify/functions/guest',{op:'transfer.import',code})},
   async restore() { if(legacyWorkspace()){await hydrateSession();return request<AuthSession|null>('/.netlify/functions/auth');}await hydrateSession().catch(()=>null);return(await guestState()).identity; },
   async signIn(email, password) { const value = await request<AuthSession>('/.netlify/functions/auth?op=login', { email: email.trim(), password }); await hydrateSession(); notify(value); return value; },
