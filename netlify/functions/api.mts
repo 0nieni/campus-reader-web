@@ -19,6 +19,7 @@ import {reminderService} from '../../apps/cloud/src/reminders';
 import {reminderRuntime} from '../../apps/cloud/src/netlify-reminder-runtime';
 import {providerProfiles} from '../../apps/cloud/src/ai-provider-profiles';
 import {materialRuntime} from '../../apps/cloud/src/material-runtime';
+import {withCollectionHealth} from '../../apps/cloud/src/collection-health';
 declare const Netlify:{env:{get(name:string):string|undefined}};
 let pool:SqlPool|undefined;
 const database=()=>pool ||= getDatabase().pool as unknown as SqlPool;
@@ -60,8 +61,8 @@ async function run(event:unknown,user:NetlifyUser|null,guest:GuestRef|null,aiReq
  }
  return result;
 }
-export default createWorkspaceApi({
+export default withCollectionHealth(createWorkspaceApi({
  async account(){const user=await getUser();return user?.email?requireSiteUser({id:user.id,email:user.email},Netlify.env.get('NETLIFY_OWNER_EMAIL')):null;},
  guest:request=>{const token=guestCookie(request);return token?anonymousWorkspaces(database()).resolve(token):Promise.resolve(null);},
  legacy:(event,user)=>run(event,user,null),public:(event,guest,user)=>run(event,user,guest),ai:(event,guest,user)=>run(event,user,guest,true)
-});
+}));

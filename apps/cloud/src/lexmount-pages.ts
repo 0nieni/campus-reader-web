@@ -21,11 +21,27 @@ const problem=(code:string,message:string)=>new AppError(code,message);
 
 function checkedConfig(value:LexmountConfig){
  const apiKey=value.apiKey.trim(),projectId=value.projectId.trim(),engine=value.engine||'auto';
- const invalid=()=>problem('LEXMOUNT_NOT_CONFIGURED','Lexmount 尚未正确配置，请在服务端设置项目凭据及官方区域入口。');
- if(!apiKey||apiKey.length>2048||/[\r\n]/.test(apiKey)||!/^[A-Za-z0-9_-]{1,100}$/.test(projectId)||!engines.has(engine))throw invalid();
- let endpoint:URL;try{endpoint=new URL(value.baseUrl||'https://api.lexmount.cn');}catch{throw invalid();}
- if(endpoint.protocol!=='https:'||!['api.lexmount.cn','api.lexmount.com'].includes(endpoint.hostname)||endpoint.port||endpoint.username||endpoint.password||endpoint.search||endpoint.hash||endpoint.pathname!=='/')throw invalid();
+ const report=lexmountConfigurationStatus(value);
+ if(report.issues.length)throw problem('LEXMOUNT_NOT_CONFIGURED',configurationMessages[report.issues[0]!]);
+ const endpoint=new URL(value.baseUrl||'https://api.lexmount.cn');
  return{apiKey,projectId,engine,endpoint:new URL('/v1/dom/dump',endpoint).href};
+}
+const configurationMessages={
+ LEXMOUNT_API_KEY_MISSING:'采集服务未读取到 LEXMOUNT_API_KEY，请检查正式环境的 Functions 配置并重新部署。',
+ LEXMOUNT_API_KEY_FORMAT:'LEXMOUNT_API_KEY 格式异常，请核对是否包含换行或粘贴了多余内容。',
+ LEXMOUNT_PROJECT_ID_MISSING:'采集服务未读取到 LEXMOUNT_PROJECT_ID，请检查正式环境的 Functions 配置并重新部署。',
+ LEXMOUNT_PROJECT_ID_FORMAT:'LEXMOUNT_PROJECT_ID 格式异常：请仅填写项目编号，不要填写网址、API Key 或添加引号。',
+ LEXMOUNT_WEBFETCH_ENGINE_INVALID:'LEXMOUNT_WEBFETCH_ENGINE 无法识别，请使用 auto 或支持的采集引擎名称。',
+ LEXMOUNT_WEBFETCH_BASE_URL_INVALID:'LEXMOUNT_WEBFETCH_BASE_URL 格式异常：只允许 Lexmount 官方 HTTPS 根地址，不要添加接口路径、查询参数或凭据。',
+} as const;
+/** Reports fixed issue codes only. Never return values, lengths, prefixes or fingerprints. */
+export function lexmountConfigurationStatus(value:LexmountConfig=configuration()){
+ const issues:Array<keyof typeof configurationMessages>=[],apiKey=value.apiKey.trim(),projectId=value.projectId.trim();
+ if(!apiKey)issues.push('LEXMOUNT_API_KEY_MISSING');else if(apiKey.length>2048||/[\r\n]/.test(apiKey))issues.push('LEXMOUNT_API_KEY_FORMAT');
+ if(!projectId)issues.push('LEXMOUNT_PROJECT_ID_MISSING');else if(!/^[A-Za-z0-9_-]{1,100}$/.test(projectId))issues.push('LEXMOUNT_PROJECT_ID_FORMAT');
+ if(!engines.has(value.engine||'auto'))issues.push('LEXMOUNT_WEBFETCH_ENGINE_INVALID');
+ try{const endpoint=new URL(value.baseUrl||'https://api.lexmount.cn');if(endpoint.protocol!=='https:'||!['api.lexmount.cn','api.lexmount.com'].includes(endpoint.hostname)||endpoint.port||endpoint.username||endpoint.password||endpoint.search||endpoint.hash||endpoint.pathname!=='/')issues.push('LEXMOUNT_WEBFETCH_BASE_URL_INVALID');}catch{issues.push('LEXMOUNT_WEBFETCH_BASE_URL_INVALID');}
+ return{configured:issues.length===0,issues};
 }
 function providerError(status:number,body:any):AppError{
  // Never surface arbitrary provider bodies, URLs or echoed credentials.
