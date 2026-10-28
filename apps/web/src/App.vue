@@ -19,6 +19,7 @@ import EmailConfirmationPanel from './components/EmailConfirmationPanel.vue';
 import {usePageTemplate} from './lib/page-template';
 import TemplateIcon from './components/TemplateIcon.vue';
 import PasswordRecoveryPanel from './components/PasswordRecoveryPanel.vue';
+import McpAuthorizationPanel from './components/McpAuthorizationPanel.vue';
 const AccountSettingsDialog=defineAsyncComponent(()=>import('./components/AccountSettingsDialog.vue'));
 const accountOpen=ref(false),providerChange=ref<ProviderChange|null>(null),assistantFeedback=ref('');
 const accountOpener=ref<HTMLElement|null>(null);
@@ -34,8 +35,9 @@ const props = defineProps<{
 const store = workspaceStore(props.transport || cloudTransport)();
 const transport = props.transport || cloudTransport;
 const authScreen=ref(false),wantAi=ref(false),workspaceMessage=ref('');
+const mcpTicket=ref(transport.mcp?new URLSearchParams(location.search).get('mcp_authorize')||'':'');
 const actualAccount=computed(()=>store.auth?.kind==='guest'?store.auth.account:store.auth);
-usePageTemplate(computed(()=>Boolean(store.workspace)&&!authScreen.value));
+usePageTemplate(computed(()=>Boolean(store.workspace)&&!authScreen.value&&!mcpTicket.value));
 const sidebarCollapsed=ref(false),showPassword=ref(false),rememberAccount=ref(false),authHint=ref('');
 const searchInput=ref<HTMLInputElement|null>(null),readerDialog=ref<HTMLElement|null>(null);
 const avatarLetter=computed(()=>(store.auth?.username?.trim()[0]||'阅').toUpperCase());
@@ -156,6 +158,7 @@ function beginEmailConfirmation(){
   void confirmationAttempt.value?.catch(()=>{});
 }
 beginEmailConfirmation();
+if(mcpTicket.value){const next=new URL(location.href);next.searchParams.delete('mcp_authorize');history.replaceState(null,'',next.pathname+next.search+next.hash);}
 if (inviteToken.value||confirmationToken.value||recoveryToken.value) history.replaceState(null, '', location.pathname + location.search);
 function receiveConfirmationLink(){
   const params=new URLSearchParams(location.hash.slice(1));
@@ -255,7 +258,7 @@ function schoolChanged(event: Event) {
 </script>
 
 <template>
-  <div v-if="!store.workspace||authScreen" class="page login-template">
+  <div v-if="!store.workspace||authScreen||mcpTicket" class="page login-template">
     <section class="visual" aria-label="校园阅览室介绍">
       <div class="brand"><div class="brandmark"><TemplateIcon name="planet" /></div><div><div class="brand-name">校园阅览室</div><div class="brand-sub">校园信息门户</div></div></div>
       <div class="visual-copy"><div class="overline">A CAMPUS CONNECTED</div><h1>让每一份热爱<br>都有回响。</h1><p>校园资讯、学术活动与成长机会，<br>从校园阅览室开始。</p><div class="visual-art"><span class="star s1">✦</span><span class="star s2">✧</span><span class="star s3">✦</span><div class="orbit"></div><div class="orbit two"></div><div class="planet"></div></div></div>
@@ -265,6 +268,7 @@ function schoolChanged(event: Event) {
       <div class="locale"><TemplateIcon name="globe" />简体中文</div>
       <PasswordRecoveryPanel v-if="recoveryToken" :key="recoveryToken" :token="recoveryToken" :transport="transport" @complete="recoveryToken='';confirmedAccount()" @back="recoveryToken='';store.signOut();changeAuthMode('login')" />
       <EmailConfirmationPanel v-else-if="confirmationToken" :key="confirmationToken" :token="confirmationToken" :attempt="confirmationAttempt" :transport="transport" @complete="confirmationToken='';confirmationAttempt=undefined;confirmedAccount()" @back="confirmationToken='';confirmationAttempt=undefined;changeAuthMode('login')" />
+      <McpAuthorizationPanel v-else-if="mcpTicket&&transport.mcp" :key="mcpTicket" :transport="transport" :ticket="mcpTicket" @back="mcpTicket='';store.connect()" />
       <InvitationPanel v-else-if="inviteToken" :token="inviteToken" @complete="inviteToken='';confirmedAccount()" />
       <div v-else class="form-wrap">
         <div class="welcome">{{authMode==='register'?'CREATE ACCOUNT':'WELCOME BACK'}}</div><h2 id="login-title">{{authMode==='register'?'创建你的账号':'欢迎回来'}}</h2><p class="sub">{{transport.anonymous?'账号用于 AI 阅读，公告、收藏和提醒可继续匿名使用。':authMode==='register'?'验证邮箱，开启你的独立校园阅览室。':'登录你的校园账号，继续探索校园。'}}</p>

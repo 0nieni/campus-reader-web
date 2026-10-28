@@ -4,10 +4,12 @@ import type {
   GatewayAction,
   GatewayActions,
   AnonymousTransport,
+  McpTransport,
 } from "@campus/contracts";
 
 export interface Transport {
   anonymous?: AnonymousTransport;
+  mcp?: McpTransport;
   restore(): Promise<AuthSession | null>;
   signIn(username: string, password: string): Promise<AuthSession>;
   signUp?(email: string, password: string): Promise<{ verificationRequired: true }>;

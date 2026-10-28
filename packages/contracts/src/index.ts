@@ -6,6 +6,8 @@ export interface AuthSession {
   account?:{uid:string;username:string|null}|null;
 }
 export type {AnonymousState,AnonymousTransfer,AnonymousImport,AnonymousTransport} from './anonymous';
+export {mcpScopes} from './mcp';
+export type {McpScope,McpConnection,McpConnections,McpConsent,McpTransport} from './mcp';
 export interface School {
   id: string;
   name: string;
