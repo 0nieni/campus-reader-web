@@ -1,10 +1,16 @@
 # AI 阅读重做进度
 
-## 2026-10-29：MCP发布准备（Netlify入口）
+## 2026-10-29：通用MCP已上线（Netlify入口）
 
-用户明确授权上线 `codex/mcp-workspace-tools`，并选择先发布到Netlify域名；`campusreader.online`未绑定当前Netlify项目，本轮不修改其托管或DNS。MCP正式地址为 `https://campus-reader-ninie6159.netlify.app/mcp`。已设置每5小时跟进，成功发布并验收后停止。
+用户明确授权上线 `codex/mcp-workspace-tools`，并选择先发布到Netlify域名；`campusreader.online`未绑定当前Netlify项目，本轮不修改其托管或DNS。MCP正式地址为 `https://campus-reader-ninie6159.netlify.app/mcp`。按 `/loop 5h` 设置每5小时跟进，当前立即执行，成功发布并验收后停用。
 
-发布前合入main新增的3个提交，保留 `ba3751f428ba5d98c8e19def210ff6c8f72bed93` 的Lexmount脱敏诊断，仅进度文档需合并冲突。重新运行npm ci、指南/类型、完整691项测试（web262/cloud429）、普通构建及15函数完整Netlify构建通过，产物 `.netlify-staging/20261028235451323`。下一步以匹配头提交创建PR，核对预览迁移及MCP真实HTTP/OAuth，再合并并验收正式站；不发送真实邮件/推送、不调用模型、不向生产导入公告或提醒夹具。
+发布前合入main新增的3个提交，保留 `ba3751f428ba5d98c8e19def210ff6c8f72bed93` 的Lexmount脱敏诊断，仅进度文档需合并冲突。重新运行npm ci、指南/类型、完整691项测试（web262/cloud429）、普通构建及15函数完整Netlify构建通过，产物 `.netlify-staging/20261028235451323`。
+
+PR #32头提交 `c5847b1f72d5f65b68bf357bf1c5c445fea41a2a`，预览部署 `6ae28bcd528150a7874f0197` 为ready。33项真实HTTP检查通过，包括官方客户端的10工具发现、读取、只读写入拒绝、手动密钥撤销、OAuth元数据/DCR/PKCE/匿名工作区绑定/刷新轮换及旧版握手；预览采集诊断未配置，未将其当成生产故障。GitHub检查成功且mergeable/clean，按匹配头提交正常合并main为 `a480bc65782ae7c4fee29b6bab7054b0ac54489a`；合并树与预览提交逐文件一致。
+
+官方CLI确认正式部署 `6ae28c708bf20c23b5b9f58f` 为production/main/ready、提交一致，于北京时间2026-10-29 08:00:18发布，无部署错误。正式36项真实HTTP检查通过，进一步验证公开公告搜索/正文、收藏和提醒读取；凭证表与授权码表实际读写成功，资源/发行方均为正式Netlify域名。匿名AI继续401，密钥撤销后401，现有采集配置诊断configured=true。入口 `/assets/index-BVOZjHan.js` 与预览一致。独立Chrome确认正式个人工作区MCP入口及地址、三项默认读取权限、桌面1366×900及手机390×844布局，运行错误0、无手机横向溢出。
+
+验收只使用正常空匿名工作区及公开公告，临时连接全部撤销；未向生产写入合成公告或提醒，未操作真实个人账号，未发送邮件/推送、未调用模型。脚本、脱敏结果及截图在忽略目录 `.github-staging/mcp-qa`。真实发送与各第三方产品界面仍分别验收。发布完成，停止本次循环跟进以免重复部署。
 
 ## 2026-10-28：通用MCP连接（分支开发，未上线）
 

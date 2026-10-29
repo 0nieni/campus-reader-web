@@ -1,6 +1,6 @@
 # 外部 AI 的 MCP 连接
 
-本功能在 `codex/mcp-workspace-tools` 分支开发，尚未上线。发布后服务地址为 `https://campus-reader-ninie6159.netlify.app/mcp`，预览环境使用其自身域名。发布需先应用独立迁移 `20261028000100_mcp_access.sql`，再部署本分支的网页及15个函数。无需增加或轮换生产密钥。
+本功能已通过 PR #32 合入main，于北京时间2026-10-29 08:00:18上线。服务地址为 `https://campus-reader-ninie6159.netlify.app/mcp`，预览环境使用其自身域名。独立迁移 `20261028000100_mcp_access.sql` 和15个函数已发布，正式MCP授权及读写凭证表实际使用通过。无需增加或轮换生产密钥。`campusreader.online`未绑定此Netlify项目，不在本次部署范围。
 
 ## 如何连接
 
@@ -41,6 +41,8 @@ OAuth 使用授权码与S256 PKCE，资源固定为本环境 `/mcp`，支持动�
 
 2026-10-29验证：`npm ci`、指南/类型检查、完整688项测试（web262/cloud426）、普通构建和15函数Netlify完整构建通过。官方Inspector2.12.0严格检查10个工具Schema并完成只读调用；官方SDK完成现代和旧版握手、完整OAuth与刷新。真实Vue在本机临时SQL及独立Chrome完成桌面1366×900、手机390×844的24项流程检查，运行错误0、无手机横向溢出。原迁移和紫色模板CSS保持不变。构建产物 `.netlify-staging/20261028161319459`，更完整证据见 [进度记录](../PROGRESS.md)。
 
-固定评估问题见 [10个只读用例](mcp-evaluation.xml)，脚本核对多工具答案，并未调用真实语言模型评分。邮件、设备送达、第三方客户端各自的界面，以及正式Netlify路由和运行时需在后续上线验收时分别确认；本轮不向生产写入夹具、不发送真实通知、不调用模型。
+发布前合入最新main并再次通过完整691项测试（web262/cloud429）、类型/指南、普通构建和15函数Netlify构建。PR32预览的33项真实HTTP检查通过；正式部署 `6ae28c708bf20c23b5b9f58f` 为production/main/ready，提交 `a480bc65782ae7c4fee29b6bab7054b0ac54489a` 与验收预览逐文件一致。正式36项检查覆盖公告查询及正文、空收藏/提醒读取、只读权限拒绝、手动密钥撤销、OAuth发现/DCR/PKCE/工作区绑定/刷新轮换/旧版客户端；独立浏览器确认MCP入口、默认读取权限和桌面/手机布局，运行错误0、无手机横向溢出。既有采集配置诊断保持正常。
+
+固定评估问题见 [10个只读用例](mcp-evaluation.xml)，脚本核对多工具答案，并未调用真实语言模型评分。发布验收只使用正常空匿名工作区、查询公开公告，连接均已撤销；未导入公告或提醒夹具，未操作真实个人账号，未发送邮件/推送或调用模型。实际邮件、设备送达和各第三方产品界面仍按需单独验证。
 
 实现参考 [官方 TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk)、[MCP 授权规范](https://modelcontextprotocol.io/specification/latest/basic/authorization) 与 [Anthropic mcp-builder 技能](https://github.com/anthropics/skills/tree/main/skills/mcp-builder)。实际锁定SDK版本及协议兼容以仓库测试为准。

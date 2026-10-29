@@ -1,6 +1,6 @@
 # 校园阅览室
 
-通用MCP接口正在 `codex/mcp-workspace-tools` 分支开发，支持外部AI查询公开公告，并经授权管理匿名工作区的收藏和提醒；提供OAuth和可撤销连接密钥。本分支尚未上线，接入方式及验证边界见 [MCP说明](docs/mcp.md)。
+通用MCP接口已通过 PR #32 合入main并上线到 `https://campus-reader-ninie6159.netlify.app/mcp`，支持外部AI查询公开公告，并经授权管理匿名工作区的收藏和提醒；提供OAuth和可撤销连接密钥。个人工作区可选择权限、查看和撤销连接，接入方式及验证边界见 [MCP说明](docs/mcp.md)。`campusreader.online`不在本次部署范围。
 
 匿名工作区与一次性迁移已通过 PR #30 合入 main：公告、收藏和提醒免登录，AI登录后继续本设备匿名工作区；在个人工作区生成30分钟有效的一次性迁移码，新设备导入后失效，邮箱需重新验证。原账号工作区保留显式入口。使用方法、迁移范围和验证边界见 [匿名工作区说明](docs/anonymous-workspace.md)，正式发布结果见 [进度记录](PROGRESS.md)。下文账号制描述仍记录历史状态。
 
