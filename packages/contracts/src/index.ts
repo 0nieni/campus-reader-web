@@ -71,7 +71,7 @@ export interface AiStartInput {
   schoolId: string; itemIds: string[]; requestId: string; service: "official" | "byok";
   provider?: "deepseek" | "openai"; model?: string; task: "summary" | "outline" | "answer"; question?: string; fingerprint?: string;
 }
-export type { AiPreferences, AiMemorySlot, AiMemoryItem, AiMemoryState, RecommendedNotice, AiRecommendations, ChatReference, AiChatTurn, AiConversation } from './assistant';
+export type { AiPreferences, AiMemorySlot, AiMemoryItem, AiMemoryState, RecommendedNotice, AiRecommendations, AiSearchErrorCode, ChatReference, AiChatTurn, AiConversation } from './assistant';
 import type { AssistantActions } from './assistant';
 export interface ReminderChannels {browser:boolean;email:boolean}
 export interface ReminderInput { id?:string; schoolId:string; itemId:string; label:string; dueAt:string; days:number[];channels?:ReminderChannels }
@@ -129,7 +129,7 @@ export interface GatewayActions extends AssistantActions {
   "feed.labels.set": {input:{schoolId:string;itemId:string;categories:string[]|null};output:{categories:string[];customized:boolean}};
   "favorites.list": { input: { schoolId?: string; cursor?: string }; output: { items: Favorite[]; nextCursor: string | null } };
   "favorites.set": { input: { schoolId: string; itemId: string; saved: boolean }; output: { saved: boolean } };
-  "ai.status": { input: Record<string, never>; output: { quota: AiQuota; officialConfigured: boolean; officialModel: string | null; providers: Array<{ id: string; name: string; endpoint: string }> } };
+  "ai.status": { input: Record<string, never>; output: { quota: AiQuota; officialConfigured: boolean; searchConfigured?: boolean; officialModel: string | null; providers: Array<{ id: string; name: string; endpoint: string }> } };
   "ai.diagnose": { input: Record<string, never>; output: { code: string; message: string } };
   "ai.preview": { input: { schoolId: string; itemIds: string[] }; output: ReadingPackage };
   "ai.export": { input: { schoolId: string; itemIds: string[] }; output: ReadingPackage };
@@ -145,3 +145,5 @@ export type GatewayAction = keyof GatewayActions;
 export type GatewayResult<T> =
   | { ok: true; data: T }
   | { ok: false; code: string; message: string };
+
+export { chatSearchQuery, isSearchCapabilityQuestion } from './search-intent';

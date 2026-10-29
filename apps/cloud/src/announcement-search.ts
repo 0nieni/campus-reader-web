@@ -1,11 +1,22 @@
 import { isIP } from 'node:net';
+import type { AiSearchErrorCode } from '@campus/contracts';
 
 export interface SearchCandidate { url: string; title: string; snippet: string }
-interface SearchResult { state: 'unconfigured' | 'complete' | 'failed'; message: string; candidates: SearchCandidate[] }
+interface SearchResult { state: 'unconfigured' | 'complete' | 'failed'; code?: AiSearchErrorCode; message: string; candidates: SearchCandidate[] }
 type SearchSchool = { id: string; name: string; homepage?: string; announcementUrl?: string };
 const endpoint = 'https://api.tavily.com/search';
 const maxBytes = 512 * 1024;
-const failed = (): SearchResult => ({ state: 'failed', message: '本次联网搜索未完成，已有公告仍可使用。', candidates: [] });
+const failureMessages: Record<Exclude<AiSearchErrorCode, 'unconfigured'>, string> = {
+  authorization: '搜索服务授权异常，请联系网站管理员检查搜索服务凭据。已有公告仍可使用。',
+  quota: '搜索服务额度不足，请联系网站管理员检查搜索服务账户。已有公告仍可使用。',
+  rate_limited: '搜索服务请求过于频繁，请稍后重试。已有公告仍可使用。',
+  timeout: '本次搜索超时，请稍后重试。已有公告仍可使用。',
+  network: '搜索服务连接失败，请稍后重试。已有公告仍可使用。',
+  provider: '搜索服务暂时异常，请稍后重试。已有公告仍可使用。',
+  invalid_response: '搜索服务返回异常，请稍后重试。已有公告仍可使用。',
+  invalid_scope: '学校官方域名配置异常，请联系网站管理员检查。已有公告仍可使用。',
+};
+const failed = (code: Exclude<AiSearchErrorCode, 'unconfigured'>): SearchResult => ({ state: 'failed', code, message: failureMessages[code], candidates: [] });
 
 function safeUrl(value: string): URL | undefined {
   try {
@@ -56,7 +67,7 @@ async function limitedJson(response: Response, signal: AbortSignal): Promise<unk
  * each candidate through school-pages before treating it as body evidence. */
 export async function searchAnnouncements(school: SearchSchool, query: string, options: { fetch?: typeof fetch; apiKey?: string } = {}): Promise<SearchResult> {
   const apiKey = (options.apiKey ?? process.env.TAVILY_API_KEY ?? '').trim();
-  if (!apiKey) return { state: 'unconfigured', message: '联网搜索未配置，继续使用已有公告。', candidates: [] };
+  if (!apiKey) return { state: 'unconfigured', code: 'unconfigured', message: '联网搜索服务未配置，请联系网站管理员。已有公告仍可使用。', candidates: [] };
   const domains = [...new Set([school.homepage, school.announcementUrl].flatMap(value => {
     const url = value && safeUrl(value);
     if (!url) return [];
@@ -65,7 +76,7 @@ export async function searchAnnouncements(school: SearchSchool, query: string, o
     const host = url.hostname;
     return [host.endsWith('.edu.cn') ? host.split('.').slice(-3).join('.') : host];
   }))];
-  if (!domains.length) return failed();
+  if (!domains.length) return failed('invalid_scope');
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
@@ -82,9 +93,17 @@ export async function searchAnnouncements(school: SearchSchool, query: string, o
           max_results: 5, auto_parameters: false, include_answer: false, include_raw_content: false,
         }),
       });
-      if (!response.ok) { void response.body?.cancel().catch(() => {}); return failed(); }
-      const data = await limitedJson(response, controller.signal);
-      if (!data || typeof data !== 'object' || !('results' in data) || !Array.isArray(data.results)) return failed();
+      if (!response.ok) {
+        void response.body?.cancel().catch(() => {});
+        if (response.status === 401 || response.status === 403) return failed('authorization');
+        if (response.status === 429) return failed('rate_limited');
+        if (response.status === 432 || response.status === 433) return failed('quota');
+        return failed('provider');
+      }
+      let data: unknown;
+      try { data = await limitedJson(response, controller.signal); }
+      catch { return failed(controller.signal.aborted ? 'timeout' : 'invalid_response'); }
+      if (!data || typeof data !== 'object' || !('results' in data) || !Array.isArray(data.results)) return failed('invalid_response');
       const candidates: SearchCandidate[] = [], seen = new Set<string>();
       for (const item of data.results) {
         if (!item || typeof item !== 'object' || typeof item.url !== 'string' || typeof item.title !== 'string' || !item.title.trim()) continue;
@@ -94,8 +113,10 @@ export async function searchAnnouncements(school: SearchSchool, query: string, o
         candidates.push({ url: url.href, title: item.title.trim().slice(0, 220), snippet: typeof item.content === 'string' ? item.content.trim().slice(0, 2000) : '' });
         if (candidates.length === 5) break;
       }
-      return { state: 'complete', message: '本次联网搜索已完成，搜索摘要仅供发现线索，正文仍需核验。', candidates };
+      return { state: 'complete', message: candidates.length
+        ? '本次联网搜索已完成，搜索摘要仅供发现线索，正文仍需核验。'
+        : '本次联网搜索已完成，未找到符合本校官方域名范围的公告线索。已有公告仍可使用。', candidates };
     })()]);
-  } catch { return failed(); }
+  } catch { return failed(controller.signal.aborted ? 'timeout' : 'network'); }
   finally { clearTimeout(timer); }
 }

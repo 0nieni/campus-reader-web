@@ -7,13 +7,14 @@ import { digest, readingPackage } from './reading-package';
 import { AppError, reject } from './errors';
 import type { aiService } from './ai-service';
 import { buildChatContext, type ContextExchange, type MemorySnapshot, type MemoryDependency } from './chat-context';
-import { chatSearchQuery } from './chat-intent';
+import { chatSearchQuery, isSearchCapabilityQuestion } from './chat-intent';
 import { memoryService, selectMemoryItems } from './assistant-memory';
 import { buildConversationSummary } from './conversation-summary';
+import { filterProgramReferences } from './program-references';
 
 const COLLECTION = 'web_ai_conversations';
 const unreadableMaterial = new Set(['NO_MATERIAL', 'SOURCE_UNAVAILABLE', 'SOURCE_LOGIN_REQUIRED', 'SOURCE_RESTRICTED', 'SOURCE_NOT_FOUND', 'SOURCE_ROBOTS_BLOCKED', 'SOURCE_BUSY', 'SOURCE_DAILY_LIMIT']);
-type SavedTurn = { id: string; question: string; fingerprint: string; taskId: string | null; materialIds: string[]; references: AiChatTurn['references']; reply?: string; error?: string; history: string; summary?: string; evidence?: import('./chat-context').HistoryEvidence[]; memory?: MemorySnapshot; memoryDependencies?: MemoryDependency[]; search?: AiRecommendations['search']; preparing?: boolean; preparationStartedAt?: number; cancelled?: boolean; service: 'official' | 'byok'; provider?: string; model?: string };
+type SavedTurn = { id: string; question: string; fingerprint: string; taskId: string | null; materialIds: string[]; references: AiChatTurn['references']; reply?: string; programReply?: AiChatTurn['programReply']; error?: string; history: string; summary?: string; evidence?: import('./chat-context').HistoryEvidence[]; memory?: MemorySnapshot; memoryDependencies?: MemoryDependency[]; search?: AiRecommendations['search']; preparing?: boolean; preparationStartedAt?: number; cancelled?: boolean; service: 'official' | 'byok'; provider?: string; model?: string };
 type Conversation = { _id: string; owner: string; schoolId: string; createdAt: string; expireAt: string; turns: SavedTurn[]; pendingTurn: string | null; purged?: boolean };
 type Ai = ReturnType<typeof aiService>;
 export function assistantChat(db: Database, repo: Repository, ai: Ai, recommend: (owner: string, schoolId: string, query?: string) => Promise<AiRecommendations>, now = Date.now, discover?: (schoolId: string, query: string, identity: IdentityContext) => Promise<AiRecommendations>) {
@@ -33,7 +34,7 @@ export function assistantChat(db: Database, repo: Repository, ai: Ai, recommend:
     await authorizeSchool(repo, owner, row.schoolId); return row;
   }
   function baseTurn(turn: SavedTurn): AiChatTurn {
-    return { id: turn.id, question: turn.question, taskId: turn.taskId, state: turn.cancelled ? 'cancelled' : turn.preparing ? 'running' : turn.error ? 'failed' : 'complete', result: turn.reply || null, message: turn.preparing ? '正在检索或准备资料，请稍后刷新对话状态。' : turn.error || (turn.reply ? '未调用模型，不扣官方次数。' : '正在准备本轮，请先刷新状态。'), references: turn.references, step: 0, totalSteps: 0, quotaHeld: false, service: turn.service, provider: turn.provider || '', model: turn.model || '', ...(turn.search ? { search: turn.search } : {}) };
+    return { id: turn.id, question: turn.question, taskId: turn.taskId, state: turn.cancelled ? 'cancelled' : turn.preparing ? 'running' : turn.error ? 'failed' : 'complete', result: turn.reply || null, message: turn.preparing ? '正在检索或准备资料，请稍后刷新对话状态。' : turn.error || (turn.reply ? '未调用模型，不扣官方次数。' : '正在准备本轮，请先刷新状态。'), references: turn.references, step: 0, totalSteps: 0, quotaHeld: false, service: turn.service, provider: turn.provider || '', model: turn.model || '', ...(turn.search ? { search: turn.search } : {}), ...(turn.programReply ? { programReply: turn.programReply } : {}) };
   }
   async function publicTurn(row: Conversation, turn: SavedTurn): Promise<AiChatTurn> {
     if (turn.preparing && now() - (turn.preparationStartedAt || 0) > 90000) {
@@ -46,7 +47,15 @@ export function assistantChat(db: Database, repo: Repository, ai: Ai, recommend:
         } else if (saved) turn = saved;
       });
     }
-    if (!turn.taskId || turn.error || turn.preparing || turn.cancelled) return baseTurn(turn);
+    if (!turn.taskId || turn.error || turn.preparing || turn.cancelled) {
+      const visible = baseTurn(turn);
+      if (turn.programReply === 'search_status' && visible.references.length) {
+        const references = await filterProgramReferences(db, repo, row.owner, row.schoolId, visible.references);
+        if (references.length < visible.references.length) visible.result = `${visible.result || ''}\n\n部分原文入口已变化或不可访问，已隐藏；请重新搜索确认。`;
+        visible.references = references;
+      }
+      return visible;
+    }
     try {
       const task = await ai.handle('ai.task', { taskId: turn.taskId }, { dataOwnerId: row.owner } as IdentityContext) as ReadingTask;
       // Legacy execution or a lost response can finish before the chat lock is
@@ -77,6 +86,27 @@ export function assistantChat(db: Database, repo: Repository, ai: Ai, recommend:
   }
   async function view(row: Conversation): Promise<AiConversation> {
     return { id: row._id, schoolId: row.schoolId, createdAt: row.createdAt, expireAt: row.expireAt, turns: await Promise.all(row.turns.map(turn => publicTurn(row, turn))) };
+  }
+  async function completeProgramTurn(row: Conversation, pending: SavedTurn, patch: Pick<SavedTurn, 'reply' | 'programReply'> & Partial<Pick<SavedTurn, 'references' | 'search'>>): Promise<AiChatTurn> {
+    let turn: SavedTurn = { ...pending, preparing: false, ...patch };
+    await load(row._id, row.owner);
+    await atomic(db, async tx => {
+      const ref = tx.collection(COLLECTION).doc(row._id), current = transactionRow((await ref.get()).data) as Conversation;
+      if (current.purged || Date.parse(current.expireAt) <= now()) reject('RESULT_EXPIRED', '对话已到期或清除。');
+      const existing = current.turns.find(value => value.id === pending.id);
+      if (!existing?.preparing || current.pendingTurn !== pending.id) { turn = existing || { ...pending, preparing: false, cancelled: true }; return; }
+      await ref.update({ turns: current.turns.map(value => value.id === pending.id ? turn : value), pendingTurn: null });
+    });
+    return publicTurn(await load(row._id, row.owner), turn);
+  }
+  function searchStatusTurn(row: Conversation, pending: SavedTurn, discovery: AiRecommendations) {
+    const reply = discovery.search.state !== 'complete'
+      ? `这次没有完成联网搜索。${discovery.search.message} 下方保留已收录公告的入口；本轮没有调用模型。`
+      : discovery.search.candidateCount === 0
+        ? '联网搜索已完成，但这次没找到符合本校范围的公告线索。下方保留已收录公告入口，不会把它们当成本次新搜到的结果。'
+        : `联网搜索找到了${discovery.search.candidateCount ?? '一些'}条候选，但本次没有取得可用于AI回答的正文。你可以先看下方原文；搜索摘要不会被当作公告正文。`;
+    return completeProgramTurn(row, pending, { reply, programReply: 'search_status', search: discovery.search,
+      references: discovery.items.slice(0, 5).map((item, index) => ({ reference: `R${index + 1}`, itemId: item.id, title: item.title, originalUrl: item.originalUrl })) });
   }
   async function releasePending(row: Conversation, turn: SavedTurn, task: ReadingTask) {
     if (['ready', 'running', 'uncertain'].includes(task.state) || task.quotaHeld) return;
@@ -143,24 +173,17 @@ export function assistantChat(db: Database, repo: Repository, ai: Ai, recommend:
           });
           if (!acquired) return publicTurn(row, turn!);
           try {
-            // Explicit memory management never depends on materials, model setup or quota.
-            const command = await memory.command(owner, row.schoolId, { requestId: digest(['chat-memory-command', row._id, id]), question });
-            if (command.handled) {
-              const saved: SavedTurn = { ...pending, preparing: false, reply: command.message || '请说明要修改或删除哪条自动记忆。' };
-              await load(row._id, owner);
-              await atomic(db, async tx => {
-                const ref = tx.collection(COLLECTION).doc(row._id), current = transactionRow((await ref.get()).data) as Conversation;
-                if (current.purged || Date.parse(current.expireAt) <= now()) reject('RESULT_EXPIRED', '对话已到期或清除。');
-                const existing = current.turns.find(value => value.id === id);
-                if (!existing?.preparing || current.pendingTurn !== id) { turn = existing || { ...pending, preparing: false, cancelled: true }; return; }
-                await ref.update({ turns: current.turns.map(value => value.id === id ? saved : value), pendingTurn: null });
-                turn = saved;
-              });
-              return publicTurn(row, turn!);
-            }
+            // Program-owned capability facts and memory management need no model or sources.
+            const command = isSearchCapabilityQuestion(question)
+              ? { handled: true, message: discover && process.env.TAVILY_API_KEY?.trim()
+                ? '搜索服务已配置，可以帮你找当前学校官方公开的公告。你可以直接问“最近学校有什么比赛可以报名”。是否搜到、正文能否读到，会按本次实际结果说明；这里不是全网通用搜索。'
+                : '当前还不能实际联网，因为网站的搜索服务尚未配置。请联系网站管理员；已收录的公告仍然可以查看。搜索服务与回答模型是分开配置的，填写自己的模型 Key 不会自动开启联网。' }
+              : await memory.command(owner, row.schoolId, { requestId: digest(['chat-memory-command', row._id, id]), question });
+            if (command.handled) return completeProgramTurn(row, pending, { reply: command.message || '请说明要修改或删除哪条自动记忆。', programReply: isSearchCapabilityQuestion(question) ? 'search_capability' : 'memory' });
             const searchQuery = discover ? chatSearchQuery(question) : null;
             const discovery = searchQuery ? await discover!(row.schoolId, searchQuery, identity) : null;
-            let ids = discovery ? discovery.items.filter(item => item.allowAi).map(item => item.id).slice(0, 5) : explicitIds;
+            if (discovery && (discovery.search.state !== 'complete' || discovery.search.readableCount === 0)) return searchStatusTurn(row, pending, discovery);
+            let ids = discovery ? discovery.items.filter(item => item.allowAi && (!discovery.search.candidateIds || discovery.search.candidateIds.includes(item.id))).map(item => item.id).slice(0, 5) : explicitIds;
             if (!ids.length && !discovery) {
               const last = [...row.turns].reverse().find(t => t.materialIds.length && !t.error);
               const isFollowup = /^(那|它|这个|这条|这项|什么时候|截止|需要|怎么|能否|可以|还有|报名|材料|费用|地点|你刚才|刚才|之前|第二|第一个|接下来)/.test(question);
@@ -178,13 +201,9 @@ export function assistantChat(db: Database, repo: Repository, ai: Ai, recommend:
                 if (explicitIds.length && !discovery) missingExplicit = true;
               }
             }
-            if (discovery && !readable.length) {
-              const local = await recommend(owner, row.schoolId, searchQuery || undefined);
-              for (const item of local.items.filter(value => value.allowAi)) {
-                try { await readingPackage(db, repo, owner, row.schoolId, [item.id]); readable.push(item.id); }
-                catch (error) { if (!(error instanceof AppError) || !unreadableMaterial.has(error.code)) throw error; }
-              }
-              discovery.search = { ...discovery.search, message: `${discovery.search.message} 本次检索未取得可用于回答的新正文，继续使用已有公告；搜索摘要不作为正文依据。` };
+            if (discovery) {
+              discovery.search = { ...discovery.search, readableCount: readable.length };
+              if (!readable.length) return searchStatusTurn(row, pending, discovery);
             }
             if (readable.length && !missingExplicit) pack = await readingPackage(db, repo, owner, row.schoolId, readable);
             const profile = await readDoc(db, 'user_profiles', owner);

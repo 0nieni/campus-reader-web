@@ -118,7 +118,7 @@ export function aiService(db: Database, repo: Repository, complete = userComplet
         const q = await quota(owner);
         await readDoc(db, TASKS, "schema-probe");
         await cleanup(owner);
-        return { quota: q, officialConfigured: Boolean(officialConfig()), officialModel: officialConfig()?.connection.model || null, providers: Object.entries(PROVIDERS).map(([id, provider]) => ({ id, ...provider })) };
+        return { quota: q, officialConfigured: Boolean(officialConfig()), searchConfigured: Boolean(process.env.TAVILY_API_KEY?.trim()), officialModel: officialConfig()?.connection.model || null, providers: Object.entries(PROVIDERS).map(([id, provider]) => ({ id, ...provider })) };
       }
       if (action === "ai.preview" || action === "ai.export") return readingPackage(db, repo, owner, identifier(input.schoolId), input.itemIds, action !== "ai.export");
       if (action === "ai.list") {

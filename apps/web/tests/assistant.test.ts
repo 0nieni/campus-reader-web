@@ -31,6 +31,129 @@ function fakeTransport(override?: (action: string, input: any) => unknown): Tran
 const mounted: ReturnType<typeof mount>[] = [];
 function open(fake: Transport, selection: Notice[] = []) { const w = mount(AssistantPanel, { props: { transport: fake, schoolId: 'bjtu', selection } }); mounted.push(w); return w; }
 afterEach(() => { mounted.splice(0).forEach(w => w.unmount()); vi.useRealTimers(); vi.restoreAllMocks(); });
+it.each([
+  { officialConfigured: false, remaining: 3, question: '你能联网吗' },
+  { officialConfigured: true, remaining: 0, question: '你可以联网搜索吗' },
+  { officialConfigured: false, remaining: 0, question: '这里支持联网搜索吗' },
+])('answers search capability with officialConfigured=$officialConfigured and remaining=$remaining without model credentials', async ({ officialConfigured, remaining, question }) => {
+  const fake = fakeTransport(a => a === 'ai.status' ? { quota: { limit: 3, remaining, used: 3 - remaining, held: 0 }, officialConfigured, officialModel: '', searchConfigured: false, providers: [] }
+    : a === 'ai.chat.send' ? { ...turn, question, taskId: null, state: 'complete', references: [], result: '联网搜索尚未配置，请联系网站管理员。', quotaHeld: false, totalSteps: 0 } : undefined);
+  const w = open(fake, [notice]); await flushPromises(); await w.get('#assistant-question').setValue(question);
+  expect(w.get('[data-test="send"]').attributes('disabled')).toBeUndefined();
+  await w.get('form.assistant-composer').trigger('submit'); await flushPromises();
+  expect(w.get('.markdown-content').text()).toContain('联网搜索尚未配置');
+  expect(fake.call).toHaveBeenCalledWith('ai.chat.send', expect.objectContaining({ question, service: 'official' }));
+  const input = vi.mocked(fake.call).mock.calls.find(([a]) => a === 'ai.chat.send')![1];
+  expect(input).not.toHaveProperty('itemIds'); expect(input).not.toHaveProperty('provider'); expect(input).not.toHaveProperty('model');
+  expect(vi.mocked(fake.call).mock.calls.some(([a]) => a === 'ai.chat.step')).toBe(false);
+});
+it('uses the program capability path with BYOK selected, omitting BYOK settings and selected articles', async () => {
+  const fake = fakeTransport(a => a === 'ai.chat.send' ? { ...turn, taskId: null, state: 'complete', references: [], result: '搜索服务已配置，是否可用需实际搜索确认。', quotaHeld: false, totalSteps: 0 } : undefined);
+  const w = open(fake, [notice]); await flushPromises(); await w.get('input[value="byok"]').setValue();
+  await w.get('#assistant-model').setValue('private-model');
+  await w.get('#assistant-question').setValue('能不能帮我查一下本校比赛');
+  expect(w.get('[data-test="send"]').attributes('disabled')).toBeDefined();
+  await w.get('#assistant-question').setValue('你能联网吗');
+  expect(w.get('[data-test="send"]').attributes('disabled')).toBeUndefined();
+  await w.get('form.assistant-composer').trigger('submit'); await flushPromises();
+  expect(w.get('.markdown-content').text()).toContain('是否可用需实际搜索确认');
+  const input = vi.mocked(fake.call).mock.calls.find(([a]) => a === 'ai.chat.send')![1];
+  expect(input).toMatchObject({ question: '你能联网吗', service: 'official' });
+  for (const field of ['itemIds', 'provider', 'model', 'connection', 'apiKey']) expect(input).not.toHaveProperty(field);
+  expect(vi.mocked(fake.call).mock.calls.some(([a]) => a === 'ai.chat.step')).toBe(false);
+});
+it.each(['查一下', '帮我看看学校有没有新的讲座', '最近我们学校有什么比赛可以报名', '联网搜索是什么意思', '你能联网吗？顺便查一下本校比赛'])('keeps the actual search or ordinary question %s blocked without model quota', async question => {
+  const fake = fakeTransport(a => a === 'ai.status' ? { quota: { limit: 3, remaining: 0, used: 3, held: 0 }, officialConfigured: true, officialModel: 'chat', providers: [] } : undefined);
+  const w = open(fake); await flushPromises(); await w.get('#assistant-question').setValue(question);
+  expect(w.get('[data-test="send"]').attributes('disabled')).toBeDefined();
+  await w.get('form.assistant-composer').trigger('submit'); await flushPromises();
+  expect(vi.mocked(fake.call).mock.calls.some(([a]) => a === 'ai.chat.send')).toBe(false);
+});
+it.each([true, false, undefined])('shows only the known search configuration for searchConfigured=%s and allows an explicit search', async searchConfigured => {
+  const fake = fakeTransport(a => a === 'ai.status' ? { quota: { limit: 3, remaining: 0, used: 3, held: 0 }, officialConfigured: false, officialModel: '', searchConfigured, providers: [] } : undefined);
+  const w = open(fake); await flushPromises();
+  expect(w.get('[data-test="search"]').text()).toBe('联网找公告');
+  if (searchConfigured === undefined) expect(w.find('.search-configuration').exists()).toBe(false);
+  else {
+    const configuration = w.get('.search-configuration').text();
+    expect(configuration).toContain(searchConfigured ? '已配置' : '尚未配置');
+    if (searchConfigured) { expect(configuration).toContain('实际搜索'); expect(configuration).not.toContain('搜索成功'); }
+    else expect(configuration).toContain('管理员');
+  }
+  await w.get('#assistant-search').setValue('讲座'); await w.get('form.source-search').trigger('submit'); await flushPromises();
+  expect(fake.call).toHaveBeenCalledWith('ai.recommend', { schoolId: 'bjtu', query: '讲座', search: true });
+});
+it('preserves the server search result and distinguishes completed search from unreadable article bodies', async () => {
+  const fake = fakeTransport((a, input) => a === 'ai.recommend' && input.search ? { items: [{ ...notice, originalUrl: 'https://example.edu/notice', reason: '搜索候选', readState: 'snippet_only', checkedAt: null, allowAi: false }], search: { state: 'complete', message: '已找到候选公告，正文暂不可读取。' }, coverage: '本次联网搜索结果' } : undefined);
+  const w = open(fake); await flushPromises(); await w.get('form.source-search').trigger('submit'); await flushPromises();
+  expect(w.get('.search-status').text()).toBe('已找到候选公告，正文暂不可读取。');
+  expect(w.get('.source-meta').text()).toContain('仅摘要');
+  expect(w.get('[data-test="select-source"]').attributes('disabled')).toBeDefined();
+  expect(w.get('.recommendation h3 a').attributes('href')).toBe('https://example.edu/notice');
+});
+it.each([
+  { candidateCount: 2, readableCount: 0 },
+  { candidateCount: 0, readableCount: 0 },
+  { candidateCount: undefined, readableCount: undefined },
+  { candidateCount: 2, readableCount: undefined },
+  { candidateCount: undefined, readableCount: 0 },
+])('puts real search status and supplied counts $candidateCount/$readableCount before the answer', async counts => {
+  const completed: AiChatTurn = { ...turn, state: 'complete', taskId: null, programReply: 'search_status', quotaHeld: false, result: '没有取得可用于回答的正文，请打开原文核对。', search: { state: 'complete', message: '本次搜索已完成，尚无可用于回答的正文。', ...counts } };
+  const w = open(fakeTransport(a => a === 'ai.chat.latest' ? { conversation: conversation([completed]) } : undefined)); await flushPromises();
+  const statusElement = w.get('.turn-search-status').element, answer = w.get('.markdown-content').element;
+  expect(statusElement.compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(w.get('.turn-search-status').text()).toContain(completed.search!.message);
+  if (counts.candidateCount === undefined && counts.readableCount === undefined) expect(w.find('.turn-search-counts').exists()).toBe(false);
+  else {
+    const text = w.get('.turn-search-counts').text();
+    if (counts.candidateCount === undefined) expect(text).not.toContain('搜索候选');
+    else expect(text).toContain(`搜索候选 ${counts.candidateCount} 条`);
+    if (counts.readableCount === undefined) expect(text).not.toContain('可读正文');
+    else expect(text).toContain(`可读正文 ${counts.readableCount} 篇`);
+  }
+});
+it.each(['search_capability', 'search_status'] as const)('does not reload memory or recommendations after a direct %s program reply', async programReply => {
+  const fake = fakeTransport(a => a === 'ai.chat.send' ? { ...turn, taskId: null, state: 'complete', result: '搜索服务已配置，可用性需实际检索确认。', quotaHeld: false, programReply, totalSteps: 0 } : undefined);
+  const w = open(fake); await flushPromises(); await w.get('#assistant-question').setValue(programReply === 'search_capability' ? '你能联网吗' : '查一下');
+  await w.get('form.assistant-composer').trigger('submit'); await flushPromises();
+  expect(w.get('.markdown-content').text()).toContain('可用性需实际检索确认');
+  for (const action of ['ai.memory.get', 'ai.recommend']) expect(vi.mocked(fake.call).mock.calls.filter(([a]) => a === action)).toHaveLength(1);
+  expect(vi.mocked(fake.call).mock.calls.some(([a]) => a === 'ai.chat.step')).toBe(false);
+});
+it.each(['search_capability', 'search_status'] as const)('labels the %s program result without implying a model answered', async programReply => {
+  const fake = fakeTransport(a => a === 'ai.chat.latest' ? { conversation: conversation([{ ...turn, taskId: null, state: 'complete', quotaHeld: false, result: '请以实际搜索结果为准。', programReply }]) } : undefined);
+  const w = open(fake); await flushPromises();
+  expect(w.get('.turn-meta').text()).toBe('系统说明 · 未调用模型');
+});
+it.each(['search_capability', 'search_status'] as const)('recovers a lost %s program reply without unrelated reloads or a second send', async programReply => {
+  let requestId = '';
+  const fake = fakeTransport((a, input) => {
+    if (a === 'ai.chat.send') { requestId = input.requestId; throw new Error('response lost'); }
+    if (a === 'ai.chat.get') return conversation([{ ...turn, id: requestId, taskId: null, state: 'complete', result: '本次搜索尚未完成，请稍后重试。', quotaHeld: false, programReply, totalSteps: 0 }]);
+  });
+  const w = open(fake); await flushPromises(); await w.get('#assistant-question').setValue(programReply === 'search_capability' ? '你能联网吗' : '查一下');
+  await w.get('form.assistant-composer').trigger('submit'); await flushPromises();
+  expect(w.get('.markdown-content').text()).toContain('本次搜索尚未完成');
+  expect(vi.mocked(fake.call).mock.calls.filter(([a]) => a === 'ai.chat.send')).toHaveLength(1);
+  for (const action of ['ai.memory.get', 'ai.recommend']) expect(vi.mocked(fake.call).mock.calls.filter(([a]) => a === action)).toHaveLength(1);
+  expect(vi.mocked(fake.call).mock.calls.some(([a]) => a === 'ai.chat.step')).toBe(false);
+});
+it('keeps refreshing legacy completed memory commands without a program marker', async () => {
+  const fake = fakeTransport(a => a === 'ai.chat.send' ? { ...turn, taskId: null, state: 'complete', result: '已忘记专业。', quotaHeld: false, totalSteps: 0 } : undefined);
+  const w = open(fake); await flushPromises(); await w.get('#assistant-question').setValue('忘掉我的专业');
+  await w.get('form.assistant-composer').trigger('submit'); await flushPromises();
+  expect(w.get('.markdown-content').text()).toContain('已忘记专业');
+  for (const action of ['ai.memory.get', 'ai.recommend']) expect(vi.mocked(fake.call).mock.calls.filter(([a]) => a === action)).toHaveLength(2);
+});
+it.each(['search_capability', 'search_status'] as const)('refreshes chat status without reloading unrelated data for a completed %s reply', async programReply => {
+  const value = conversation([{ ...turn, id: 'older', state: 'uncertain' }, { ...turn, id: 'newer', state: 'complete', taskId: null, quotaHeld: false, programReply, result: '实际搜索未完成。' }]);
+  const fake = fakeTransport(a => a === 'ai.chat.latest' ? { conversation: value } : a === 'ai.chat.get' ? value : undefined);
+  const w = open(fake); await flushPromises();
+  await w.findAll('button').find(button => button.text() === '刷新对话状态')!.trigger('click'); await flushPromises();
+  expect(w.get('.markdown-content').text()).toContain('实际搜索未完成');
+  expect(fake.call).toHaveBeenCalledWith('ai.chat.get', { conversationId: 'chat-1' });
+  for (const action of ['ai.memory.get', 'ai.recommend']) expect(vi.mocked(fake.call).mock.calls.filter(([a]) => a === action)).toHaveLength(1);
+});
 it('loads automatic memory independently from behavior learning without writing or asking for confirmation', async () => {
   const fake = fakeTransport(a => a === 'ai.memory.get' ? memory([memoryItem, { ...memoryItem, id: 'major', slot: 'major', text: '我是计算机专业', expiresAt: null }]) : undefined);
   const w = open(fake); await flushPromises();

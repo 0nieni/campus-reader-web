@@ -41,7 +41,7 @@ export function assistantService(db: Database, repo: Repository, ai: ReturnType<
     catch (error) {
       if (!(error instanceof AppError) || error.code !== 'SEARCH_LIMIT') throw error;
       const local = await profile.recommend(identity.dataOwnerId, schoolId, query);
-      return { ...local, search: { state: 'failed', message: error.message } };
+      return { ...local, search: { state: 'failed', code: 'rate_limited', message: error.message } };
     }
   });
   async function searchBudget(owner: string) {
@@ -58,11 +58,11 @@ export function assistantService(db: Database, repo: Repository, ai: ReturnType<
     if (input.query !== undefined && (typeof input.query !== 'string' || input.query.length > 500)) reject('VALIDATION_FAILED', '搜索问题最多 500 字。');
     if (input.search !== undefined && typeof input.search !== 'boolean') reject('VALIDATION_FAILED', '联网搜索开关无效。');
     const query = String(input.query || '').trim(), local = await profile.recommend(owner, schoolId, query);
-    if (!input.search) return process.env.TAVILY_API_KEY || search !== searchAnnouncements
-      ? { ...local, search: { state: 'idle', message: '联网搜索已配置，点击搜索后执行；当前仅展示已有公告。' } } : local;
-    if (process.env.TAVILY_API_KEY || search !== searchAnnouncements) await searchBudget(owner);
+    if (!input.search) return process.env.TAVILY_API_KEY?.trim() || search !== searchAnnouncements
+      ? { ...local, search: { state: 'idle', message: '联网搜索已配置，点击搜索后执行；当前仅展示已有公告。' } } : { ...local, search: { state: 'unconfigured', code: 'unconfigured', message: '联网搜索尚未配置，请联系网站管理员；当前仅展示已收录公告。' } };
+    if (process.env.TAVILY_API_KEY?.trim() || search !== searchAnnouncements) await searchBudget(owner);
     const found = await search(school, query || '通知公告 报名');
-    const result: AiRecommendations = { ...local, search: { state: found.state, message: found.message } };
+    const result: AiRecommendations = { ...local, search: { state: found.state, message: found.message, ...(found.code ? { code: found.code } : {}) } };
     if (found.state !== 'complete') return result;
     const scope = await repo.scope(schoolId, owner), current = now();
     const known = new Map<string, ItemRow[]>(), seen = new Set<string>();
@@ -131,7 +131,11 @@ export function assistantService(db: Database, repo: Repository, ai: ReturnType<
       } catch { return { ...card, readState: 'unavailable', reason: '发现本校候选页面，但本次正文未读取成功，请查看原文。' }; }
     }));
     await authorizeSchool(repo, owner, schoolId);
-    const merged = [...candidates.filter((n): n is RecommendedNotice => n !== null), ...local.items];
+    const verifiedCandidates = candidates.filter((n): n is RecommendedNotice => n !== null);
+    result.search.candidateCount = verifiedCandidates.length;
+    result.search.candidateIds = [...new Set(verifiedCandidates.map(item => item.id))];
+    result.search.readableCount = verifiedCandidates.filter(item => item.readState === 'body' && item.allowAi).length;
+    const merged = [...verifiedCandidates, ...local.items];
     result.items = merged.filter((n, index) => merged.findIndex(other => Boolean(other.originalUrl && other.originalUrl === n.originalUrl) || other.id === n.id) === index).slice(0, 5);
     result.coverage = '已有来源与本次本校官方域名搜索结果；不保证覆盖全校公告。搜索摘要不是正文证据，临时正文最多保留 24 小时，不创建来源订阅。';
     if (lookupSaturated) result.coverage += ' 已有公告链接核验达到 200 条上限，未匹配的新链接仅展示线索，不自动读取或导入。';

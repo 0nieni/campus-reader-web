@@ -10,8 +10,11 @@ test('an absent key explicitly disables search without contacting the network', 
   let calls = 0;
   const result = await searchAnnouncements(school, '竞赛', { apiKey: '', fetch: async () => { calls++; throw new Error('must not fetch'); } });
   assert.equal(result.state, 'unconfigured');
+  assert.equal(result.code, 'unconfigured');
   assert.deepEqual(result.candidates, []);
   assert.match(result.message, /未配置/);
+  assert.match(result.message, /搜索服务.*网站管理员|网站管理员.*搜索服务/);
+  assert.doesNotMatch(result.message, /模型|BYOK/);
   assert.equal(calls, 0);
 });
 
@@ -36,6 +39,7 @@ test('the fixed search endpoint receives only the scoped query and bearer creden
   } });
   assert.equal(calls, 1);
   assert.equal(result.state, 'complete');
+  assert.equal(result.code, undefined);
   assert.deepEqual(result.candidates, [{ url: 'https://notice.example.edu.cn/1', title: '竞赛报名', snippet: '搜索摘要，不是已读取正文' }]);
   assert.ok(!JSON.stringify(result).includes(apiKey));
 });
@@ -65,6 +69,8 @@ test('unsafe configured hosts fail before any network request', async () => {
     let calls = 0;
     const result = await searchAnnouncements({ id: 'test', name: '示例大学', homepage }, '通知', { apiKey, fetch: async () => { calls++; return response([]); } });
     assert.equal(result.state, 'failed', homepage);
+    assert.equal(result.code, 'invalid_scope', homepage);
+    assert.match(result.message, /学校.*域名/);
     assert.equal(calls, 0, homepage);
   }
 });
@@ -109,6 +115,8 @@ test('institutional expansion applies only to edu.cn without guessing other publ
 test('an empty successful search is distinct from network, HTTP and malformed responses', async () => {
   const empty = await searchAnnouncements(school, '通知', { apiKey, fetch: async () => response([]) });
   assert.equal(empty.state, 'complete');
+  assert.equal(empty.code, undefined);
+  assert.match(empty.message, /未找到/);
   assert.deepEqual(empty.candidates, []);
   const failures: (typeof fetch)[] = [
     async () => { throw new Error(`Private upstream failure ${apiKey}`); },
@@ -137,9 +145,11 @@ test('oversize declared and streaming responses fail without returning partial r
   });
   const streamed = await searchAnnouncements(school, '通知', { apiKey, fetch: async () => new Response(largeStream) });
   assert.equal(streamed.state, 'failed');
+  assert.equal(streamed.code, 'invalid_response');
   assert.equal(cancelled, true);
   const declared = await searchAnnouncements(school, '通知', { apiKey, fetch: async () => new Response('{"results":[]}', { headers: { 'content-length': '524289' } }) });
   assert.equal(declared.state, 'failed');
+  assert.equal(declared.code, 'invalid_response');
 });
 
 test('search aborts at eight seconds and does not expose timeout details', async context => {
@@ -155,6 +165,8 @@ test('search aborts at eight seconds and does not expose timeout details', async
   const result = await pending;
   assert.equal(signal?.aborted, true);
   assert.equal(result.state, 'failed');
+  assert.equal(result.code, 'timeout');
+  assert.match(result.message, /超时.*重试/);
   assert.deepEqual(result.candidates, []);
 });
 
@@ -165,8 +177,59 @@ test('the deadline also cancels a stalled streaming response body', async contex
   const pending = searchAnnouncements(school, '通知', { apiKey, fetch: async () => new Response(body) });
   await Promise.resolve();
   context.mock.timers.tick(8000);
-  assert.equal((await pending).state, 'failed');
+  const result = await pending;
+  assert.equal(result.state, 'failed');
+  assert.equal(result.code, 'timeout');
   assert.equal(cancelled, true);
+});
+
+test('HTTP failures use safe status diagnostics without reading the provider body', async () => {
+  const cases = [
+    { status: 401, code: 'authorization', message: /搜索服务授权异常.*网站管理员/ },
+    { status: 403, code: 'authorization', message: /搜索服务授权异常.*网站管理员/ },
+    { status: 429, code: 'rate_limited', message: /搜索服务.*频繁.*稍后重试/ },
+    { status: 432, code: 'quota', message: /搜索服务额度.*网站管理员/ },
+    { status: 433, code: 'quota', message: /搜索服务额度.*网站管理员/ },
+    { status: 500, code: 'provider', message: /搜索服务暂时异常.*稍后重试/ },
+    { status: 503, code: 'provider', message: /搜索服务暂时异常.*稍后重试/ },
+    { status: 302, code: 'provider', message: /搜索服务暂时异常.*稍后重试/ },
+  ];
+  for (const { status, code, message } of cases) {
+    let reads = 0, cancelled = false;
+    const body = new ReadableStream<Uint8Array>({ cancel() { cancelled = true; } });
+    const getReader = body.getReader.bind(body);
+    body.getReader = ((...args: Parameters<typeof body.getReader>) => { reads++; return getReader(...args); }) as typeof body.getReader;
+    const result = await searchAnnouncements(school, '通知', { apiKey, fetch: async () => new Response(body, { status }) });
+    assert.equal(result.state, 'failed', String(status));
+    assert.equal(result.code, code, String(status));
+    assert.match(result.message, message);
+    assert.deepEqual(result.candidates, []);
+    assert.equal(reads, 0, `must not read HTTP ${status} error body`);
+    assert.equal(cancelled, true);
+    assert.doesNotMatch(JSON.stringify(result), /tvly-test-secret|模型|校园网/);
+  }
+});
+
+test('network errors never expose raw exceptions or blame the school network', async () => {
+  const result = await searchAnnouncements(school, '通知', { apiKey, fetch: async () => {
+    throw new Error(`Private network exception ${apiKey}`);
+  } });
+  assert.equal(result.state, 'failed');
+  assert.equal(result.code, 'network');
+  assert.match(result.message, /搜索服务连接失败.*稍后重试/);
+  assert.deepEqual(result.candidates, []);
+  assert.doesNotMatch(JSON.stringify(result), /Private|tvly-test-secret|校园网/);
+});
+
+test('bad JSON and response shapes are invalid responses rather than empty searches', async () => {
+  for (const text of [`Private invalid JSON ${apiKey}`, '{"results":null}', '{"results":{}}', 'null', '{}']) {
+    const result = await searchAnnouncements(school, '通知', { apiKey, fetch: async () => new Response(text) });
+    assert.equal(result.state, 'failed');
+    assert.equal(result.code, 'invalid_response');
+    assert.match(result.message, /搜索服务返回异常.*稍后重试/);
+    assert.deepEqual(result.candidates, []);
+    assert.doesNotMatch(JSON.stringify(result), /Private|tvly-test-secret/);
+  }
 });
 
 test('the backend environment key is used when no override is supplied', async () => {
