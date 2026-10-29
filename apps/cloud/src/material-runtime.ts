@@ -8,12 +8,14 @@ import {approvedSchoolUrl,type SchoolSource} from './school-pages';
 import {readLexmountPage} from './lexmount-pages';
 import {AppError} from './errors';
 import {publicSources as createPublicSources} from './public-sources';
+import {noticeBriefRuntime,briefSchool} from './notice-brief-runtime';
 
 /** Preview SQL clones can contain production metadata; scopes never share objects. */
 export function materialRuntime(pool:SqlPool,repo:Repository,context:{production:boolean;deployId:string}){
  const scope=context.production?'production-v1':`preview-${context.deployId}`;
+ const briefs=noticeBriefRuntime(pool,context);
  const store=context.production?getStore({name:'campus-materials-production-v1',consistency:'strong'}):getDeployStore({name:'campus-materials',consistency:'strong'});
- const archive=materialArchive(pool,{async put(key,bytes){await store.set(key,bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength) as ArrayBuffer);},async get(key){const data=await store.get(key,{type:'arrayBuffer'});return data?new Uint8Array(data):null;},async remove(key){await store.delete(key);}},scope);
+ const archive=materialArchive(pool,{async put(key,bytes){await store.set(key,bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength) as ArrayBuffer);},async get(key){const data=await store.get(key,{type:'arrayBuffer'});return data?new Uint8Array(data):null;},async remove(key){await store.delete(key);}},scope,{onArticleSaved:async(row,school,text)=>{try{await briefs.enqueue(row,school,text);}catch{console.warn(JSON.stringify({event:'notice-brief-queue',code:'QUEUE_UNAVAILABLE'}));}}});
  const directory=schoolDirectory(pool,repo,readLexmountPage,Date.now,{archive}),websites=websiteSources(pool,repo,readLexmountPage,Date.now,undefined,archive);
  const publicSources=createPublicSources(pool,repo,websites,directory.sources,archive);
  async function source(row:ItemRow):Promise<SchoolSource>{
@@ -34,5 +36,6 @@ export function materialRuntime(pool:SqlPool,repo:Repository,context:{production
   return archive.collect(row,await source(row),readLexmountPage,settings);
  }
  repo.material=row=>material(row);
- return{archive,directory,websites,publicSources,source,material};
+ repo.brief=(row,school)=>briefs.get(row,briefSchool(row,school));
+ return{archive,directory,websites,publicSources,source,material,briefs};
 }

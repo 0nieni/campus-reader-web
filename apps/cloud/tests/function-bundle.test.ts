@@ -7,7 +7,7 @@ test('Netlify v2 bundles workspace runtime code without importing TypeScript pac
   // Netlify v2's transformer bundles relative files but keeps package imports
   // external. A plain esbuild bundle (without packages: external) masks this
   // production cold-start failure for our TypeScript-only workspace package.
-  for (const name of ['api', 'auth', 'guest', 'mcp', 'mcp-oauth', 'mcp-management', 'cleanup', 'identity', 'reminders','reminder-delivery','reminder-tick','reminder-email','material-file','material-schedule','material-collect-background']) {
+  for (const name of ['api', 'auth', 'guest', 'mcp', 'mcp-oauth', 'mcp-management', 'cleanup', 'identity', 'reminders','reminder-delivery','reminder-tick','reminder-email','material-file','material-schedule','material-collect-background','notice-brief-background']) {
     const compiled = await build({
       entryPoints: [fileURLToPath(new URL(`../../../netlify/functions/${name}.mts`, import.meta.url))],
       bundle: true, packages: 'external', platform: 'node', format: 'esm',

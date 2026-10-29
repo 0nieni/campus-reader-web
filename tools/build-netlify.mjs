@@ -28,7 +28,7 @@ async function copyDirectory(from, to) {
 }
 await copyDirectory(join(root, 'apps/web/dist'), join(output, 'public'))
 await mkdir(join(output, 'functions'))
-for (const name of ['api', 'auth', 'guest', 'mcp', 'mcp-oauth', 'mcp-management', 'cleanup', 'identity', 'reminders','reminder-delivery','reminder-tick','reminder-email','material-file','material-schedule','material-collect-background']) {
+for (const name of ['api', 'auth', 'guest', 'mcp', 'mcp-oauth', 'mcp-management', 'cleanup', 'identity', 'reminders','reminder-delivery','reminder-tick','reminder-email','material-file','material-schedule','material-collect-background','notice-brief-background']) {
   const compiled = await bundle({ entryPoints: [join(root, `netlify/functions/${name}.mts`)], outfile: join(output, `functions/${name}.mjs`), bundle: true, external: ['unpdf','word-extractor','xlsx','yauzl'], platform: 'node', format: 'esm', target: 'node22', sourcemap: false, logLevel: 'info', metafile: true, banner: { js: "import { createRequire as __deployCreateRequire } from 'node:module'; const require = __deployCreateRequire(import.meta.url);" } })
   execFileSync(process.execPath,['--check',join(output,`functions/${name}.mjs`)],{stdio:'inherit'})
   if (Object.keys(compiled.metafile.inputs).some(path => /(?:@cloudbase\/(?:node-sdk|database)|node_modules\/(?:axios|lodash\.set|lodash\.unset))\//.test(path.replaceAll('\\', '/')))) throw new Error('全 Netlify 函数不得包含旧 CloudBase SDK 依赖')
@@ -48,4 +48,4 @@ if(health.status!==200||health.headers.get('cache-control')!=='no-store'||health
 const stillDenied=await handler(new Request('https://localhost/.netlify/functions/api?health=collection',{method:'POST',headers:{origin:'https://localhost','content-type':'application/json'},body:JSON.stringify({action:'ai.status',input:{}})}))
 if(stillDenied.status!==401)throw new Error('诊断查询不得绕过业务API认证')
 console.log(`Netlify 部署产物：${output}`)
-console.log(`仅包含网页、15 个 Netlify 函数与 SQL 迁移；不含本地环境文件，未上传、未调用模型。`)
+console.log(`仅包含网页、16 个 Netlify 函数与 SQL 迁移；不含本地环境文件，未上传、未调用模型。`)

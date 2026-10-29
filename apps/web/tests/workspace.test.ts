@@ -310,4 +310,14 @@ describe("visible entry and untrusted content", () => {
       "https://example.org/notice?id=1",
     );
   });
+  it('discards a brief response after closing or changing the article',async()=>{
+    const {fake}=fixture(),pending=deferred<any>(),original=vi.mocked(fake.call).getMockImplementation()!;
+    vi.mocked(fake.call).mockImplementation((async(action,input)=>action==='feed.brief'?pending.promise:action==='feed.detail'?{...structuredClone(detail),brief:{state:'pending',checkedAt:'2026-10-30T04:00:00Z',attachmentsRead:false}}:original(action,input)) as Transport['call']);
+    const store=workspaceStore(fake)();await store.connect();await store.openNotice('one');const request=store.refreshBrief();store.closeNotice();pending.resolve({state:'ready',checkedAt:'2026-10-30T04:00:00Z',attachmentsRead:false});await request;expect(store.detail).toBeNull();
+  });
+  it('keeps the title and original body and inserts a safe brief even without an original link',async()=>{
+    const {fake}=fixture(),original=vi.mocked(fake.call).getMockImplementation()!;
+    vi.mocked(fake.call).mockImplementation((async(action,input)=>action==='feed.detail'?{...structuredClone(detail),brief:{state:'unavailable',checkedAt:'2026-10-30T04:00:00Z',attachmentsRead:false,message:'暂未生成摘要。'}}:original(action,input)) as Transport['call']);
+    const wrapper=mount(App,{props:{transport:fake,configurationIssues:[]},global:{plugins:[createPinia()]}});await flushPromises();await wrapper.get('.notice-open').trigger('click');await flushPromises();expect(wrapper.get('.modal-top h2').text()).toBe(detail.title);expect(wrapper.get('.original-text').text()).toContain(detail.text);expect(wrapper.get('.notice-brief').text()).toContain('暂未生成摘要');expect(wrapper.find('.original-source').exists()).toBe(false);expect(wrapper.html().indexOf('notice-brief')).toBeLessThan(wrapper.html().indexOf('original-text'));wrapper.unmount();
+  });
 });

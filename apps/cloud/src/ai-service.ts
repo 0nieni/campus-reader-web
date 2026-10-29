@@ -28,9 +28,9 @@ interface Task extends Omit<ReadingTask, "state" | "totalSteps" | "title"> {
   chat?: ChatContext;
   memoryProposals?: MemoryProposal[];
 }
-export function officialConfig(): { connection: Connection; endpoint: string } | null {
-  const base = process.env.AI_CHAT_BASE_URL, apiKey = process.env.AI_CHAT_API_KEY, model = process.env.AI_CHAT_MODEL;
-  if (!base || !apiKey || !model || process.env.AI_PROVIDER === "mock") return null;
+export function officialConfig(settings:Record<string,string|undefined>=process.env): { connection: Connection; endpoint: string } | null {
+  const base = settings.AI_CHAT_BASE_URL, apiKey = settings.AI_CHAT_API_KEY, model = settings.AI_CHAT_MODEL;
+  if (!base || !apiKey || !model || settings.AI_PROVIDER === "mock") return null;
   try {
     const endpoint = base.replace(/\/$/, "").endsWith("/chat/completions") ? base.replace(/\/$/, "") : `${base.replace(/\/$/, "")}/chat/completions`;
     const url = new URL(endpoint);
