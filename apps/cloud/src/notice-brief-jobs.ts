@@ -6,21 +6,22 @@ import {isPrivate,sourceVisible,itemVisible} from './scope';
 import {AppError} from './errors';
 import {prepareBrief,validateBrief,canonicalBriefBody,briefHash,briefPublicationDay,BRIEF_GUIDE,BRIEF_SCHEMA,BRIEF_PROMPT,BRIEF_PARSER} from './notice-brief';
 import type {CompletionResult,Connection} from './model-provider';
+import {noticeBriefBackfill,type BriefArticleReader} from './notice-brief-backfill';
 const iso=(at:number)=>new Date(at).toISOString(),day=(at:number)=>iso(at+8*3600000).slice(0,10);
 const hash=(text:string)=>createHash('sha256').update(text).digest('hex');
 const year=365*86400000;
 interface Options {
  scope:string;enabled():boolean;model():{connection:Connection;endpoint:string}|null;
  complete(connection:Connection,guide:string,content:string,maxTokens:number,endpoint:string):Promise<CompletionResult>;
- now?:()=>number;dailyCalls?:number;dailyTokens?:number;dispatch?:()=>Promise<void>;
+ now?:()=>number;dailyCalls?:number;dailyTokens?:number;dispatch?:()=>Promise<void>;article?:BriefArticleReader;
 }
 export function noticeBriefJobs(pool:SqlPool,options:Options){
  const now=options.now||Date.now,scope=options.scope,callLimit=Math.min(100,Math.max(0,options.dailyCalls??100)),tokenLimit=Math.min(10000000,Math.max(0,options.dailyTokens??1000000));
  async function tx<T>(work:(client:SqlClient)=>Promise<T>){const client=await pool.connect();try{await client.query('BEGIN');await client.query("SET LOCAL statement_timeout='10000'");const result=await work(client);await client.query('COMMIT');return result;}catch(error){await client.query('ROLLBACK').catch(()=>{});throw error;}finally{client.release();}}
  function modelSignature(){const config=options.model();return config?briefHash([config.connection.provider,config.connection.model,config.endpoint,config.connection.protocol,BRIEF_PROMPT]):null;}
- async function current(sql:Pick<SqlPool,'query'>,id:string,school:string,lock=false){
+ async function current(sql:Pick<SqlPool,'query'>,id:string,school:string,lock=false,requireBody=true){
   const item=(await sql.query("SELECT body FROM campus_documents WHERE collection='items' AND id=$1"+(lock?' FOR SHARE':''),[id])).rows[0]?.body as ItemRow|undefined;
-  if(!item||item.status!=='published'||isPrivate(item)||item.aiSearchExpiresAt||item.aiProcessing==='import_only'||(item as any).allowAi===false||!item.contentText||item.materialExpiresAt&&Date.parse(item.materialExpiresAt)<=now())return null;
+  if(!item||item.status!=='published'||isPrivate(item)||item.aiSearchExpiresAt||item.aiProcessing==='import_only'||(item as any).allowAi===false||requireBody&&!item.contentText||item.materialExpiresAt&&Date.parse(item.materialExpiresAt)<=now())return null;
   const stamp=Date.parse(item.publishedAt||item.discoveredAt||item.createdAt||'');if(!Number.isFinite(stamp)||stamp<now()-year)return null;
   const ids=[...new Set([item.sourceId,...(item.sourceIds||[])].filter((id):id is string=>Boolean(id)))].sort();if(!ids.length)return null;
   const policies=(await sql.query("SELECT id,body FROM campus_documents WHERE collection='sources' AND id=ANY($1::text[]) ORDER BY id"+(lock?' FOR SHARE':''),[ids])).rows;
@@ -33,6 +34,14 @@ export function noticeBriefJobs(pool:SqlPool,options:Options){
  // Fingerprints and task IDs use the same canonical article; appended archive
  // attachment text stays outside that fingerprint and never enters the model.
  const matches=(value:Awaited<ReturnType<typeof current>>,job:Row)=>{if(!value||value.signature!==job.signature)return false;const body=canonicalBriefBody(value.item.contentText!),tail=body.slice(job.raw_length);return body.length>=job.raw_length&&hash(body.slice(0,job.raw_length))===job.raw_hash&&(!tail||tail.startsWith('\n## 附件：'));};
+ const backfill=options.article?noticeBriefBackfill(pool,{scope,now,readLimit:callLimit,article:options.article,enabled:()=>options.enabled()&&Boolean(options.model()),
+  capacity:async()=>{
+   if(!callLimit||!tokenLimit)return false;
+   const budget=(await pool.query('SELECT * FROM campus_notice_brief_budget WHERE store_scope=$1 AND day=$2',[scope,day(now())])).rows[0];
+   if(budget&&(budget.attempts>=callLimit||Number(budget.held_tokens)+Number(budget.used_tokens)>=tokenLimit))return false;
+   return Number((await pool.query("SELECT count(*) AS count FROM campus_notice_briefs WHERE store_scope=$1 AND state IN ('pending','running') AND expires_at>$2",[scope,iso(now())])).rows[0].count)<200;
+  },eligible:async(id,school)=>(await current(pool,id,school,false,false))?.item||null,
+  known:async(row,school)=>{const value=await current(pool,row._id,school);if(!value)return false;return(await pool.query('SELECT * FROM campus_notice_briefs WHERE store_scope=$1 AND item_id=$2 ORDER BY created_at DESC LIMIT 8',[scope,row._id])).rows.some(job=>matches(value,job)&&Date.parse(job.expires_at)>now());},enqueue}):null;
  async function enqueue(row:ItemRow,school:string,body:string){
   if(!options.enabled()||!options.model()||isPrivate(row))return false;
   const latest=await current(pool,row._id,school);if(!latest||!latest.item.contentText!.startsWith(body))return false;
@@ -51,7 +60,9 @@ export function noticeBriefJobs(pool:SqlPool,options:Options){
  }
  async function wake(){
   if(!options.enabled()||!options.dispatch)return;
-  const due=(await pool.query("UPDATE campus_notice_brief_workers SET dispatch_after=$2 WHERE store_scope=$1 AND dispatch_after<=$3 AND EXISTS(SELECT 1 FROM campus_notice_briefs WHERE store_scope=$1 AND state='pending' AND available_at<=$3 AND expires_at>$3) RETURNING store_scope",[scope,iso(now()+60000),iso(now())])).rows.length;
+  const historyDue=backfill?await backfill.due():false;
+  await pool.query('INSERT INTO campus_notice_brief_workers(store_scope) VALUES($1) ON CONFLICT DO NOTHING',[scope]);
+  const due=(await pool.query("UPDATE campus_notice_brief_workers SET dispatch_after=$2 WHERE store_scope=$1 AND dispatch_after<=$3 AND (EXISTS(SELECT 1 FROM campus_notice_briefs WHERE store_scope=$1 AND state='pending' AND available_at<=$3 AND expires_at>$3) OR $4::boolean) RETURNING store_scope",[scope,iso(now()+60000),iso(now()),historyDue])).rows.length;
   if(due)await options.dispatch().catch(()=>{}); // durable queue survives dispatcher failure
  }
  async function get(row:ItemRow,school:string):Promise<NoticeBrief>{
@@ -59,7 +70,7 @@ export function noticeBriefJobs(pool:SqlPool,options:Options){
   if(!latest)return{...base,state:'unavailable',message:'此来源或正文暂不允许自动摘要，请阅读原文。'};
   const jobs=(await pool.query('SELECT * FROM campus_notice_briefs WHERE store_scope=$1 AND item_id=$2 ORDER BY created_at DESC LIMIT 8',[scope,row._id])).rows;
   const job=jobs.find(job=>matches(latest,job)&&Date.parse(job.expires_at)>now());
-  if(!job)return{...base,state:jobs.length?'stale':'unavailable',message:jobs.length?'正文或来源已更新，原摘要已失效，等待新版本采集。':!options.enabled()?'自动摘要尚未启用，可继续阅读正文。':!options.model()?'自动摘要模型尚未配置，可继续阅读正文。':'此公告尚无自动摘要，新增正文采集后会按独立额度整理。'};
+  if(!job)return{...base,state:jobs.length?'stale':'unavailable',message:jobs.length?'正文或来源已更新，原摘要已失效，等待后台按独立额度重新整理。':!options.enabled()?'自动摘要尚未启用，可继续阅读正文。':!options.model()?'自动摘要模型尚未配置，可继续阅读正文。':'此公告尚无自动摘要，后台将按独立额度逐步补齐，可先阅读正文。'};
   const metadata={contentHash:job.content_hash,schemaVersion:BRIEF_SCHEMA};
   if(!matches(await current(pool,row._id,school),job))return{...base,state:'stale',message:'正文或来源许可已变化，请重新读取原文。'};
   if(job.state==='ready')return{...base,...metadata,state:'ready',content:job.result,generatedAt:new Date(job.generated_at).toISOString()};
@@ -79,6 +90,7 @@ export function noticeBriefJobs(pool:SqlPool,options:Options){
   try{
    // A crashed call has an unknown billing result; never reclaim it for sending.
    await tx(async sql=>{const expired=(await sql.query("SELECT * FROM campus_notice_briefs WHERE store_scope=$1 AND state='running' AND lease_until<=$2 FOR UPDATE",[scope,iso(now())])).rows;for(const job of expired){await settle(sql,job,job.reserved_tokens);await sql.query("UPDATE campus_notice_briefs SET state='uncertain',input='{}',error_code='MODEL_UNCERTAIN',message='上次请求结果不明，已停止自动重试，请先核查服务商用量。' WHERE id=$1",[job.id]);}});
+   if(backfill)await backfill.run(Math.min(deadline-40000,now()+2*60000));
    while(options.enabled()&&now()<deadline-35000&&processed<100){
     const token=randomUUID(),config=options.model();if(!config)break;
     const claimed=await tx(async sql=>{
@@ -111,7 +123,7 @@ export function noticeBriefJobs(pool:SqlPool,options:Options){
      });
     }processed++;
    }
-   more=Boolean((await pool.query("SELECT id FROM campus_notice_briefs WHERE store_scope=$1 AND state='pending' AND available_at<=$2 AND expires_at>$2 LIMIT 1",[scope,iso(now())])).rows.length);
+   more=Boolean((await pool.query("SELECT id FROM campus_notice_briefs WHERE store_scope=$1 AND state='pending' AND available_at<=$2 AND expires_at>$2 LIMIT 1",[scope,iso(now())])).rows.length)||Boolean(backfill&&await backfill.due());
   }finally{await pool.query("UPDATE campus_notice_brief_workers SET lease_until='1970-01-01',dispatch_after='1970-01-01' WHERE store_scope=$1 AND lease_id=$2",[scope,worker]);}
   if(more)await wake();return{processed,more};
  }

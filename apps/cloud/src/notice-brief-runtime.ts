@@ -4,6 +4,7 @@ import type {ItemRow} from './repository';
 import {noticeBriefJobs} from './notice-brief-jobs';
 import {officialConfig} from './ai-service';
 import {modelCompletion} from './model-provider';
+import type {BriefArticleReader} from './notice-brief-backfill';
 declare const Netlify:{env:{get(key:string):string|undefined}};
 export const BRIEF_JOB_PATH='/.netlify/functions/notice-brief-background';
 const env=(key:string)=>typeof Netlify!=='undefined'?Netlify.env.get(key):process.env[key];
@@ -19,7 +20,7 @@ async function dispatch(){
  if(response.status!==202)throw Error('BRIEF_DISPATCH_FAILED');
 }
 export const briefSchool=(row:ItemRow,school:string)=>row.scope==='global'?'global':row.schoolIds?.[0]||school;
-export function noticeBriefRuntime(pool:SqlPool,context:{production:boolean;deployId:string}){
+export function noticeBriefRuntime(pool:SqlPool,context:{production:boolean;deployId:string},article?:BriefArticleReader){
  const bounded=(key:string,fallback:number,max:number)=>{const value=Number(env(key)??fallback);return Number.isFinite(value)?Math.max(0,Math.min(max,Math.floor(value))):fallback;};
- return noticeBriefJobs(pool,{scope:context.production?'production-v1':`preview-${context.deployId}`,enabled:()=>context.production&&env('NOTICE_BRIEF_ENABLED')==='true',model:()=>officialConfig({AI_CHAT_BASE_URL:env('AI_CHAT_BASE_URL')||'https://api.deepseek.com',AI_CHAT_API_KEY:env('AI_CHAT_API_KEY'),AI_CHAT_MODEL:env('AI_CHAT_MODEL')||'deepseek-flash',AI_PROVIDER:env('AI_PROVIDER')}),complete:modelCompletion,dailyCalls:bounded('NOTICE_BRIEF_DAILY_CALLS',100,100),dailyTokens:bounded('NOTICE_BRIEF_DAILY_TOKENS',1000000,10000000),dispatch});
+ return noticeBriefJobs(pool,{scope:context.production?'production-v1':`preview-${context.deployId}`,enabled:()=>context.production&&env('NOTICE_BRIEF_ENABLED')==='true',model:()=>officialConfig({AI_CHAT_BASE_URL:env('AI_CHAT_BASE_URL')||'https://api.deepseek.com',AI_CHAT_API_KEY:env('AI_CHAT_API_KEY'),AI_CHAT_MODEL:env('AI_CHAT_MODEL')||'deepseek-flash',AI_PROVIDER:env('AI_PROVIDER')}),complete:modelCompletion,dailyCalls:bounded('NOTICE_BRIEF_DAILY_CALLS',100,100),dailyTokens:bounded('NOTICE_BRIEF_DAILY_TOKENS',1000000,10000000),dispatch,article});
 }

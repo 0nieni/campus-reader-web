@@ -27,6 +27,8 @@
   external_node_modules = ["unpdf", "word-extractor", "xlsx", "yauzl"]
 [functions.material-collect-background]
   external_node_modules = ["unpdf", "word-extractor", "xlsx", "yauzl"]
+[functions.notice-brief-background]
+  external_node_modules = ["unpdf", "word-extractor", "xlsx", "yauzl"]
 [functions.material-file]
   external_node_modules = ["unpdf", "word-extractor", "xlsx", "yauzl"]
 [functions.material-schedule]
