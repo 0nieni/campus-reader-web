@@ -64,7 +64,7 @@ export function materialArchive(pool:SqlPool,objects:MaterialObjects,scope:strin
    throw error;
   }
  }
- async function collect(row:ItemRow,source:SchoolSource,reader:PageReader,settings:{force?:boolean;deadline?:number;repair?:boolean;download?:MaterialDownloader}={}):Promise<ItemRow>{
+ async function collect(row:ItemRow,source:SchoolSource,reader:PageReader,settings:{force?:boolean;deadline?:number;repair?:boolean;download?:MaterialDownloader;articleOnly?:boolean}={}):Promise<ItemRow>{
   await access(row,source);
   if(!row.originalUrl)throw new AppError('NO_MATERIAL','此公告没有可采集的原文地址。');
   const previousArticle=options.onArticleSaved?(await rowsFor(row,source)).find(file=>file.kind==='article'):undefined;
@@ -77,7 +77,7 @@ export function materialArchive(pool:SqlPool,objects:MaterialObjects,scope:strin
   const fetchedArticle=Boolean(page);
   if(!page){const raw=await objects.get(article.blob_key);if(raw)page={url:row.originalUrl,html:new TextDecoder().decode(raw)};else if(!settings.repair)return collect(row,source,reader,{...settings,force:true,repair:true});else throw new AppError('NO_MATERIAL','正文快照暂不可读取。');}
   const attachments=attachmentCandidates(page,source),notes:string[]=[];
-  for(const file of attachments.slice(0,20)){
+  for(const file of settings.articleOnly?[]:attachments.slice(0,20)){
    if(settings.deadline&&now()>=settings.deadline){notes.push('部分附件待后台继续采集。');break;}
    try{await save(row,source,file.url,file.filename,'attachment',()=>(settings.download||download)(file.url,source),settings.force);}
    catch(error){if(error instanceof AppError&&error.code==='NOT_FOUND')throw error;notes.push(`${file.filename}：${error instanceof AppError?error.message:'暂未采集成功。'}`);}
@@ -96,7 +96,7 @@ export function materialArchive(pool:SqlPool,objects:MaterialObjects,scope:strin
   await access(row,source);
   await pool.query("UPDATE campus_documents SET body=body || $3::jsonb WHERE collection='items' AND id=$1 AND coalesce(body->>'ownerOpenid','')=$2 AND body->>'sourceId'=$4 AND body->>'status'='published'",[row._id,owner(row),JSON.stringify(patch),row.sourceId]);
   await access(row,source);
-  if(fetchedArticle&&previousArticle?.text_content!==body.text_content)await options.onArticleSaved?.({...row,...patch},source.id,body.text_content);
+  if(!settings.articleOnly&&fetchedArticle&&previousArticle?.text_content!==body.text_content)await options.onArticleSaved?.({...row,...patch},source.id,body.text_content);
   return{...row,...patch};
  }
  async function readFile(id:string,row:ItemRow,source:SchoolSource){
