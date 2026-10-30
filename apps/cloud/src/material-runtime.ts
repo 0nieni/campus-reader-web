@@ -27,7 +27,8 @@ export function materialRuntime(pool:SqlPool,repo:Repository,context:{production
   if(!policy||row.ownerOpenid||!row.originalUrl)throw new AppError('NO_MATERIAL','此资料暂未配置可自动采集的来源。');
   const entry=policy.entryUrl||policy.url;
   if(typeof entry!=='string')throw new AppError('NO_MATERIAL','此来源尚未配置公开采集入口。');
-  const descriptor:SchoolSource={id:row.schoolIds?.[0]||(['ciscn-announcement','lanqiao-competition'].includes(policy.key)?'global':'bjtu'),name:policy.name||'公开来源',announcementUrl:entry,homepage:new URL(entry).origin+'/',exactHost:true};
+  const fallbackSchool=policy.scope==='global'||['ciscn-announcement','lanqiao-competition'].includes(policy.key)?'global':policy.schoolIds?.[0]||'bjtu';
+  const descriptor:SchoolSource={id:briefSchool(row,fallbackSchool),name:policy.name||'公开来源',announcementUrl:entry,homepage:new URL(entry).origin+'/',exactHost:true};
   approvedSchoolUrl(row.originalUrl,descriptor);return descriptor;
  }
  async function material(row:ItemRow,settings:{force?:boolean;deadline?:number;articleOnly?:boolean}={deadline:Date.now()+18000}){

@@ -46,7 +46,7 @@ export function noticeBriefBackfill(pool:SqlPool,options:Options){
    for(const row of rows){
     if(scanned>=500||now()>=deadline-25000||!await due())break;
     const item=row.body as ItemRow,source=row.source||{};
-    const global=item.scope==='global'||(!item.scope&&(source.scope==='global'||['ciscn-announcement','lanqiao-competition'].includes(source.key)));
+    const global=item.scope==='global'||(!item.scope&&!item.schoolIds?.[0]&&(source.scope==='global'||['ciscn-announcement','lanqiao-competition'].includes(source.key)));
     const school=global?'global':item.schoolIds?.[0]||source.schoolIds?.[0]||'bjtu';
     const candidate=await options.eligible(row.id,school);
     if(candidate&&!await options.known(candidate,school)){
