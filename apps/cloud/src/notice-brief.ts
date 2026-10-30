@@ -2,16 +2,17 @@ import {createHash} from 'node:crypto';
 import {z} from 'zod';
 import type {BriefContent,BriefEvidence,BriefTime} from '../../../packages/contracts/src/notice-brief';
 import {AppError} from './errors';
-export const BRIEF_SCHEMA='notice-brief-v1',BRIEF_PROMPT='evidence-v1',BRIEF_PARSER='paragraphs-v1';
+export const BRIEF_SCHEMA='notice-brief-v1',BRIEF_PROMPT='evidence-v2',BRIEF_PARSER='paragraphs-v2';
 export const briefHash=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const norm=(text:string)=>text.normalize('NFKC').replace(/\s+/g,'');
 export interface BriefParagraph {id:string;text:string}
 export interface PreparedBrief {body:string;paragraphs:BriefParagraph[];contentHash:string}
+export const canonicalBriefBody=(text:string)=>text.replace(/\r/g,'').replace(/[\u200b\ufeff]/g,'').split(/\n+/).map(line=>line.trim()).filter(Boolean).join('\n');
 export function prepareBrief(text:string):PreparedBrief{
  const clean=text.replace(/\r/g,'').replace(/[\u200b\ufeff]/g,'').trim();
  if(!clean||clean.length>12000)throw new AppError('BRIEF_QUALITY','正文为空或超过自动摘要长度上限，请使用原文或AI阅读。');
  if(/统一身份认证|请输入密码|扫码登录|访问验证|安全验证|验证您是人类|access denied|captcha/i.test(clean))throw new AppError('BRIEF_QUALITY','网页可能是登录或访问验证页，未自动总结。');
- const lines=clean.split(/\n+/).map(line=>line.trim()).filter(Boolean);
+ const lines=canonicalBriefBody(clean).split('\n');
  // Body extraction is DOM-based upstream. Never trim a flattened page by the
  // words “首页/联系”; that can remove real requirements or submission details.
  if(/首页.{0,60}(硕士招生|通知公告).{0,60}(博士招生|首页)/.test(clean)||/ICP备\d|公网安备|版权所有/.test(clean)||lines.filter(line=>/^(首页|导航|快速链接|TOP|返回顶部)$/.test(line)).length>1)throw new AppError('BRIEF_QUALITY','正文仍含较多导航或页脚，待核验后再生成摘要。');
@@ -30,18 +31,22 @@ function validDate(value:string){if(!/^\d{4}-\d\d-\d\d$/.test(value))return fals
 export function briefPublicationDay(value:string|undefined){if(!value)return undefined;if(validDate(value))return value;const parsed=Date.parse(value);return Number.isFinite(parsed)?new Date(parsed+8*3600000).toISOString().slice(0,10):undefined;}
 /** Date candidates come from the quoted sentence, with publication year only
  * used for a month/day that has no year. Examination-title years are not used. */
-function datesIn(quote:string,publishedYear?:string){
- const text=norm(quote),dates:string[]=[];let year=publishedYear;
+function dateExpressions(quote:string,publishedYear?:string){
+ const text=norm(quote),dates:{value:string;end:number}[]=[];let year=publishedYear;
  const expression=/(?:(\d{4})[年/-])?(\d{1,2})[月/-](\d{1,2})(?:日)?/g;
- for(const match of text.matchAll(expression)){if(match[1])year=match[1];if(year){const value=`${year}-${match[2]!.padStart(2,'0')}-${match[3]!.padStart(2,'0')}`;if(validDate(value))dates.push(value);}}
- return dates;
+ for(const match of text.matchAll(expression)){if(match[1])year=match[1];if(year){const value=`${year}-${match[2]!.padStart(2,'0')}-${match[3]!.padStart(2,'0')}`;if(validDate(value))dates.push({value,end:match.index!+match[0].length});}}
+ return{text,dates};
 }
+const datesIn=(quote:string,publishedYear?:string)=>dateExpressions(quote,publishedYear).dates.map(row=>row.value);
 function verifyTime(value:BriefTime,quotes:string[],publishedYear?:string){
  const date=value.value.slice(0,10);if(!validDate(date)||!quotes.some(quote=>datesIn(quote,publishedYear).includes(date)))fail();
  if(value.precision==='date'){if(value.value!==date)fail();return;}
  if(!/^\d{4}-\d\d-\d\dT\d\d:\d\d:00\+08:00$/.test(value.value)||!Number.isFinite(Date.parse(value.value)))fail();
  const hour=Number(value.value.slice(11,13)),minute=Number(value.value.slice(14,16));if(hour>23||minute>59)fail();
- if(!quotes.some(quote=>{if(!datesIn(quote,publishedYear).includes(date))return false;const normalized=norm(quote);return[...normalized.matchAll(/(\d{1,2})[:时点](\d{2})?(?:分)?/g)].some(match=>{let h=Number(match[1]);if(h<12&&/下午|晚上/.test(normalized.slice(Math.max(0,match.index!-4),match.index)))h+=12;return h===hour&&Number(match[2]||0)===minute;});}))fail();
+ if(!quotes.some(quote=>{const{text,dates}=dateExpressions(quote,publishedYear);return[...text.matchAll(/(\d{1,2})[:时点](\d{2})?(?:分)?/g)].some(match=>{
+  const at=match.index!,dated=dates.filter(row=>row.end<=at).at(-1);if(!dated||dated.value!==date||/[。！？；;]/.test(text.slice(dated.end,at)))return false;
+  let h=Number(match[1]);if(h<12&&/下午|晚上/.test(text.slice(Math.max(dated.end,at-4),at)))h+=12;return h===hour&&Number(match[2]||0)===minute;
+ });}))fail();
 }
 function significant(text:string){return text.normalize('NFKC').match(/https?:\/\/[^\s，。；、)）]+|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}|(?:Word|PDF|Excel|EMS)/gi)||[];}
 export function validateBrief(output:string,prepared:PreparedBrief,publishedAt?:string):BriefContent{

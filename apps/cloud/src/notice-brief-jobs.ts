@@ -4,7 +4,7 @@ import type {SqlPool,SqlClient,Row} from './postgres-storage';
 import type {ItemRow} from './repository';
 import {isPrivate,sourceVisible,itemVisible} from './scope';
 import {AppError} from './errors';
-import {prepareBrief,validateBrief,briefHash,briefPublicationDay,BRIEF_GUIDE,BRIEF_SCHEMA,BRIEF_PROMPT,BRIEF_PARSER} from './notice-brief';
+import {prepareBrief,validateBrief,canonicalBriefBody,briefHash,briefPublicationDay,BRIEF_GUIDE,BRIEF_SCHEMA,BRIEF_PROMPT,BRIEF_PARSER} from './notice-brief';
 import type {CompletionResult,Connection} from './model-provider';
 const iso=(at:number)=>new Date(at).toISOString(),day=(at:number)=>iso(at+8*3600000).slice(0,10);
 const hash=(text:string)=>createHash('sha256').update(text).digest('hex');
@@ -30,25 +30,28 @@ export function noticeBriefJobs(pool:SqlPool,options:Options){
   const signature=briefHash([item.title,item.publishedAt,item.status,item.scope,item.schoolIds,item.sourceId,ids,item.originalUrl,item.aiProcessing,(item as any).allowAi,policy,BRIEF_SCHEMA,BRIEF_PARSER,BRIEF_PROMPT]);
   return{item:{...item,_id:id},signature,sourceId:item.sourceId!};
  }
- const matches=(value:Awaited<ReturnType<typeof current>>,job:Row)=>{if(!value||value.signature!==job.signature)return false;const body=value.item.contentText!,tail=body.slice(job.raw_length);return body.length>=job.raw_length&&hash(body.slice(0,job.raw_length))===job.raw_hash&&(!tail||tail.startsWith('\n\n## 附件：'));};
+ // Fingerprints and task IDs use the same canonical article; appended archive
+ // attachment text stays outside that fingerprint and never enters the model.
+ const matches=(value:Awaited<ReturnType<typeof current>>,job:Row)=>{if(!value||value.signature!==job.signature)return false;const body=canonicalBriefBody(value.item.contentText!),tail=body.slice(job.raw_length);return body.length>=job.raw_length&&hash(body.slice(0,job.raw_length))===job.raw_hash&&(!tail||tail.startsWith('\n## 附件：'));};
  async function enqueue(row:ItemRow,school:string,body:string){
   if(!options.enabled()||!options.model()||isPrivate(row))return false;
   const latest=await current(pool,row._id,school);if(!latest||!latest.item.contentText!.startsWith(body))return false;
-  let prepared:ReturnType<typeof prepareBrief>;try{prepared=prepareBrief(body);}catch(error){if(!(error instanceof AppError))throw error;await pool.query("INSERT INTO campus_notice_briefs(id,store_scope,item_id,school_id,source_id,signature,content_hash,raw_hash,raw_length,input,state,message,available_at,created_at,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'{}','unavailable',$10,$11,$11,$12) ON CONFLICT DO NOTHING",[briefHash([scope,row._id,school,latest.signature,hash(body)]),scope,row._id,school,latest.sourceId,latest.signature,hash(body),hash(body),body.length,error.message,iso(now()),latest.item.materialExpiresAt||iso(now()+year)]);return false;}
+  const canonical=canonicalBriefBody(body),fingerprint=hash(canonical),length=canonical.length;
+  let prepared:ReturnType<typeof prepareBrief>;try{prepared=prepareBrief(body);}catch(error){if(!(error instanceof AppError))throw error;await pool.query("INSERT INTO campus_notice_briefs(id,store_scope,item_id,school_id,source_id,signature,content_hash,raw_hash,raw_length,input,state,message,available_at,created_at,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'{}','unavailable',$10,$11,$11,$12) ON CONFLICT DO NOTHING",[briefHash([scope,row._id,school,latest.signature,fingerprint]),scope,row._id,school,latest.sourceId,latest.signature,fingerprint,fingerprint,length,error.message,iso(now()),latest.item.materialExpiresAt||iso(now()+year)]);return false;}
   const id=briefHash([scope,row._id,school,latest.signature,prepared.contentHash]);
   const inserted=await tx(async sql=>{
    await sql.query("INSERT INTO campus_notice_brief_workers(store_scope) VALUES($1) ON CONFLICT DO NOTHING",[scope]);
    await sql.query('SELECT store_scope FROM campus_notice_brief_workers WHERE store_scope=$1 FOR UPDATE',[scope]);
-   const count=Number((await sql.query("SELECT count(*) AS count FROM campus_notice_briefs WHERE store_scope=$1 AND state IN ('pending','running')",[scope])).rows[0].count);if(count>=200)return false;
-   if(!matches(await current(sql,row._id,school,true),{signature:latest.signature,raw_length:body.length,raw_hash:hash(body)}))return false;
+   const count=Number((await sql.query("SELECT count(*) AS count FROM campus_notice_briefs WHERE store_scope=$1 AND state IN ('pending','running') AND expires_at>$2",[scope,iso(now())])).rows[0].count);if(count>=200)return false;
+   if(!matches(await current(sql,row._id,school,true),{signature:latest.signature,raw_length:length,raw_hash:fingerprint}))return false;
    const budget=(await sql.query('SELECT * FROM campus_notice_brief_budget WHERE store_scope=$1 AND day=$2',[scope,day(now())])).rows[0],defer=budget&&(budget.attempts>=callLimit||Number(budget.held_tokens)+Number(budget.used_tokens)>=tokenLimit);
-   const result=await sql.query("INSERT INTO campus_notice_briefs(id,store_scope,item_id,school_id,source_id,signature,content_hash,raw_hash,raw_length,input,state,available_at,created_at,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,'pending',$11,$12,$13) ON CONFLICT DO NOTHING RETURNING id",[id,scope,row._id,school,latest.sourceId,latest.signature,prepared.contentHash,hash(body),body.length,JSON.stringify(prepared),defer?iso(Date.parse(day(now())+'T00:00:00+08:00')+86400000):iso(now()),iso(now()),latest.item.materialExpiresAt||iso(now()+year)]);return result.rows.length>0;
+   const result=await sql.query("INSERT INTO campus_notice_briefs(id,store_scope,item_id,school_id,source_id,signature,content_hash,raw_hash,raw_length,input,state,available_at,created_at,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,'pending',$11,$12,$13) ON CONFLICT DO NOTHING RETURNING id",[id,scope,row._id,school,latest.sourceId,latest.signature,prepared.contentHash,fingerprint,length,JSON.stringify(prepared),defer?iso(Date.parse(day(now())+'T00:00:00+08:00')+86400000):iso(now()),iso(now()),latest.item.materialExpiresAt||iso(now()+year)]);return result.rows.length>0;
   });
   if(inserted)await wake();return inserted;
  }
  async function wake(){
   if(!options.enabled()||!options.dispatch)return;
-  const due=(await pool.query("UPDATE campus_notice_brief_workers SET dispatch_after=$2 WHERE store_scope=$1 AND dispatch_after<=$3 AND EXISTS(SELECT 1 FROM campus_notice_briefs WHERE store_scope=$1 AND state='pending' AND available_at<=$3) RETURNING store_scope",[scope,iso(now()+60000),iso(now())])).rows.length;
+  const due=(await pool.query("UPDATE campus_notice_brief_workers SET dispatch_after=$2 WHERE store_scope=$1 AND dispatch_after<=$3 AND EXISTS(SELECT 1 FROM campus_notice_briefs WHERE store_scope=$1 AND state='pending' AND available_at<=$3 AND expires_at>$3) RETURNING store_scope",[scope,iso(now()+60000),iso(now())])).rows.length;
   if(due)await options.dispatch().catch(()=>{}); // durable queue survives dispatcher failure
  }
  async function get(row:ItemRow,school:string):Promise<NoticeBrief>{
@@ -108,7 +111,7 @@ export function noticeBriefJobs(pool:SqlPool,options:Options){
      });
     }processed++;
    }
-   more=Boolean((await pool.query("SELECT id FROM campus_notice_briefs WHERE store_scope=$1 AND state='pending' AND available_at<=$2 LIMIT 1",[scope,iso(now())])).rows.length);
+   more=Boolean((await pool.query("SELECT id FROM campus_notice_briefs WHERE store_scope=$1 AND state='pending' AND available_at<=$2 AND expires_at>$2 LIMIT 1",[scope,iso(now())])).rows.length);
   }finally{await pool.query("UPDATE campus_notice_brief_workers SET lease_until='1970-01-01',dispatch_after='1970-01-01' WHERE store_scope=$1 AND lease_id=$2",[scope,worker]);}
   if(more)await wake();return{processed,more};
  }

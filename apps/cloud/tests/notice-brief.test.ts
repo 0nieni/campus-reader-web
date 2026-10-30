@@ -22,3 +22,12 @@ test('multi-stage dates retain conditions and use publication year rather than e
  const noCondition={keyDates:[{...result.keyDates[2]!,conditions:undefined}],requirements:[]};assert.throws(()=>validateBrief(JSON.stringify(noCondition),p,'2026-10-08'),{code:'BRIEF_EVIDENCE'});
 });
 test('provider usage is explicit and missing/zero/malformed usage never becomes free',()=>{assert.equal(modelUsage('openai-chat',{}),undefined);assert.equal(modelUsage('openai-chat',{usage:{prompt_tokens:0,completion_tokens:0,total_tokens:0}}),undefined);assert.deepEqual(modelUsage('openai-chat',{usage:{prompt_tokens:12,completion_tokens:8,total_tokens:20}}),{inputTokens:12,outputTokens:8,totalTokens:20});});
+
+test('minute evidence associates each clock with its own date rather than another milestone',()=>{
+ const p=prepareBrief('2026年11月1日09:00开始报名，2026年11月5日17:00截止。');
+ const validate=(time:string)=>validateBrief(JSON.stringify({keyDates:[{label:'报名',kind:'deadline',rawText:p.body,end:{value:time,precision:'minute'},evidence:proof('p0001',p.body)}],requirements:[]}),p,'2026-10-30');
+ for(const time of ['2026-11-01T09:00:00+08:00','2026-11-05T17:00:00+08:00'])assert.doesNotThrow(()=>validate(time));
+ for(const time of ['2026-11-05T09:00:00+08:00','2026-11-01T17:00:00+08:00'])assert.throws(()=>validate(time),{code:'BRIEF_EVIDENCE'});
+ const range=prepareBrief('2026年11月1日09:00至17:00可以报名。');
+ assert.doesNotThrow(()=>validateBrief(JSON.stringify({keyDates:[{label:'报名',kind:'period',rawText:range.body,start:{value:'2026-11-01T09:00:00+08:00',precision:'minute'},end:{value:'2026-11-01T17:00:00+08:00',precision:'minute'},evidence:proof('p0001',range.body)}],requirements:[]}),range,'2026-10-30'));
+});

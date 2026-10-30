@@ -31,6 +31,23 @@ test('independent brief SQL queue, permissions, reservations and uncertain calls
    assert.equal((await pool.query("SELECT input FROM campus_notice_briefs WHERE store_scope='once'")).rows[0].input.body,undefined);
    assert.match((await pool.query("SELECT request_id FROM campus_notice_briefs WHERE store_scope='once'")).rows[0].request_id,/^[a-f0-9-]{36}$/);
   });
+  await t.test('canonical-only edits during generation and recollection keep one reusable task',async()=>{
+   const row=await put('brief_canonical');let calls=0;
+   const jobs=noticeBriefJobs(pool,{scope:'canonical',now:()=>clock,enabled:()=>true,model,complete:async()=>{calls++;await db.collection('items').doc(row._id).update({contentText:text.replace('申报','申\u200b报')});return{text:output()};}});
+   await jobs.enqueue(row,'bjtu',text);await jobs.run();assert.equal((await jobs.get(row,'bjtu')).state,'ready');
+   const canonicalEdit='  '+text.replace('申报','申\ufeff报').replace('\n','  \n\n  ')+'  ';
+   await db.collection('items').doc(row._id).update({contentText:canonicalEdit+'\n\n## 附件：材料\n附件文本不进入摘要。'});
+   assert.equal((await jobs.get(row,'bjtu')).state,'ready');assert.equal(await jobs.enqueue({...row,contentText:canonicalEdit},'bjtu',canonicalEdit),false);assert.equal((await jobs.run()).processed,0);assert.equal(calls,1);
+   const changed=canonicalEdit+'\n申请要求已经更新。';await db.collection('items').doc(row._id).update({contentText:changed});assert.equal((await jobs.get(row,'bjtu')).state,'stale');assert.equal(await jobs.enqueue({...row,contentText:changed},'bjtu',changed),true);
+  });
+  await t.test('expired pending jobs neither wake nor continue a worker',async()=>{
+   let dispatches=0,calls=0;const jobs=noticeBriefJobs(pool,{scope:'expired-pending',now:()=>clock,enabled:()=>true,model,dispatch:async()=>{dispatches++;},complete:async()=>{calls++;return{text:output()};}});
+   await jobs.enqueue(await put('brief_expired_pending'),'bjtu',text);dispatches=0;
+   await pool.query("UPDATE campus_notice_briefs SET expires_at=$1 WHERE store_scope='expired-pending'",[new Date(clock-1000).toISOString()]);await pool.query("UPDATE campus_notice_brief_workers SET dispatch_after='1970-01-01' WHERE store_scope='expired-pending'");
+   await jobs.wake();const result=await jobs.run();assert.deepEqual({more:result.more,dispatches,calls},{more:false,dispatches:0,calls:0});
+   await pool.query("INSERT INTO campus_notice_briefs(id,store_scope,item_id,school_id,source_id,signature,content_hash,raw_hash,raw_length,input,state,available_at,created_at,expires_at) SELECT b.id||'-'||n,b.store_scope,b.item_id,b.school_id,b.source_id,b.signature,b.content_hash,b.raw_hash,b.raw_length,b.input,b.state,b.available_at,b.created_at,b.expires_at FROM campus_notice_briefs b CROSS JOIN generate_series(1,200) n WHERE b.store_scope='expired-pending'");
+   assert.equal(await jobs.enqueue(await put('brief_after_expired'),'bjtu',text),true,'Expired entries must not fill the live queue');
+  });
   await t.test('daily call/token limits defer queued jobs, without resetting personal AI accounts',async()=>{
    let calls=0;const jobs=noticeBriefJobs(pool,{scope:'budget',now:()=>clock,enabled:()=>true,model,dailyCalls:1,dailyTokens:100000,complete:async()=>{calls++;return{text:output()};}});
    for(const id of ['brief_budget_a','brief_budget_b'])await jobs.enqueue(await put(id),'bjtu',text);await jobs.run();assert.equal(calls,1);const budget=(await pool.query("SELECT * FROM campus_notice_brief_budget WHERE store_scope='budget'")).rows[0];assert.ok(Number(budget.used_tokens)>1500);assert.equal(Number(budget.held_tokens),0);await jobs.run();assert.equal(calls,1);clock+=86400000;await jobs.run();assert.equal(calls,2);
