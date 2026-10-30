@@ -21,6 +21,7 @@ export default async(request:Request)=>{
   try{if(!owner&&school==='global'){await runtime.publicSources.refreshSource(id);return;}return await runtime.websites.refreshSource(id,owner,school);}catch(error){if(error&&typeof error==='object'&&'code' in error&&error.code==='SOURCE_INTERVAL')return;throw error;}
  },material:(row,deadline)=>runtime.material(row,{force:true,deadline}),cleanup:()=>runtime.archive.cleanup(100)});
  await jobs.start();const result=await jobs.run(start+12*60000);
+ await runtime.briefs.wake();
  console.info(JSON.stringify({event:'material-collection',...result}));
  if(result.more)await dispatchMaterials(Netlify.env.get('URL'),secret);
 };

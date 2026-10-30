@@ -70,6 +70,16 @@ function code(value: { ok: boolean; code?: string }): string | undefined {
   return value.code;
 }
 
+test('brief status reads the authorized cache without material fetching, selection changes or model work',async()=>{
+ let material=0,brief=0;const f=fixture({material:async row=>{material++;return row;},brief:async()=>{brief++;return{state:'pending',attachmentsRead:false,checkedAt:new Date(now).toISOString()};}});
+ const result=await f.gateway({action:'feed.brief',input:{schoolId:'bjtu',itemId:'one'}},caller);assert.equal(result.ok,true);assert.equal(brief,1);assert.equal(material,0);
+ assert.equal((await f.gateway({action:'feed.brief',input:{schoolId:'other',itemId:'one'}},caller)).ok,false);assert.equal(brief,1);
+ assert.equal((await f.gateway({action:'feed.brief',input:{schoolId:'bjtu',itemId:'one',owner:'forged'}},caller)).ok,false);
+});
+test('a broken cache cannot hide or rewrite the original article',async()=>{
+ const f=fixture({brief:async()=>{throw Error('private database details');}});const result=await f.gateway({action:'feed.detail',input:{schoolId:'bjtu',itemId:'one'}},caller);assert.equal(result.ok,true);if(result.ok){const detail=result.data as import('@campus/contracts').NoticeDetail;assert.equal(detail.title,notice.title);assert.equal(detail.text,notice.contentText);assert.equal(detail.brief?.state,'failed');assert.ok(!JSON.stringify(detail).includes('private database'));}
+});
+
 test("anonymous and logged-out requests never touch the database", async () => {
   const f = fixture();
   for (const actor of [

@@ -20,6 +20,7 @@ import {usePageTemplate} from './lib/page-template';
 import TemplateIcon from './components/TemplateIcon.vue';
 import PasswordRecoveryPanel from './components/PasswordRecoveryPanel.vue';
 import McpAuthorizationPanel from './components/McpAuthorizationPanel.vue';
+import NoticeBrief from './components/NoticeBrief.vue';
 const AccountSettingsDialog=defineAsyncComponent(()=>import('./components/AccountSettingsDialog.vue'));
 const accountOpen=ref(false),providerChange=ref<ProviderChange|null>(null),assistantFeedback=ref('');
 const accountOpener=ref<HTMLElement|null>(null);
@@ -367,7 +368,7 @@ function schoolChanged(event: Event) {
           <button class="text-button" :disabled="store.loading" @click="store.applyUpdates()">显示更新</button>
         </div>
         <p v-else-if="store.refreshingSchool && store.items.length" class="muted small" role="status">已显示保存的公告，正在后台检查学校来源…</p>
-        <p class="muted small">浏览和采集不扣次数；生成摘要请使用 AI 阅读，每人每天 3 次。</p>
+        <p class="muted small">公告自动摘要使用独立额度；AI 阅读每人每天 3 次。</p>
 
 <p v-if="assistantFeedback" class="feed-update" role="status">{{assistantFeedback}}<button class="text-button" @click="navigate('ai')">查看已加入资料</button></p>
           <div class="section-head" id="notice-feed"><h2 class="section-title">校园动态</h2><span class="section-note">已读取 {{store.items.length}} 条<button class="text-button" :disabled="store.loading||store.refreshingSchool||!store.workspace.school" @click="store.refreshSchool()">{{store.refreshingSchool?'检查更新中…':'刷新'}}</button></span></div>
@@ -458,6 +459,7 @@ function schoolChanged(event: Event) {
             <p v-if="copied" class="small" role="status">{{ copied }}</p>
           </div>
           <p v-else class="muted small">这份资料未提供可打开的原文网址。</p>
+          <NoticeBrief v-if="store.detail.brief" :key="store.detail.id" :brief="store.detail.brief" :refresh="store.refreshBrief" />
           <div class="original-text">
             {{ store.detail.text || "尚未提供正文，请查看公告原文。" }}
           </div>

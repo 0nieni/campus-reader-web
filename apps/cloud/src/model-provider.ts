@@ -4,7 +4,7 @@ import type { AiProviderProtocol } from '@campus/contracts'
 import { reject as problem } from './errors'
 import { providerHttpCode } from './model-diagnostics'
 import { checkedHttpsEndpoint, checkedModel, checkedProtocol, publicAddress } from './provider-endpoints'
-import { modelHeaders, modelPayload, modelText } from './model-protocols'
+import { modelHeaders, modelPayload, modelText, modelUsage } from './model-protocols'
 export { publicAddress } from './provider-endpoints'
 
 export const PROVIDERS = {
@@ -21,7 +21,8 @@ export function validateConnection(c: Connection) {
   return provider
 }
 /** Credentials are used only by this call. Errors never include raw provider bodies, headers or key. */
-export async function userCompletion(c: Connection, guide: string, content: string, maxTokens = 1800, officialEndpoint?: string): Promise<string> {
+export interface CompletionResult {text:string;usage?:{inputTokens:number;outputTokens:number;totalTokens:number}}
+export async function modelCompletion(c: Connection, guide: string, content: string, maxTokens = 1800, officialEndpoint?: string): Promise<CompletionResult> {
   const provider = validateConnection(c); const target = checkedHttpsEndpoint(officialEndpoint || provider.endpoint)
   const protocol = c.protocol || 'openai-chat'
   if (guide.length + content.length > 22000) problem('CONTEXT_TOO_LONG', '本批资料过长，请减少选中文章。')
@@ -38,7 +39,7 @@ export async function userCompletion(c: Connection, guide: string, content: stri
   if (payload.length > 120000) problem('INPUT_TOO_LONG', '请求超过大小限制，请缩小资料范围。')
   return new Promise((resolve, reject) => {
     let settled = false
-    const finish = (error?: Error, text?: string) => { if (settled) return; settled = true; clearTimeout(deadline); if (error) reject(error); else resolve(text!) }
+    const finish = (error?: Error, result?: CompletionResult) => { if (settled) return; settled = true; clearTimeout(deadline); if (error) reject(error); else resolve(result!) }
     const error = (code: string, message: string) => Object.assign(new Error(message), { code })
     const request = https.request(target, { method: 'POST', agent: false, lookup: ((_host: string, options: { all?: boolean }, cb: any) => options?.all ? cb(null, [{ address: pinned.address, family: 4 }]) : cb(null, pinned.address, 4)) as any, headers: { 'content-type': 'application/json', 'content-length': payload.length, ...modelHeaders(protocol, c.apiKey) } }, response => {
       const status = response.statusCode ?? 0
@@ -54,7 +55,7 @@ export async function userCompletion(c: Connection, guide: string, content: stri
         if (settled) return
         try {
           const value = JSON.parse(Buffer.concat(chunks).toString('utf8'))
-          finish(undefined, modelText(protocol, value))
+          finish(undefined, {text:modelText(protocol, value),usage:modelUsage(protocol,value)})
         } catch (caught) { finish(caught instanceof Error && 'code' in caught ? caught : error('MODEL_FORMAT_INVALID', '服务商返回格式无法解析。')) }
       })
     })
@@ -63,3 +64,5 @@ export async function userCompletion(c: Connection, guide: string, content: stri
     request.end(payload)
   })
 }
+/** Existing AI reading and BYOK calls keep the original string interface. */
+export async function userCompletion(c:Connection,guide:string,content:string,maxTokens=1800,officialEndpoint?:string):Promise<string>{return(await modelCompletion(c,guide,content,maxTokens,officialEndpoint)).text;}

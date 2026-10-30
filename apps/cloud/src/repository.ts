@@ -44,6 +44,8 @@ export interface Repository {
   item(id: string): Promise<ItemRow | null>;
   /** Invoked only after scope/ownership checks. Existing imported bodies are retained. */
   material?(row: ItemRow): Promise<ItemRow>;
+  /** Read cache only; never starts extraction or model work. Caller authorizes. */
+  brief?(row:ItemRow,schoolId:string):Promise<import('../../../packages/contracts/src/notice-brief').NoticeBrief>;
   personalize?(row: ItemRow, ownerId: string): Promise<ItemRow>;
   setLabels?(ownerId: string, itemId: string, categories: string[] | null): Promise<void>;
 }

@@ -42,3 +42,12 @@ export function modelText(protocol: AiProviderProtocol, value: any): string {
   if (typeof text !== 'string' || !text.trim()) reject('MODEL_FORMAT_INVALID', '服务商未返回可阅读的文本，请检查模型及接口协议。');
   return text.trim();
 }
+/** Missing/malformed usage stays unknown; callers must retain their reservation. */
+export function modelUsage(protocol:AiProviderProtocol,value:any):{inputTokens:number;outputTokens:number;totalTokens:number}|undefined{
+ const usage=protocol==='gemini'?value?.usageMetadata:value?.usage;
+ const input=protocol==='openai-chat'?usage?.prompt_tokens:protocol==='gemini'?usage?.promptTokenCount:usage?.input_tokens;
+ const output=protocol==='openai-chat'?usage?.completion_tokens:protocol==='gemini'?usage?.candidatesTokenCount:usage?.output_tokens;
+ const total=protocol==='gemini'?usage?.totalTokenCount:usage?.total_tokens??(typeof input==='number'&&typeof output==='number'?input+output:undefined);
+ if(![input,output,total].every(v=>Number.isSafeInteger(v)&&v>=0&&v<=1000000)||total<=0||total<input+output)return;
+ return{inputTokens:input,outputTokens:output,totalTokens:total};
+}

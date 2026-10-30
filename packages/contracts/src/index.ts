@@ -56,6 +56,7 @@ export interface FeedFilters {
   period?: "7d" | "30d" | "90d" | "all";
 }
 export interface NoticeDetail extends Notice {
+  brief?:import('./notice-brief').NoticeBrief;
   materialArchive?: {expiresAt:string;attachmentNote:string;version:string;files:Array<{id:string;filename:string;kind:'article'|'attachment';state:string;message:string;collectedAt:string|null;expiresAt:string|null;characters:number;available:boolean}>};
   defaultCategories?: string[];
   categoriesCustomized?: boolean;
@@ -142,6 +143,7 @@ export interface GatewayActions extends AssistantActions, AiProviderActions {
     input: { schoolId: string; itemId: string };
     output: NoticeDetail;
   };
+  'feed.brief':{input:{schoolId:string;itemId:string};output:import('./notice-brief').NoticeBrief};
   "feed.labels.set": {input:{schoolId:string;itemId:string;categories:string[]|null};output:{categories:string[];customized:boolean}};
   "favorites.list": { input: { schoolId?: string; cursor?: string }; output: { items: Favorite[]; nextCursor: string | null } };
   "favorites.set": { input: { schoolId: string; itemId: string; saved: boolean }; output: { saved: boolean } };
