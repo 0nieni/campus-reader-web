@@ -15,7 +15,7 @@ it('saves, tests and collects a source without automatically generating summarie
  });
  const transport={call} as unknown as Transport;
  const wrapper=mount(WebsiteSourcesPanel,{props:{transport,schoolId:'bjtu',schoolName:'北京交通大学'}});await flushPromises();
- await wrapper.findAll('button').find(b=>b.text()==='我的来源')!.trigger('click');await flushPromises();
+  await wrapper.findAll('button').find(b=>b.text()==='管理我的来源')!.trigger('click');await flushPromises();
  expect(wrapper.text()).toContain('不提供免费摘要');
  await wrapper.get('button.primary').trigger('click');
  await wrapper.get('input[placeholder="例如：某学院通知公告"]').setValue('学院公开通知');
@@ -25,7 +25,7 @@ it('saves, tests and collects a source without automatically generating summarie
  expect(wrapper.text()).toContain('学院公开通知');expect(wrapper.text()).toContain('先测试连接');
  const button=(label:string)=>wrapper.findAll('button').find(b=>b.text()===label)!;
  await button('测试连接').trigger('click');await flushPromises();expect(wrapper.find('.source-preview').text()).toContain('学院活动公告');
- await button('立即采集').trigger('click');await flushPromises();expect(wrapper.emitted('changed')).toHaveLength(2);
+ await button('更新来源').trigger('click');await flushPromises();expect(wrapper.emitted('changed')).toHaveLength(2);
  expect(call.mock.calls.some(([action])=>action.startsWith('ai.')||action==='school.summarize')).toBe(false);
  const saved=call.mock.calls.find(([action])=>action==='sources.save')![1];expect(saved).not.toHaveProperty('ownerOpenid');expect(saved.schoolId).toBe('bjtu');
  wrapper.unmount();

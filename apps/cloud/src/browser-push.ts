@@ -1,9 +1,15 @@
 import {createHash,createPublicKey} from 'node:crypto';
 import webpush from 'web-push';
 import {request} from 'node:https';
-import type {BrowserPushSubscription} from '@campus/contracts';
+import type {BrowserPushSubscription,Reminder} from '@campus/contracts';
 import {reject} from './errors';
 export interface PushConfig { publicKey:string; privateKey:string; subject:string }
+export interface PushMessage {title:string;body:string}
+export function reminderPushMessage(reminder:Pick<Reminder,'title'|'label'|'dueAt'>):PushMessage{
+ const due=reminder.dueAt?Date.parse(reminder.dueAt):NaN;
+ const deadline=Number.isFinite(due)?new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date(due)).replace(/\//g,'-'):'未设置';
+ return{title:reminder.title.trim().slice(0,300)||'校园阅览室',body:`${reminder.label}\n到期时间：${deadline}（北京时间）`};
+}
 export const endpointHash=(endpoint:string)=>createHash('sha256').update(endpoint).digest('hex');
 export function checkedSubscription(value:unknown):BrowserPushSubscription {
   const input=value as BrowserPushSubscription;
@@ -19,11 +25,11 @@ export function checkedSubscription(value:unknown):BrowserPushSubscription {
   try{createPublicKey({key:{kty:'EC',crv:'P-256',x:key.subarray(1,33).toString('base64url'),y:key.subarray(33).toString('base64url')},format:'jwk'});}catch{reject('VALIDATION_FAILED','推送公钥无效。');}
   return{endpoint:endpoint.href,keys:{p256dh:input.keys.p256dh,auth:input.keys.auth}};
 }
-export function createPushRequest(subscription:BrowserPushSubscription,config:PushConfig,tag:string){
-  return webpush.generateRequestDetails(checkedSubscription(subscription),JSON.stringify({title:'校园阅览室',body:'你有新的提醒，请登录提醒中心查看。',tag,url:'/?view=reminders'}),{vapidDetails:config,TTL:86400,urgency:'high',topic:tag.slice(0,32)});
+export function createPushRequest(subscription:BrowserPushSubscription,config:PushConfig,tag:string,message:PushMessage={title:'校园阅览室',body:'你有新的提醒，请登录提醒中心查看。'}){
+  return webpush.generateRequestDetails(checkedSubscription(subscription),JSON.stringify({...message,tag,url:'/?view=reminders'}),{vapidDetails:config,TTL:86400,urgency:'high',topic:tag.slice(0,32)});
 }
-export async function sendBrowserPush(subscription:BrowserPushSubscription,config:PushConfig,tag:string){
-  const details=createPushRequest(subscription,config,tag);
+export async function sendBrowserPush(subscription:BrowserPushSubscription,config:PushConfig,tag:string,message?:PushMessage){
+  const details=createPushRequest(subscription,config,tag,message);
   // An absolute deadline, not just a socket-idle timeout. HTTPS does not follow
   // redirects; errors contain only a status code, never an endpoint or key.
   await new Promise<void>((resolve,reject)=>{

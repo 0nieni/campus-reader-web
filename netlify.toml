@@ -23,6 +23,15 @@
 [functions.reminders]
   schedule = "0 1,12 * * *"
 
+[functions.api]
+  external_node_modules = ["unpdf", "word-extractor", "xlsx", "yauzl"]
+[functions.material-collect-background]
+  external_node_modules = ["unpdf", "word-extractor", "xlsx", "yauzl"]
+[functions.material-file]
+  external_node_modules = ["unpdf", "word-extractor", "xlsx", "yauzl"]
+[functions.material-schedule]
+  schedule = "45 18 * * *"
+
 # The Netlify monorepo package directory is apps/web. Resolve migrations from
 # the repository base explicitly instead of package-directory auto-detection.
 [database.migrations]
@@ -34,6 +43,11 @@
 [context.AI_module.database.migrations]
   path = "netlify/database/pr14-migrations"
 
+# PR17's preview applied provider profiles before main's material archive.
+# Keep its applied versions; only that preview appends the archive afterward.
+[context."codex/ai-companion-model-settings".database.migrations]
+  path = "netlify/database/pr17-migrations"
+
 [[headers]]
   for = "/*"
   [headers.values]
@@ -44,3 +58,30 @@
   for = "/reminder-worker.js"
   [headers.values]
     Cache-Control = "no-cache"
+
+# Remote MCP and its OAuth discovery/authorization endpoints.
+[[redirects]]
+  from = "/mcp"
+  to = "/.netlify/functions/mcp"
+  status = 200
+  force = true
+[[redirects]]
+  from = "/oauth/*"
+  to = "/.netlify/functions/mcp-oauth/:splat"
+  status = 200
+  force = true
+[[redirects]]
+  from = "/.well-known/oauth-authorization-server"
+  to = "/.netlify/functions/mcp-oauth/authorization-metadata"
+  status = 200
+  force = true
+[[redirects]]
+  from = "/.well-known/oauth-protected-resource"
+  to = "/.netlify/functions/mcp-oauth/resource-metadata"
+  status = 200
+  force = true
+[[redirects]]
+  from = "/.well-known/oauth-protected-resource/mcp"
+  to = "/.netlify/functions/mcp-oauth/resource-metadata"
+  status = 200
+  force = true

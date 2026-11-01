@@ -42,6 +42,7 @@ it('renders saved notices while both the directory and source refresh are unreso
  const wrapper=mount(App,{props:{transport,configurationIssues:[]}});await flushPromises();
  expect(wrapper.text()).toContain('a公告');expect(wrapper.text()).toContain('正在后台检查');
  expect(wrapper.find('.notice-scroll').attributes('aria-busy')).toBe('false');
+ await wrapper.get('.profile-mini').trigger('click');await vi.dynamicImportSettled();await flushPromises();await wrapper.findAll('.account-tabs button')[1].trigger('click');await flushPromises();
  expect(wrapper.find('#school option[value="__request__"]').exists()).toBe(false);
  catalogue.resolve({schools:[a,b],nextCursor:null});source.resolve(ready);await flushPromises();
  expect(wrapper.find('#school option[value="__request__"]').exists()).toBe(true);wrapper.unmount();

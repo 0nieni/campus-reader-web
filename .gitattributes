@@ -1,3 +1,6 @@
 # Applied migration checksums include line endings. Preserve exact SQL bytes
 # across Windows/Linux checkouts; CRLF is intentional in older migration files.
 netlify/database/**/*.sql -text whitespace=cr-at-eol
+# Preserve the exact user-supplied template CSS bytes and their integrity hashes.
+apps/web/src/template-login.css -text
+apps/web/src/template-portal.css -text

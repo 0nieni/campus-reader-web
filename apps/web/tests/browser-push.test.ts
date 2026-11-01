@@ -21,3 +21,17 @@ it('asks permission only on the explicit call and unregisters an unbound subscri
  const call=vi.fn(async()=>{throw Error('synthetic API failure');});expect(Notification.requestPermission).not.toHaveBeenCalled();
  await expect(enablePush({call} as unknown as Transport,'AAAA')).rejects.toThrow('synthetic API failure');expect(Notification.requestPermission).toHaveBeenCalledTimes(1);expect(subscribe).toHaveBeenCalledTimes(1);expect(unsubscribe).toHaveBeenCalledTimes(1);
 });
+it('rebinds an existing browser/app subscription without destroying the shared endpoint',async()=>{
+ const unsubscribe=vi.fn(async()=>true),subscription={endpoint:'https://fcm.googleapis.com/shared',toJSON:()=>({keys:{auth:'fake',p256dh:'fake'}}),unsubscribe};
+ const worker={pushManager:{getSubscription:async()=>subscription,subscribe:vi.fn()}},register=vi.fn(async()=>worker);
+ property('serviceWorker',{register,ready:Promise.resolve(worker)});const call=vi.fn(async()=>({}));
+ await expect(enablePush({call} as unknown as Transport,'AAAA')).resolves.toBe(subscription);
+ expect(unsubscribe).not.toHaveBeenCalled();expect(worker.pushManager.subscribe).not.toHaveBeenCalled();
+ expect(call).toHaveBeenCalledExactlyOnceWith('reminders.push.subscribe',expect.objectContaining({subscription:expect.objectContaining({endpoint:subscription.endpoint})}));
+});
+it('keeps an existing subscription intact if repairing its server binding fails',async()=>{
+ const unsubscribe=vi.fn(async()=>true),subscription={endpoint:'https://fcm.googleapis.com/shared',toJSON:()=>({keys:{auth:'fake',p256dh:'fake'}}),unsubscribe};
+ const worker={pushManager:{getSubscription:async()=>subscription,subscribe:vi.fn()}},register=vi.fn(async()=>worker);
+ property('serviceWorker',{register,ready:Promise.resolve(worker)});const call=vi.fn(async()=>{throw Error('synthetic API failure');});
+ await expect(enablePush({call} as unknown as Transport,'AAAA')).rejects.toThrow('synthetic API failure');expect(unsubscribe).not.toHaveBeenCalled();
+});

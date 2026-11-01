@@ -7,7 +7,7 @@ import {schoolSources,publicSourceId} from './school-sources';
 import { AppError } from './errors';
 import {hiddenFeedSources} from './source-feed-preferences';
 
-export function schoolDirectory(pool: SqlPool, repo: Repository, reader: PageReader = readSchoolPage, now = Date.now, options:{trackActivity?:boolean}={}) {
+export function schoolDirectory(pool: SqlPool, repo: Repository, reader: PageReader = readSchoolPage, now = Date.now, options:{trackActivity?:boolean;archive?:import('./material-archive').MaterialArchive}={}) {
   const configVersion=(config:ReturnType<typeof schoolSources>)=>createHash('sha256').update(PARSER_VERSION+JSON.stringify(config)).digest('hex');
   async function sources(id:string,owner?:string):Promise<SchoolSourceCatalogue> {
     const school=await repo.school(id);
@@ -62,7 +62,7 @@ export function schoolDirectory(pool: SqlPool, repo: Repository, reader: PageRea
     const items=new Map<string,Record<string,unknown>>();const sourceBodies:Record<string,unknown>[]=[];
     for(const outcome of outcomes) {
       if(!outcome.rows.length)continue;
-      const source=outcome.source,sourceId=publicSourceId(id,source.key),name=`${source.name} · ${source.label}`;
+      const source=outcome.source,sourceId=publicSourceId(id,source.key),name=source.label.startsWith(source.name)?source.label:`${source.name} · ${source.label}`;
       sourceBodies.push({_id:sourceId,key:sourceId,name,scope:'school',schoolIds:[id],aiProcessing:'allow',entryUrl:source.announcementUrl});
       for(const row of outcome.rows)if(!items.has(row.id))items.set(row.id,{_id:row.id,title:row.title,originalUrl:row.url,canonicalUrl:row.url,publishedAt:row.publishedAt,status:'published',scope:'school',schoolIds:[id],sourceId,sourceName:name,aiProcessing:'allow',categories:[/竞赛|比赛|大赛/.test(row.title)?'competition':/奖学金|助学金|奖助学/.test(row.title)?'scholarship':/讲座|研讨会|论坛/.test(row.title)?'academic':/活动|报名/.test(row.title)?'activity':'school'],discoveredAt:at,createdAt:at});
     }
@@ -85,6 +85,9 @@ export function schoolDirectory(pool: SqlPool, repo: Repository, reader: PageRea
     return result;
   }
   async function material(row: ItemRow): Promise<ItemRow> {
+    if(options.archive&&row.sourceId?.startsWith('directory_')){
+      const source=await materialSource(row);if(source)return options.archive.collect(row,source,reader,{deadline:now()+18000});
+    }
     if(row.contentText?.trim()||!row.sourceId?.startsWith('directory_'))return row;
     const id=row.schoolIds?.[0];
     if(!id||row.scope!=='school'||row.ownerOpenid||!row.originalUrl)return row;
@@ -97,5 +100,6 @@ export function schoolDirectory(pool: SqlPool, repo: Repository, reader: PageRea
     await pool.query("UPDATE campus_documents SET body=body || $2::jsonb WHERE collection='items' AND id=$1",[row._id,JSON.stringify(patch)]);
     return {...row,...patch};
   }
-  return {refresh,material,sources};
+  async function materialSource(row:ItemRow){const id=row.schoolIds?.[0];if(!id)return null;return(await configuration(id)).sources.find(s=>publicSourceId(id,s.key)===row.sourceId)||null;}
+  return {refresh,material,materialSource,sources};
 }

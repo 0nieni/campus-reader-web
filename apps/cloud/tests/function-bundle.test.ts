@@ -7,7 +7,7 @@ test('Netlify v2 bundles workspace runtime code without importing TypeScript pac
   // Netlify v2's transformer bundles relative files but keeps package imports
   // external. A plain esbuild bundle (without packages: external) masks this
   // production cold-start failure for our TypeScript-only workspace package.
-  for (const name of ['api', 'auth', 'cleanup', 'identity', 'reminders','reminder-delivery','reminder-tick','reminder-email']) {
+  for (const name of ['api', 'auth', 'guest', 'mcp', 'mcp-oauth', 'mcp-management', 'cleanup', 'identity', 'reminders','reminder-delivery','reminder-tick','reminder-email','material-file','material-schedule','material-collect-background']) {
     const compiled = await build({
       entryPoints: [fileURLToPath(new URL(`../../../netlify/functions/${name}.mts`, import.meta.url))],
       bundle: true, packages: 'external', platform: 'node', format: 'esm',
@@ -20,5 +20,8 @@ test('Netlify v2 bundles workspace runtime code without importing TypeScript pac
     if (name === 'api') {
       assert.ok(Object.keys(compiled.metafile!.inputs).some(path => path.replace(/\\/g, '/').endsWith('packages/contracts/src/index.ts')));
     }
+    const hasLexmount=Object.keys(compiled.metafile!.inputs).some(path=>path.replace(/\\/g,'/').endsWith('/lexmount-pages.ts'));
+    if(['api','material-collect-background'].includes(name))assert.equal(hasLexmount,true,`${name} must use the Lexmount reader`);
+    if(name==='cleanup')assert.equal(hasLexmount,false,'short cleanup must not start rendered collection');
   }
 });

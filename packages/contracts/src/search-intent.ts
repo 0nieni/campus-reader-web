@@ -1,5 +1,5 @@
-// Only these public announcement topics may leave the app as a search query.
-// Never return the question, saved interests, history, or private details.
+// Fixed topics bound implicit campus discovery and sensitive explicit-subject fallback.
+// Explicit public-web commands retain only their bounded current search subject.
 const searchTopics = ['编程', '创新创业', '创新', '科研', '项目', '竞赛', '比赛', '讲座', '学术', '论坛', '招聘', '实习', '就业', '奖学金', '助学金', '交流', '留学', '志愿', '社团', '活动', '招募', '申请', '报名', '通知', '公告', '蓝桥杯', '挑战杯', '数学建模', '大创', '四六级', '英语四级', '英语六级', '计算机等级', '考研', '保研', '交换生'];
 
 function isNonAction(question: string): boolean {
@@ -23,13 +23,22 @@ export function isSearchCapabilityQuestion(question: string): boolean {
   return /^(?:请问|想问一下|请告诉我)?(?:你|这里|这个助手|当前助手|系统)?(?:现在|目前|当前)?(?:是否)?(?:支持|可以|能不能|能否|能|可不可以)(?:联网|上网)(?:搜索|检索|查询)?(?:吗|么)?[?？。！!]*$/.test(text);
 }
 
-/** Explicit commands and campus announcement discovery; returns allowlisted topics only. */
+/** Explicit public-web subjects plus topic-only natural campus discovery. */
 export function chatSearchQuery(question: string): string | null {
   const text = unwrapQuotedPublicTopics(question.trim());
   if (!text || isNonAction(text) || isSearchCapabilityQuestion(text)) return null;
   const topics = searchTopics.filter(word => text.includes(word)).join(' ');
-  const explicit = /^(?:(?:请|麻烦|帮我|再|重新|也|替我|给我|能否|能不能|可以|帮忙|你|能|去|在网上)\s*)*(?:联网(?:搜索|搜|查|找)|上网(?:搜索|搜|查|找)|搜索|搜一下|搜一搜|搜搜|查一下|查一查|查查|查找|检索|找找|找一下|找一找)/.test(text);
-  if (explicit) return topics || '通知公告 报名';
+  const explicit = /^(?:(?:请|麻烦|帮我|再|重新|也|替我|给我|能否|能不能|可以|帮忙|你|能|去|在网上)\s*)*(?:(?:联网|上网)(?:搜索|查一下|查一查|查查|查找|检索|搜一下|搜一搜|搜搜|找一下|找一找|找找|搜|查|找)|搜索|搜一下|搜一搜|搜搜|查一下|查一查|查查|查找|检索|找找|找一下|找一找)/.exec(text);
+  if (explicit) {
+    // Preserve main's explicit public-web feature without sending later personal clauses.
+    const subject = text.slice(explicit[0].length).split(/[，,。；;\n\r]/)[0]!.trim().replace(/[？?！!]+$/, '').slice(0, 200);
+    // Recent campus discovery can use an explicit search verb too. Send only
+    // public topics plus a marker expanded from the authorized server school.
+    const campusTopics = searchTopics.filter(word => subject.includes(word)).join(' ');
+    if (campusTopics && /^(?:最近|近期|这几天|这周|本周|这月|本月|现在|今天|目前)\s*(?:本校|我校|我们学校|我们校|咱们学校|咱们校|学校|校园)/.test(subject)) return `本校 ${campusTopics}`;
+    if (subject && !/@|https?:\/\/|\b(?:sk-|tvly-)|\b\d{11,}\b|密钥|密码|邮箱|手机号|身份证|我的|我是|我在|秘密/.test(subject)) return subject;
+    return searchTopics.filter(word => subject.includes(word)).join(' ') || '通知公告 报名';
+  }
 
   // Discovery needs a campus scope and a request for new/recent possibilities.
   // Questions about an existing notice's date, requirements, or materials stay local.
@@ -38,5 +47,5 @@ export function chatSearchQuery(question: string): string | null {
   const campus = /^(?:(?:请|麻烦|帮我|替我|给我|你|能不能|能否|可以|能|看看|看下|了解一下)\s*)*(?:(?:最近|近期|这几天|这周|本周|这月|本月|现在|今天|目前)\s*)?(?:本校|我校|我们学校|我们校|咱们学校|咱们校|学校|校园)/.test(request);
   const current = /最近|近期|这几天|这周|本周|这月|本月|现在|今天|目前|新/.test(request);
   const possibilities = /有没有|有什么|有哪些|有.{0,20}[吗么]/.test(request);
-  return campus && current && possibilities ? topics : null;
+  return campus && current && possibilities ? `本校 ${topics}` : null;
 }

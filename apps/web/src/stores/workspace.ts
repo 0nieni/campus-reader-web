@@ -35,6 +35,7 @@ export function workspaceStore(transport: Transport) {
     let detailEpoch = 0;
     let sessionEpoch = 0, schoolEpoch = 0;
     let selectingSchool = false;
+    let signingIn=false;
     let feedRequest = 0;
     let activeFeed: Promise<void> | null = null;
     let sourceJob: { ticket:number; promise:Promise<void> } | null = null;
@@ -229,6 +230,7 @@ export function workspaceStore(transport: Transport) {
         const session = await transport.call("session.get", {});
         if (ticket !== sessionEpoch) return;
         workspace.value = session;
+        auth.value = session.identity.kind==='guest'?session.identity:restored;
         loading.value=false;
         await Promise.all([loadCatalogue(),workspace.value.school?refreshSchool(true):Promise.resolve()]);
       } catch (caught) {
@@ -238,21 +240,33 @@ export function workspaceStore(transport: Transport) {
       }
     }
     async function signIn(username: string, password: string) {
-      const ticket = ++epoch;
+      if(signingIn)return;signingIn=true;
+      const ticket = auth.value?.kind==='guest'?epoch:++epoch;
       error.value = "";
       loading.value = true;
       try {
-        await transport.signIn(username, password);
+        const account=await transport.signIn(username, password);
         if (ticket !== epoch) return;
+        if(auth.value?.kind==='guest'){
+          updateAccount(account);return;
+        }
         loading.value = false;
         await connect();
       } catch (caught) {
         if (ticket === epoch) failure(caught);
       } finally {
+        signingIn=false;
         if (ticket === epoch) loading.value = false;
       }
     }
     async function signOut() {
+      if(auth.value?.kind==='guest'){
+        error.value='';loading.value=true;
+        try{await transport.signOut();updateAccount(null);}
+        catch{error.value='AI账号退出未成功，请联网后重试。';}
+        finally{loading.value=false;}
+        return;
+      }
       clear();
       error.value = "";
       loading.value = true;
@@ -305,9 +319,9 @@ export function workspaceStore(transport: Transport) {
         if (ticket === epoch && request === detailEpoch) {
           detail.value = result;
           // Learning is enforced by the server's opt-in; never delay article display.
-          void transport.call('ai.behavior', { schoolId, itemId }).catch(() => {});
+          if(workspace.value?.capabilities.ai)void transport.call('ai.behavior', { schoolId, itemId }).catch(() => {});
           const row=items.value.find(row=>row.id===itemId);
-          if(row){row.summary=result.summary;rememberFeed(schoolId);}
+          if(row){row.title=result.title;row.summary=result.summary;row.excerpt=result.excerpt;rememberFeed(schoolId);}
         }
       } catch (caught) {
         if (ticket === epoch && request === detailEpoch) failure(caught);
@@ -321,8 +335,18 @@ export function workspaceStore(transport: Transport) {
       detail.value = null;
       detailLoading.value = false;
     }
+    function updateAccount(session:AuthSession|null){
+      if(auth.value?.kind!=='guest')return;
+      const account=session?{uid:session.uid,username:session.username}:null;
+      auth.value={...auth.value,account};
+      if(workspace.value){workspace.value.identity={...auth.value};workspace.value.capabilities.ai=Boolean(account);}
+    }
     function watchSession() {
       return transport.onSessionChange((session) => {
+        if(auth.value?.kind==='guest'){
+          if(session?.kind==='guest')return;
+          updateAccount(session);return;
+        }
         if (!session || (auth.value && auth.value.uid !== session.uid)) {
           const hadSession = Boolean(auth.value || workspace.value);
           clear();

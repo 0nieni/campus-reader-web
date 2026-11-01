@@ -12,6 +12,7 @@ import {reminderEmail,reminderOrigin} from '../src/reminder-email';
 import {createEmailPage} from '../src/reminder-email-page';
 import {directMailConfig,directMailSender,type MailResult} from '../src/directmail';
 import {replaceWake,type WakeStore,type WakeValue,minuteTick} from '../src/reminder-index';
+import {reminderPushMessage,type PushMessage} from '../src/browser-push';
 function memoryWake():WakeStore {let value:WakeValue|null=null,version=0;return{async read(){return value?{value:structuredClone(value),etag:String(version)}:null;},async write(next,etag){if(etag!==(value?String(version):null))return false;value=structuredClone(next);version++;return true;}};}
 const device=()=>{const ec=createECDH('prime256v1');ec.generateKeys();return{endpoint:'https://fcm.googleapis.com/fcm/send/synthetic-aliyun',keys:{p256dh:ec.getPublicKey().toString('base64url'),auth:randomBytes(16).toString('base64url')}};};
 test('mail configuration is explicit, region/version matched, capped and independent from VAPID',()=>{
@@ -39,10 +40,12 @@ test('email links do not consume tokens on GET or in preview and require a same-
 test('FC scheduling, independent channels, verification, quota and recovery use only synthetic SQL and senders',async t=>{
  const server=new NetlifyDB({logger(){}}),connectionString=await server.start(),database=getDatabase({connectionString}),native=database.pool;
  (native as any).options.max=1;const pool=native as unknown as SqlPool,repo=postgresRepository(pool),db=postgresStorage(pool),index=memoryWake();
- let clock=Math.floor(Date.now()/60000)*60000,counter=0,mode:MailResult['state']='accepted',invalid=false,pushMode='accepted',suppressed=false,identityAvailable=true,throwMail=false;
- const addresses=new Map([['fc_a','a@example.test'],['fc_b','b@example.test']]),messages:{to:string;subject:string;text:string}[]=[],pushes:string[]=[];
+ // Start at Beijing noon: this test advances seven minutes while asserting a
+ // same-day budget, so wall-clock runs near midnight must not reset that budget.
+ let clock=Date.parse(new Date().toISOString().slice(0,10)+'T04:00:00.000Z'),counter=0,mode:MailResult['state']='accepted',invalid=false,pushMode='accepted',suppressed=false,identityAvailable=true,throwMail=false;
+ const addresses=new Map([['fc_a','a@example.test'],['fc_b','b@example.test']]),messages:{to:string;subject:string;text:string}[]=[],pushes:string[]=[],pushMessages:(PushMessage|undefined)[]=[];
  const mail=reminderEmail(pool,{now:()=>clock,resolveIdentity:async id=>{if(!identityAvailable)throw Error('synthetic outage');return{email:addresses.get(id)};},sender:{send:async(to,subject,text)=>{messages.push({to,subject,text});if(throwMail)throw Error('synthetic interruption after request');return{state:mode,id:mode==='accepted'?'synthetic-env-'+messages.length:undefined,invalid};},suppressed:async()=>suppressed}});
- const options={now:()=>clock,minuteMode:true,aliyun:{index,email:mail},push:{publicKey:'synthetic-public',privateKey:'synthetic-private',subject:reminderOrigin},send:async(subscription:any)=>{pushes.push(subscription.endpoint);if(pushMode!=='accepted')throw Object.assign(Error('synthetic push'),pushMode==='temporary'?{statusCode:503}:{});}};
+ const options={now:()=>clock,minuteMode:true,aliyun:{index,email:mail},push:{publicKey:'synthetic-public',privateKey:'synthetic-private',subject:reminderOrigin},send:async(subscription:any,_config:unknown,_tag:string,message?:PushMessage)=>{pushes.push(subscription.endpoint);pushMessages.push(message);if(pushMode!=='accepted')throw Object.assign(Error('synthetic push'),pushMode==='temporary'?{statusCode:503}:{});}};
  const service=reminderService(pool,options),identity=(owner='fc_a')=>({uid:owner,dataOwnerId:owner,legacyLinked:false});
  const call=async(action:string,input:Record<string,unknown>={},owner='fc_a')=>{const result=await createGateway(repo,{ownerUid:owner,dataOwnerId:owner},()=>clock,{reminders:service})({action,input},{uid:owner,isAnonymous:false});assert.ok(result.ok,JSON.stringify(result));return result.data as any;};
  const save=async(channels={browser:false,email:true},owner='fc_a',minutes=5,days=[0])=>{
@@ -64,10 +67,10 @@ test('FC scheduling, independent channels, verification, quota and recovery use 
    await mail.handle('reminders.email.enable',{enabled:true},'fc_a');
    await service.aliyun!.register();assert.equal((await index.read())!.value.nextAt,null,'enabled mail without accepted sends must not schedule SQL maintenance');
   });
-  await t.test('mail-only users without devices or VAPID register and receive a generic reminder independently of inbox read state',async()=>{
+  await t.test('mail-only users receive the selected announcement and deadline independently of inbox read state',async()=>{
    const r=await save(),state=await call('reminders.state');assert.equal(state.deviceCount,0);assert.equal(r.channelDelivery.email.status,'scheduled');
    assert.ok((await index.read())!.value.nextAt!<=Date.parse(r.dueAt));clock=Date.parse(r.dueAt)+1000;await call('reminders.read',{});const before=messages.length;
-   const noPush=reminderService(pool,{...options,push:undefined});await noPush.aliyun!.tick({budgetMs:90000});assert.equal(messages.length,before+1);assert.equal(pushes.length,0);assert.ok(messages.at(-1)!.text.includes('北京时间'));assert.ok(!messages.at(-1)!.text.includes('合成不可外发'));await tick();assert.equal(messages.length,before+1);
+   const noPush=reminderService(pool,{...options,push:undefined});await noPush.aliyun!.tick({budgetMs:90000});assert.equal(messages.length,before+1);assert.equal(pushes.length,0);assert.ok(messages.at(-1)!.text.includes(r.title));assert.ok(messages.at(-1)!.text.includes(reminderPushMessage(r).body));await tick();assert.equal(messages.length,before+1);
    assert.equal((await noPush.handle('reminders.state',{},identity()) as any).reminders[0].channelDelivery.email.status,'accepted');
   });
   await t.test('verification and test attempts consume quota with 60-second and three-per-day verification limits',async()=>{
@@ -76,7 +79,7 @@ test('FC scheduling, independent channels, verification, quota and recovery use 
   });
   await t.test('both channels finish separately and a confirmed temporary mail failure retries without duplicating browser delivery',async()=>{
    await clear();await call('reminders.push.subscribe',{subscription:device()});const r=await save({browser:true,email:true}),beforeMail=messages.length,beforePush=pushes.length;clock=Date.parse(r.dueAt)+1000;mode='temporary';await tick();
-   assert.equal(messages.length,beforeMail+1);assert.equal(pushes.length,beforePush+1);let state=await call('reminders.state');assert.equal(state.reminders[0].channelDelivery.browser.status,'accepted');assert.equal(state.reminders[0].channelDelivery.email.status,'retrying');
+   assert.equal(messages.length,beforeMail+1);assert.equal(pushes.length,beforePush+1);assert.deepEqual(pushMessages.at(-1),reminderPushMessage(r));let state=await call('reminders.state');assert.equal(state.reminders[0].channelDelivery.browser.status,'accepted');assert.equal(state.reminders[0].channelDelivery.email.status,'retrying');
    clock+=61000;mode='accepted';await tick();assert.equal(messages.length,beforeMail+2);assert.equal(pushes.length,beforePush+1);await tick();assert.equal(messages.length,beforeMail+2);
   });
   await t.test('unknown email outcomes are durable and never automatically resent',async()=>{
@@ -128,6 +131,10 @@ test('FC scheduling, independent channels, verification, quota and recovery use 
    const job=(await pool.query('SELECT id FROM campus_reminder_jobs WHERE reminder_id=$1',[r.id])).rows[0],binding=(await pool.query("SELECT endpoint_hash,binding_id FROM campus_push_devices WHERE owner_id='fc_a'")).rows[0];
    clock=Date.parse(r.dueAt)+1000;await pool.query("UPDATE campus_reminder_jobs SET state='processing',lease_until=$2 WHERE id=$1",[job.id,new Date(clock-1000).toISOString()]);await pool.query("INSERT INTO campus_reminder_channel_receipts(job_id,channel,target_id,binding_id,state,created_at) VALUES($1,'browser',$2,$3,'sending',$4)",[job.id,binding.endpoint_hash,binding.binding_id,new Date(clock-2000).toISOString()]);await service.aliyun!.register();await tick();assert.equal(pushes.length,before);assert.equal((await call('reminders.state')).reminders[0].channelDelivery.browser.status,'unknown');
    await clear();r=await save({browser:true,email:false});clock=Date.parse(r.dueAt)+1000;await Promise.all([tick(),tick()]);assert.equal(pushes.length,before+1);
+  });
+  await t.test('an early reminder shows the actual deadline rather than the earlier sending time',async()=>{
+   await clear();const r=await save({browser:true,email:false},'fc_a',2880,[1,0]);clock=Date.parse(r.dueAt)-86400000+1000;const before=pushes.length;await tick();
+   assert.equal(pushes.length,before+1);assert.deepEqual(pushMessages.at(-1),reminderPushMessage(r));
   });
   await t.test('100 synthetic due tasks are bounded, resume without duplicate sends, and leave no SQL wake loop',async()=>{
    await clear();const before=pushes.length;

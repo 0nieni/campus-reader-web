@@ -2,7 +2,12 @@
 export interface AuthSession {
   uid: string;
   username: string | null;
+  kind?:'guest'|'account';
+  account?:{uid:string;username:string|null}|null;
 }
+export type {AnonymousState,AnonymousTransfer,AnonymousImport,AnonymousTransport} from './anonymous';
+export {mcpScopes} from './mcp';
+export type {McpScope,McpConnection,McpConnections,McpConsent,McpTransport} from './mcp';
 export interface School {
   id: string;
   name: string;
@@ -13,6 +18,9 @@ export interface School {
 }
 export interface SourceCollectionStats {newCount:number;existingCount:number;failedSources:number;skippedCount:number}
 export interface SourceDisplayState {total:number;shown:number;hidden:number}
+export interface InitialSchoolCollection {initialCollection?:{state:'ready'|'checking'|'unavailable';message:string}}
+export interface SourceCatalogueEntry {id:string;name:string;kind:'school'|'public'|'personal';schoolId:string;url:string|null;categories:string[];showInFeed:boolean;collectable:boolean;state:'unchecked'|'ready'|'unavailable';checkedAt:string|null;count:number|null;message:string;verifiedAt?:string;nextRefreshAt?:string|null;errorCode?:string|null;collectionStatus?:'verified'|'pending'|'entry_only';directory?:{number:number;entryType:string;note:string}}
+export interface SourceCatalogue {sources:SourceCatalogueEntry[];total:number;shown:number;hidden:number}
 export interface SchoolSync { state: 'ready' | 'checking' | 'unavailable'; count: number; checkedAt: string | null; message: string; changed?:boolean; coverage?:string;stats?:SourceCollectionStats; sources?:Array<{name:string;url:string;state:'ready'|'unavailable';count:number;message:string;errorCode?:string|null;stats?:SourceCollectionStats}> }
 export interface SchoolSourceCatalogue {
   school: School;
@@ -33,6 +41,7 @@ export interface Notice {
   publishedAt: string | null;
   categories: string[];
   summary: string | null;
+  excerpt?: string | null;
 }
 export interface NoticePage {
   items: Notice[];
@@ -47,6 +56,7 @@ export interface FeedFilters {
   period?: "7d" | "30d" | "90d" | "all";
 }
 export interface NoticeDetail extends Notice {
+  materialArchive?: {expiresAt:string;attachmentNote:string;version:string;files:Array<{id:string;filename:string;kind:'article'|'attachment';state:string;message:string;collectedAt:string|null;expiresAt:string|null;characters:number;available:boolean}>};
   defaultCategories?: string[];
   categoriesCustomized?: boolean;
   bookmarked?: boolean;
@@ -58,6 +68,8 @@ export interface Favorite { itemId: string; schoolId: string; schoolName: string
 export interface WebsiteSourceInput {name:string;entryUrl:string;type:'html_list'|'html_detail'|'rss'|'json_api';categories:string[];intervalMinutes:number;selectors:Record<string,string>;allowAi:boolean;authorized:boolean}
 export interface WebsiteSource extends WebsiteSourceInput {id:string;enabled:boolean;lastSuccessAt:string|null;message:string;count:number;showInFeed?:boolean;nextRefreshAt?:string|null;lastAttemptAt?:string|null;lastErrorCode?:string|null;lastCollection?:SourceCollectionStats|null}
 export interface AiConnection { provider: "deepseek" | "openai"; model: string; apiKey: string }
+export type { AiProviderProtocol, AiProviderRef, AiSavedProvider, AiProviderSelection, AiProviderState, AiProviderSave } from './ai-providers';
+import type { AiProviderActions, AiProviderRef } from './ai-providers';
 export interface AiQuota { day: string; timezone: "Asia/Shanghai"; limit: number; used: number; held: number; remaining: number; resetsAt: string }
 export interface ReadingDocument { reference: string; itemId: string; schoolId: string | null; title: string; originalUrl: string | null; version: string; markdown: string }
 export interface ReadingPackage { docs: ReadingDocument[]; guide: string; manifest: Record<string, unknown>; batches: number; maxCalls: number; fingerprint: string }
@@ -66,10 +78,11 @@ export interface ReadingTask {
   task: "summary" | "outline" | "answer"; state: "ready" | "running" | "complete" | "failed" | "uncertain" | "cancelled";
   step: number; totalSteps: number; title: string; result: string | null; message: string; failureCode?: string;
   expireAt: string; createdAt: string; quotaHeld: boolean;
+  providerProfile?: AiProviderRef;
 }
 export interface AiStartInput {
   schoolId: string; itemIds: string[]; requestId: string; service: "official" | "byok";
-  provider?: "deepseek" | "openai"; model?: string; task: "summary" | "outline" | "answer"; question?: string; fingerprint?: string;
+  provider?: "deepseek" | "openai"; model?: string; providerProfile?: AiProviderRef; task: "summary" | "outline" | "answer"; question?: string; fingerprint?: string;
 }
 export type { AiPreferences, AiMemorySlot, AiMemoryItem, AiMemoryState, RecommendedNotice, AiRecommendations, AiSearchErrorCode, ChatReference, AiChatTurn, AiConversation } from './assistant';
 import type { AssistantActions } from './assistant';
@@ -81,10 +94,10 @@ export interface Reminder extends Omit<ReminderInput,'dueAt'> { id:string; title
 export type ScheduledReminder=Reminder&{dueAt:string};
 export interface NoticeWatch { id:string; schoolId:string; schoolName:string; keyword:string; createdAt:string }
 export interface ReminderNotification { id:string; kind:'deadline'|'new_notice'; title:string; message:string; schoolId:string; itemId:string; createdAt:string; read:boolean }
-export interface ReminderEmailState {configured:boolean;address:string|null;verified:boolean;enabled:boolean;suspended:boolean;usedToday:number;dailyLimit:number}
+export interface ReminderEmailState {configured:boolean;address:string|null;verified:boolean;enabled:boolean;suspended:boolean;usedToday:number;dailyLimit:number;identityKind?:'guest'|'account'}
 export interface ReminderState { reminders:Reminder[]; watches:NoticeWatch[]; notifications:ReminderNotification[]; unread:number; checkedAt:string; more:boolean; pushConfigured:boolean; publicKey:string|null;deliveryMode?:'minute'|'daily';queueConfigured?:boolean;deviceCount?:number;scheduler?:'aliyun-fc'|'qstash';schedulerHealth?:'unconfigured'|'waiting'|'active'|'stale'|'failed';schedulerCheckedAt?:string|null;email?:ReminderEmailState }
 export interface BrowserPushSubscription { endpoint:string; keys:{p256dh:string;auth:string} }
-export interface GatewayActions extends AssistantActions {
+export interface GatewayActions extends AssistantActions, AiProviderActions {
   'reminders.state':{input:Record<string,never>;output:ReminderState};
   'reminders.add':{input:{schoolId:string;itemIds:string[]};output:ReminderState};
   'reminders.save':{input:ReminderInput;output:ReminderState};
@@ -98,12 +111,15 @@ export interface GatewayActions extends AssistantActions {
   'reminders.push.unsubscribe':{input:{endpoint:string};output:{removed:boolean}};
   'reminders.push.test':{input:{endpoint:string};output:{accepted:boolean}};
   'reminders.email.verify':{input:Record<string,never>;output:ReminderEmailState};
+  'reminders.email.bind':{input:{email:string};output:ReminderEmailState};
   'reminders.email.test':{input:Record<string,never>;output:ReminderEmailState};
   'reminders.email.enable':{input:{enabled:boolean};output:ReminderEmailState};
   "sources.list":{input:{schoolId:string};output:{sources:WebsiteSource[]}};
-  "sources.feedVisibility":{input:{schoolId:string;sourceId:string;visible:boolean};output:{visible:boolean}};
+  "sources.catalogue":{input:{schoolId:string};output:SourceCatalogue};
+  "sources.public.refresh":{input:{schoolId:string;sourceId:string};output:{count:number;message:string;stats:SourceCollectionStats}};
+  "sources.feedVisibility":{input:{schoolId:string;sourceId:string;visible:boolean};output:{visible:boolean}&InitialSchoolCollection};
   "sources.displayState":{input:{schoolId:string};output:SourceDisplayState};
-  "sources.feedVisibilityAll":{input:{schoolId:string;visible:boolean};output:SourceDisplayState};
+  "sources.feedVisibilityAll":{input:{schoolId:string;visible:boolean};output:SourceDisplayState&InitialSchoolCollection};
   "sources.save":{input:{schoolId:string;sourceId?:string;source:WebsiteSourceInput};output:{id:string}};
   "sources.test":{input:{schoolId:string;sourceId:string};output:{count:number;titles:string[];message:string}};
   "sources.refresh":{input:{schoolId:string;sourceId:string};output:{count:number;message:string;stats?:SourceCollectionStats}};

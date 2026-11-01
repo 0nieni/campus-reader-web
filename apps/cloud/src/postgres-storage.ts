@@ -6,6 +6,11 @@ export interface SqlClient extends SqlExecutor { release(): void }
 export interface SqlPool extends SqlExecutor { connect(): Promise<SqlClient> }
 const collections = new Set(['schools', 'sources', 'items', 'user_profiles', 'web_ai_tasks', 'web_ai_accounts', 'school_sync', 'school_requests', 'web_ai_conversations']);
 const operator = Symbol('campus-query');
+const sqlTransaction = Symbol('campus-sql-transaction');
+/** Internal transaction executor: keeps profile guards and task mutations atomic. */
+export function sqlTransactionExecutor(tx: unknown): SqlExecutor | undefined {
+  return (tx as Record<symbol, SqlExecutor> | null)?.[sqlTransaction];
+}
 type Condition = { [operator]: string; value?: unknown };
 const condition = (op: string, value?: unknown): Condition => ({ [operator]: op, value });
 function checked(name: string) { if (!collections.has(name)) throw new Error('Unsupported collection'); return name; }
@@ -83,6 +88,7 @@ export function postgresStorage(pool: SqlPool): Database {
       const close = () => { if (!closed) { closed = true; client.release(); } };
       const executor: SqlExecutor = { async query(sql, values) { try { return await client.query(sql, values); } catch (error) { normalized(error); } } };
       return {
+        [sqlTransaction]: executor,
         collection(name: string) { checked(name); return { doc(id: string) { return reference(executor, name, id, true); } }; },
         async commit() { try { await client.query('COMMIT'); } catch (error) { normalized(error); } finally { close(); } },
         async rollback() { if (closed) return; try { await client.query('ROLLBACK'); } finally { close(); } },

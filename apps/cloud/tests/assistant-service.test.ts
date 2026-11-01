@@ -16,6 +16,21 @@ function searchFixture() {
 }
 const article = '<article>竞赛报名通知要求提交报名表，并根据学校原文核实参与资格。未提供具体截止时间，不应从搜索摘要推断。</article>';
 
+test('external public tutorials become account-scoped evidence without posing as school announcements', async () => {
+  const f = searchFixture();
+  const assistant = assistantService(f.db, f.repo, aiService(f.db, f.repo), Date.now, async () => ({ state: 'complete', message: '全网搜索完成', candidates: [{ url: 'https://docs.example.org/typescript', title: 'TypeScript Promise 教程', snippet: '不能当正文' }] }), async url => ({ url, html: article }));
+  const result = await assistant.handle('ai.recommend', { schoolId: 'bjtu', query: 'TypeScript Promise', search: true }, identity) as AiRecommendations;
+  const found = result.items.find(item => item.title === 'TypeScript Promise 教程')!;
+  assert.equal(found.allowAi, true);
+  assert.equal(found.sourceName, 'docs.example.org');
+  assert.equal(found.readState, 'body');
+  const stored = f.rows('items').get(found.id)!;
+  assert.equal(stored.ownerOpenid, identity.dataOwnerId);
+  assert.deepEqual(stored.schoolIds, ['bjtu']);
+  assert.ok(stored.aiSearchExpiresAt);
+  assert.match(result.coverage, /全网/);
+});
+
 test('assistant gateway authenticates new actions and rejects forged owner fields', async () => {
   const f = fixtureDb(), ai = aiService(f.db, f.repo), assistant = assistantService(f.db, f.repo, ai);
   const gateway = createGateway(f.repo, ownerConfig, Date.now, { ai: { handle: (a, i, who) => assistant.supports(a) ? assistant.handle(a, i, who) : ai.handle(a, i, who) } });

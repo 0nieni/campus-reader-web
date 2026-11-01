@@ -60,6 +60,12 @@ export function fixtureDb() {
     async schools() { return []; }, async selectSchool(_owner, id) { selected = id; },
     async scope(schoolId, ownerId) { return { schoolId, ownerId, publicSourceIds: ["source"], privateSourceIds: [] }; },
     async items() { return [...items.values()]; }, async item(id) { return items.get(id) || null; },
+    async itemsForUrlPolicy(scope, url) {
+      const rows = [...items.values(), ...collectionRows('items').values() as Iterable<ItemRow>].filter(row =>
+        (row.originalUrl?.split('#')[0] === url || row.canonicalUrl?.split('#')[0] === url) &&
+        (row.ownerOpenid === scope.ownerId || !row.ownerOpenid && row.scope !== 'private' && (row.scope === 'global' || row.schoolIds?.includes(scope.schoolId) || scope.publicSourceIds.includes(row.sourceId || '') || row.sourceIds?.some(id => scope.publicSourceIds.includes(id)))));
+      return rows.length > 200 ? null : rows;
+    },
   };
   collectionRows("user_profiles").set(identity.dataOwnerId, { _id: identity.dataOwnerId, selectedSchoolId: "bjtu", unrelated: "preserve" });
   collectionRows("sources").set("source", { _id: "source", aiProcessing: "allow" });

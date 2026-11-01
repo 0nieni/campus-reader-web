@@ -4,6 +4,7 @@ import type { AiChatTurn, AiConversation } from '@campus/contracts';
 import { fixtureDb, identity } from './feature-fixture';
 import { aiService } from '../src/ai-service';
 import { assistantService } from '../src/assistant-service';
+import { AppError } from '../src/errors';
 
 function setup(search?: Parameters<typeof assistantService>[4], reader?: Parameters<typeof assistantService>[5]) {
   const f = fixtureDb(), prompts: string[] = [], queries: string[] = [];
@@ -140,6 +141,75 @@ test('a candidate losing its body during authorized acquisition cannot be replac
   assert.equal(turn.search?.candidateCount, 1); assert.equal(turn.search?.readableCount, 0);
   assert.equal(f.prompts.length, 0);
   assert.match(turn.result!, /没有取得.*正文/);
+});
+
+const bodyReader: NonNullable<Parameters<typeof assistantService>[5]> = async url => ({ url, html: '<article>竞赛报名公告。报名需要提交项目简介和报名表，具体资格以原公告为准。本段合成正文用于验证最后合包阶段失效和八篇明确选材的真实处理行为。</article>' });
+const freshSearch: NonNullable<Parameters<typeof assistantService>[4]> = async () => ({ state: 'complete', message: '搜索完成', candidates: [{ title: '新比赛公告', url: 'https://www.bjtu.edu.cn/final-pack', snippet: '不是正文' }] });
+
+test('eight explicit selections keep truthful search body counts and ask for room without reserving model quota', async () => {
+  const f = setup(undefined, bodyReader), c = await f.create();
+  const template = f.items.get('notice')!;
+  const itemIds = Array.from({ length: 8 }, (_, index) => 'selected_' + index);
+  for (const id of itemIds) f.items.set(id, { ...template, _id: id, title: id });
+  const input = { conversationId: c.id, question: '最近我们学校有什么比赛可以报名', requestId: 'eight-selected-search-01', itemIds };
+  const turn = await f.call('ai.chat.send', input) as AiChatTurn;
+  assert.equal(turn.taskId, null); assert.equal(turn.programReply, 'search_status');
+  assert.equal(turn.search?.candidateCount, 1); assert.equal(turn.search?.readableCount, 1);
+  assert.match(turn.result!, /8|八/); assert.match(turn.result!, /减少|取消.*选择/);
+  assert.doesNotMatch(turn.result!, /没有取得.*正文/);
+  assert.equal(f.prompts.length, 0); assert.equal(f.rows('web_ai_tasks').size, 0);
+  const quota = (await f.ai.handle('ai.status', {}, identity) as any).quota;
+  assert.equal(quota.used, 0); assert.equal(quota.held, 0);
+  assert.deepEqual(await f.call('ai.chat.send', input), turn);
+  assert.equal(f.queries.length, 1);
+});
+
+test('a candidate failing only on final pack acquisition yields recoverable search status with rechecked body counts', async () => {
+  for (const code of ['NO_MATERIAL', 'SOURCE_UNAVAILABLE']) {
+    const f = setup(freshSearch, bodyReader), c = await f.create();
+    let reads = 0;
+    f.repo.material = async row => {
+      if (row._id.startsWith('ai_search_item_') && ++reads >= 2) throw new AppError(code, 'synthetic body unavailable');
+      return row;
+    };
+    const turn = await f.send(c.id, '再找找本校比赛');
+    assert.equal(turn.state, 'complete'); assert.equal(turn.taskId, null);
+    assert.equal(turn.programReply, 'search_status');
+    assert.equal(turn.search?.state, 'complete'); assert.equal(turn.search?.candidateCount, 1); assert.equal(turn.search?.readableCount, 0);
+    assert.ok(turn.references.length); assert.match(turn.result!, /没有取得.*正文/);
+    assert.equal(f.prompts.length, 0); assert.equal(f.rows('web_ai_tasks').size, 0);
+    const quota = (await f.ai.handle('ai.status', {}, identity) as any).quota;
+    assert.equal(quota.used, 0); assert.equal(quota.held, 0);
+  }
+});
+
+test('a transient final-pack failure still stops model work and reports successfully rechecked candidate bodies', async () => {
+  const f = setup(freshSearch, bodyReader), c = await f.create();
+  let reads = 0;
+  f.repo.material = async row => {
+    if (row._id.startsWith('ai_search_item_') && ++reads === 2) throw new AppError('SOURCE_UNAVAILABLE', 'transient');
+    return row;
+  };
+  const turn = await f.send(c.id, '再找找本校比赛');
+  assert.equal(turn.programReply, 'search_status'); assert.equal(turn.taskId, null);
+  assert.equal(turn.search?.readableCount, 1);
+  assert.match(turn.result!, /合并|准备/); assert.doesNotMatch(turn.result!, /没有取得.*正文/);
+  assert.equal(f.prompts.length, 0); assert.equal(f.rows('web_ai_tasks').size, 0);
+});
+
+test('final-pack authorization and source policy revocation remain hard blocks without publishing search results', async () => {
+  for (const code of ['STALE_SCOPE', 'UNAUTHENTICATED', 'AI_POLICY_BLOCKED']) {
+    const f = setup(freshSearch, bodyReader), c = await f.create();
+    let reads = 0;
+    f.repo.material = async row => {
+      if (row._id.startsWith('ai_search_item_') && ++reads === 2) throw new AppError(code, 'blocked');
+      return row;
+    };
+    await assert.rejects(f.send(c.id, '再找找本校比赛'), { code });
+    const turn = f.rows('web_ai_conversations').get(c.id)!.turns[0];
+    assert.equal(turn.reply, undefined); assert.deepEqual(turn.references, []);
+    assert.equal(f.prompts.length, 0); assert.equal(f.rows('web_ai_tasks').size, 0);
+  }
 });
 
 test('saved program links are removed on reload after their source is disabled', async () => {

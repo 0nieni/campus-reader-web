@@ -3,8 +3,10 @@ import type {
   Notice,
   NoticeDetail,
   WorkspaceSession,
+  SchoolSourceCatalogue, SchoolSync, InitialSchoolCollection,
 } from "@campus/contracts";
 import { AppError, reject } from "./errors";
+import {noticeExcerpt} from './notice-excerpt';
 import {
   identify,
   type Caller,
@@ -15,8 +17,14 @@ import { itemVisible } from "./scope";
 import type { Repository, ItemRow } from "./repository";
 import { filtersOf, filterSince, matchesFilters } from "./filters";
 import { checkedLabels, displayedCategories, originalCategories } from './notice-labels';
+import {noticeSourceAliases} from './school-sources';
+import {guestActionAllowed} from './guest-access';
 
 const fields: Record<string, string[]> = {
+  'ai.providers.list': [],
+  'ai.providers.save': ['profile'],
+  'ai.providers.remove': ['id','version'],
+  'ai.providers.select': ['id','model','version'],
   'ai.memory.get': ['schoolId'],
   'ai.memory.configure': ['schoolId','enabled','version'],
   'ai.memory.forget': ['schoolId','id','version'],
@@ -29,7 +37,7 @@ const fields: Record<string, string[]> = {
   'ai.recommend': ['schoolId','query','search'],
   'ai.chat.create': ['schoolId','requestId'],
   'ai.chat.get': ['conversationId'],
-  'ai.chat.send': ['conversationId','requestId','question','itemIds','service','provider','model'],
+  'ai.chat.send': ['conversationId','requestId','question','itemIds','service','provider','model','providerProfile'],
   'ai.chat.step': ['conversationId','turnId','step','connection'],
   'ai.chat.cancel': ['conversationId','turnId'],
   'ai.chat.resolve': ['conversationId','turnId','charged'],
@@ -48,9 +56,12 @@ const fields: Record<string, string[]> = {
   'reminders.push.unsubscribe':['endpoint'],
   'reminders.push.test':['endpoint'],
   'reminders.email.verify':[],
+  'reminders.email.bind':['email'],
   'reminders.email.test':[],
   'reminders.email.enable':['enabled'],
   'sources.list':['schoolId'],
+  'sources.catalogue':['schoolId'],
+  'sources.public.refresh':['schoolId','sourceId'],
   'sources.feedVisibility':['schoolId','sourceId','visible'],
   'sources.displayState':['schoolId'],
   'sources.feedVisibilityAll':['schoolId','visible'],
@@ -74,7 +85,7 @@ const fields: Record<string, string[]> = {
   "ai.diagnose": [],
   "ai.preview": ["schoolId", "itemIds"],
   "ai.export": ["schoolId", "itemIds"],
-  "ai.start": ["schoolId", "itemIds", "requestId", "service", "provider", "model", "task", "question", "fingerprint"],
+  "ai.start": ["schoolId", "itemIds", "requestId", "service", "provider", "model", "task", "question", "fingerprint", "providerProfile"],
   "ai.test": ["schoolId", "requestId", "provider", "model"],
   "ai.step": ["taskId", "step", "connection"],
   "ai.task": ["taskId"],
@@ -122,6 +133,7 @@ function offsetOf(value: unknown): number {
   return Number(value);
 }
 export function toNotice(row: ItemRow): Notice {
+  const excerpt=noticeExcerpt(row);
   return {
     id: row._id,
     title: String(row.title || "未命名公告"),
@@ -129,6 +141,7 @@ export function toNotice(row: ItemRow): Notice {
     publishedAt: row.publishedAt || null,
     categories: displayedCategories(row),
     summary: null,
+    ...(excerpt?{excerpt}:{}),
   };
 }
 export function originalUrl(row: ItemRow): string | null {
@@ -165,7 +178,7 @@ async function session(
     identity: { uid: identity.uid, username: null },
     school: id ? await repo.school(id) : null,
     legacyLinked: identity.legacyLinked,
-    capabilities: { reading: true, ai: true, operations: false, ...(directory ? { schoolDirectory:true } : {}), ...(websites?{websiteSources:true}:{}), ...(reminders?{reminders:true}:{}), ...(repo.setLabels ? {noticeLabels:true} : {}) },
+    capabilities: { reading: true, ai: identity.kind!=='guest', operations: false, ...(directory ? { schoolDirectory:true } : {}), ...(websites?{websiteSources:true}:{}), ...(reminders?{reminders:true}:{}), ...(repo.setLabels ? {noticeLabels:true} : {}) },
   };
 }
 
@@ -175,6 +188,18 @@ export function createGateway(
   now: () => number = Date.now,
   features?: { reminders?:{handle(action:string,input:Record<string,unknown>,identity:IdentityContext):Promise<unknown>}; websites?:{handle(action:string,input:Record<string,unknown>,identity:IdentityContext):Promise<unknown>}; bookmarks?: { handle(action: string, input: Record<string, unknown>, identity: IdentityContext): Promise<unknown>; has(ownerId: string, schoolId: string, itemId: string): Promise<boolean> }; ai?: { handle(action: string, input: Record<string, unknown>, identity: IdentityContext): Promise<unknown> }; directory?: { refresh(schoolId:string):Promise<unknown>; sources?(schoolId:string,ownerId?:string):Promise<unknown>; request(name:unknown,identity:IdentityContext):Promise<unknown> } },
 ) {
+  // Saving a choice succeeds independently of the first public school read.
+  // Only the current reading school and its reviewed columns can trigger it.
+  async function initialSchoolCollection(owner:string,schoolId:string,sourceId?:string):Promise<InitialSchoolCollection>{
+    if(!features?.directory?.sources||await repo.selectedSchool(owner)!==schoolId)return{};
+    try{
+      const catalogue=await features.directory.sources(schoolId,owner) as SchoolSourceCatalogue;
+      const candidates=sourceId?noticeSourceAliases(schoolId,sourceId):null;
+      if(!catalogue.sources.some(source=>(candidates?candidates.includes(source.id):source.showInFeed!==false)&&source.state==='unchecked'&&source.checkedAt===null))return{};
+      const result=await features.directory.refresh(schoolId) as SchoolSync;
+      return{initialCollection:{state:result.state,message:result.message}};
+    }catch{return{initialCollection:{state:'unavailable',message:'勾选已保存，首次学校采集暂未完成。可稍后点击“刷新本校公告”重试，已有公告保留。'}};}
+  }
   return async (
     event: unknown,
     caller: Caller,
@@ -183,6 +208,7 @@ export function createGateway(
     try {
       const identity = identify(caller, config);
       const { action, input } = inputOf(event);
+      if(identity.kind==='guest'&&!guestActionAllowed(action))reject('LOGIN_REQUIRED','此操作需要登录AI账号或打开原账号工作区。');
       operation = action;
       const filters = action === "feed.list" ? filtersOf(input) : {};
       if(action==='sources.displayState'){
@@ -192,7 +218,8 @@ export function createGateway(
       if(action==='sources.feedVisibilityAll'){
         if(!repo.setAllSourceFeedVisibility)reject('SERVICE_UNAVAILABLE','来源批量显示设置尚未接通。');
         if(typeof input.visible!=='boolean')reject('VALIDATION_FAILED','请选择显示或隐藏。');
-        return{ok:true,data:await repo.setAllSourceFeedVisibility(identity.dataOwnerId,text(input,'schoolId'),input.visible)};
+        const schoolId=text(input,'schoolId'),saved=await repo.setAllSourceFeedVisibility(identity.dataOwnerId,schoolId,input.visible);
+        return{ok:true,data:{...saved,...(input.visible?await initialSchoolCollection(identity.dataOwnerId,schoolId):{})}};
       }
       if(action.startsWith('reminders.')){
         if(!features?.reminders)reject('SERVICE_UNAVAILABLE','此环境尚未接通提醒服务。');
@@ -201,7 +228,8 @@ export function createGateway(
       if(action==='sources.feedVisibility'){
         if(!repo.setSourceFeedVisibility)reject('SERVICE_UNAVAILABLE','此环境尚未接通来源显示设置。');
         if(typeof input.visible!=='boolean')reject('VALIDATION_FAILED','请选择是否在主页公告中显示。');
-        return{ok:true,data:await repo.setSourceFeedVisibility(identity.dataOwnerId,text(input,'schoolId'),text(input,'sourceId'),input.visible)};
+        const schoolId=text(input,'schoolId'),sourceId=text(input,'sourceId'),saved=await repo.setSourceFeedVisibility(identity.dataOwnerId,schoolId,sourceId,input.visible);
+        return{ok:true,data:{...saved,...(input.visible?await initialSchoolCollection(identity.dataOwnerId,schoolId,sourceId):{})}};
       }
       if(action.startsWith('sources.')){
         if(!features?.websites)reject('SERVICE_UNAVAILABLE','网站来源管理尚未接通。');
@@ -253,19 +281,24 @@ export function createGateway(
       const since = filterSince(filters, now());
       if (action === "feed.list") {
         const offset = offsetOf(input.cursor);
-        const hiddenSourceIds=await repo.hiddenFeedSources?.(identity.dataOwnerId,schoolId)??[];
-        const excluded=hiddenSourceIds.filter(id=>id!==filters.sourceId);
+        const selection=await repo.feedSourceSelection?.(identity.dataOwnerId,schoolId);
+        const hiddenSourceIds=selection?.hiddenIds??await repo.hiddenFeedSources?.(identity.dataOwnerId,schoolId)??[];
+        const excluded=selection?.noticeHiddenIds??hiddenSourceIds;
+        const shownSourceIds=selection?.noticeShownIds??selection?.shownIds;
+        const sourceFilterIds=filters.sourceId?noticeSourceAliases(schoolId,filters.sourceId):null;
         if (filters.categories?.length === 0) return {ok:true,data:{items:[],nextCursor:null,...(hiddenSourceIds.length?{hiddenSourceCount:hiddenSourceIds.length}:{})}};
-        const rows = await repo.items(scope, offset, 21, since, filters,{hiddenSourceIds:excluded});
+        const rows = await repo.items(scope, offset, 21, since, filters,{hiddenSourceIds:excluded,...(shownSourceIds?{shownSourceIds}:{})});
         // DB predicates operate before pagination; recheck every returned row for defense in depth.
         if (
           rows.some(
             (row) =>
               !itemVisible(row, scope) ||
               excluded.includes(row.sourceId||'') ||
+              (shownSourceIds&&!shownSourceIds.includes(row.sourceId||'')) ||
               row.status !== "published" ||
               !isRetained(row, since) ||
-              !matchesFilters(row, filters),
+              (sourceFilterIds&&!sourceFilterIds.includes(row.sourceId||'')) ||
+              !matchesFilters(row, {...filters,sourceId:undefined}),
           )
         )
           reject(
@@ -310,7 +343,8 @@ export function createGateway(
         defaultCategories: originalCategories(row),
         categoriesCustomized: row.personalCategories !== undefined,
         originalUrl: originalUrl(row),
-        attachmentNote: (materialNote ? materialNote + ' ' : '') + "本阶段未读取附件正文，请以公告原文和附件为准。",
+        attachmentNote: (materialNote ? materialNote + ' ' : '') + (row.materialArchive?.attachmentNote || "本次未读取附件正文，请以公告原文和附件为准。"),
+        ...(row.materialArchive?{materialArchive:row.materialArchive}:{}),
         ...(features?.bookmarks ? { bookmarked: await features.bookmarks.has(identity.dataOwnerId, schoolId, row._id) } : {}),
       };
       return { ok: true, data: detail };

@@ -6,7 +6,7 @@ import { load } from 'cheerio/slim';
 import { publicAddress } from './model-provider';
 import { AppError } from './errors';
 
-export interface SchoolSource { id: string; name: string; announcementUrl: string; homepage: string; listSelector?: string; articleSelector?: string; dateSelector?:string; exactHost?:boolean; allowedPath?:(url:string)=>boolean }
+export interface SchoolSource { id: string; name: string; announcementUrl: string; homepage: string; listSelector?: string; articleSelector?: string; dateSelector?:string; exactHost?:boolean; allowedPath?:(url:string)=>boolean; rawResponse?:boolean }
 export interface SchoolPage { html: string; url: string }
 export type PageReader = (url: string, school: SchoolSource) => Promise<SchoolPage>;
 const compact = (s: string) => s.replace(/\s+/g, ' ').trim();
@@ -134,7 +134,8 @@ export function extractNotices(page: SchoolPage, school: SchoolSource): Extracte
       return (!node.closest('a').length || heading.length>0 || el.tagName==='i') && text.length<=12 && !!dateMetadata(text);
     }).first();
     const dated=container.find(school.dateSelector || 'time,[class*="date"],[class*="time"],.Article_PublishDate,.sj,dl').first();
-    const dateText = container.find('time').attr('datetime') || (dated.length?metaText(dated):'') || (smallDate.length?metaText(smallDate):'') || metaText(container.clone().find('a,p').remove().end());
+    const precedingDate=school.dateSelector?container.prev(school.dateSelector):$('__no_date__');
+    const dateText = container.find('time').attr('datetime') || (dated.length?metaText(dated):'') || (smallDate.length?metaText(smallDate):'') || (precedingDate.length?metaText(precedingDate):'') || metaText(container.clone().find('a,p').remove().end());
     const publishedAt = dateMetadata(compact(dateText));
     seen.add(url.href);
     list.push({ id: noticeId(school.id,url.href), title, url: url.href, publishedAt });
@@ -154,4 +155,13 @@ export function extractArticle(page: SchoolPage, school?: SchoolSource): string 
   const text = content.text().split(/\n+/).map(compact).filter(Boolean).join('\n');
   if (text.length < 30 || text.length > 60000 || /请输入密码|统一身份认证登录/.test(text)) throw fail();
   return text;
+}
+/** Article pages can place a column heading before the actual headline. */
+export function extractArticleTitle(page:SchoolPage,selector?:string):string {
+  const $=preparedPage(page.html);
+  const column=/^(?:研究生招生|本科生招生|招生就业|本科生教育|研究生教育|人才培养|通知公告|通知通告|学院概况|首页)$/;
+  const valid=(value:string)=>value.length>=4&&value.length<=220&&!column.test(value);
+  const candidates=[selector?$(selector).first().text():'', $('meta[name="ArticleTitle"]').attr('content')||'', $('meta[property="og:title"]').attr('content')||'', $('.article-title,.article_title,.news-title,.news_title,.content-title,.arc-title').first().text(),$('title').text(),...$('h1,h2,h3').toArray().map(el=>$(el).text())];
+  for(const candidate of candidates){const title=compact(candidate);if(valid(title))return title;}
+  throw new AppError('SOURCE_PARSE_FAILED','未能核实此公告的具体标题，请查看原文。');
 }

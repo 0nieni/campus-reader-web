@@ -16,7 +16,7 @@ function fixture() {
   const f = fixtureDb(), school = f.repo.school;
   f.repo.school = async id => ({ ...(await school(id))!, homepage: 'https://www.bjtu.edu.cn/', announcementUrl: 'https://www.bjtu.edu.cn/notices' });
   f.repo.items = async (_scope, offset, limit) => [...f.items.values()].slice(offset, offset + limit);
-  return { ...f, filter: (refs: ChatReference[] = [ref]) => filterProgramReferences(f.db, f.repo, owner, 'bjtu', refs) };
+  return { ...f, filter: (refs: ChatReference[] = [ref]) => filterProgramReferences(f.db, f.repo, owner, 'bjtu', refs, 'school') };
 }
 
 test('program references retain currently accessible exact titles and original links', async () => {
@@ -129,7 +129,7 @@ test('an unstored snippet cannot route around a known same-URL source revocation
   }
 });
 
-test('known same-URL rows are reconciled across both pages, including changed titles', async () => {
+test('known same-URL policy lookup finds changed titles beyond the feed page', async () => {
   const f = fixture(), template = f.items.get('notice')!;
   f.items.clear();
   for (let index = 0; index < 110; index++) f.items.set('row_' + index, { ...template, _id: 'row_' + index, originalUrl: 'https://www.bjtu.edu.cn/old/' + index });
@@ -137,14 +137,17 @@ test('known same-URL rows are reconciled across both pages, including changed ti
   assert.deepEqual(await f.filter([snippet()]), []);
 });
 
-test('saturated known-URL lookup drops uncertain links and reads at most 200 rows', async () => {
-  const f = fixture(), template = f.items.get('notice')!, offsets: number[] = [];
+test('saturated exact-URL policy lookup drops uncertain links without scanning feed pages', async () => {
+  const f = fixture(), template = f.items.get('notice')!;
   f.items.clear();
-  for (let index = 0; index < 201; index++) f.items.set('row_' + index, { ...template, _id: 'row_' + index, originalUrl: 'https://www.bjtu.edu.cn/old/' + index });
-  const read = f.repo.items;
-  f.repo.items = async (...args) => { offsets.push(args[1]); assert.equal(args[2], 100); return read(...args); };
+  for (let index = 0; index < 201; index++) f.items.set('row_' + index, { ...template, _id: 'row_' + index, originalUrl: snippet().originalUrl! });
+  f.repo.items = async () => { throw new Error('must not scan feed'); };
   assert.deepEqual(await f.filter([snippet()]), []);
-  assert.deepEqual(offsets, [0, 100]);
+});
+
+test('repositories without a controlled URL policy lookup fail closed for unstored snippets', async () => {
+  const f = fixture(); delete f.repo.itemsForUrlPolicy;
+  assert.deepEqual(await f.filter([snippet()]), []);
 });
 
 test('reference output is capped at five and does not fetch unbounded extra references', async () => {
@@ -166,4 +169,49 @@ test('database failure hides links without exposing raw upstream errors', async 
   const f = fixture();
   const db = { collection() { throw new Error('secret-fixture-upstream-error'); } } as unknown as Database;
   assert.deepEqual(await filterProgramReferences(db, f.repo, owner, 'bjtu', [ref]), []);
+});
+
+test('default web mode preserves a verified public external snippet without a body read', async () => {
+  const f = fixture(), candidate = snippet('https://www.example.com/public/competition');
+  f.repo.material = async () => { throw new Error('no external body read permitted'); };
+  assert.deepEqual(await filterProgramReferences(f.db, f.repo, owner, 'bjtu', [candidate]), [candidate]);
+  assert.deepEqual(await f.filter([candidate]), []);
+});
+
+test('public external snippets still obey virtual source and known same-URL revocation', async () => {
+  const candidate = snippet('https://www.example.com/public/competition');
+  const f = fixture();
+  const run = () => filterProgramReferences(f.db, f.repo, owner, 'bjtu', [candidate]);
+  assert.deepEqual(await run(), [candidate]);
+  f.rows('sources').set(searchSourceId, { _id: searchSourceId, scope: 'private', ownerOpenid: owner, schoolIds: ['bjtu'], type: 'ai_search', autoCollect: false, aiProcessing: 'import_only' });
+  assert.deepEqual(await run(), [candidate]);
+  f.rows('sources').get(searchSourceId)!.enabled = false;
+  assert.deepEqual(await run(), []);
+  f.rows('sources').delete(searchSourceId);
+  Object.assign(f.items.get('notice')!, { originalUrl: candidate.originalUrl, title: candidate.title });
+  assert.deepEqual(await run(), [candidate]);
+  f.rows('sources').get('source')!.deleted = true;
+  assert.deepEqual(await run(), []);
+});
+
+test('public external snippets preserve current owner and school boundaries', async () => {
+  const candidate = snippet('https://www.example.com/public/competition');
+  for (const patch of [{ ownerOpenid: 'foreign' }, { schoolIds: ['other'] }]) {
+    const f = fixture();
+    f.rows('sources').set(searchSourceId, { _id: searchSourceId, scope: 'private', ownerOpenid: owner, schoolIds: ['bjtu'], type: 'ai_search', autoCollect: false, ...patch });
+    assert.deepEqual(await filterProgramReferences(f.db, f.repo, owner, 'bjtu', [candidate]), []);
+  }
+  const f = fixture();
+  assert.deepEqual(await filterProgramReferences(f.db, f.repo, 'foreign', 'bjtu', [candidate]), []);
+});
+
+test('default web mode rejects hostile, login, private and credential-bearing URLs', async () => {
+  const f = fixture();
+  for (const url of [
+    'http://www.example.com/public', 'https://login.example.com/public', 'https://sso.example.com/public',
+    'https://metadata.example.com/public', 'https://localhost/public', 'https://intranet.internal/public',
+    'https://127.0.0.1/public', 'https://192.168.0.1/public', 'https://[::1]/public',
+    'https://user:password@www.example.com/public', 'https://www.example.com:8443/public',
+    'https://www.example.com/public?api_key=hidden', 'https://www.example.com/public?session=hidden',
+  ]) assert.deepEqual(await filterProgramReferences(f.db, f.repo, owner, 'bjtu', [snippet(url)]), [], url);
 });

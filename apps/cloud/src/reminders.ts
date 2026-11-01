@@ -8,7 +8,7 @@ import {isPrivate,itemVisible,sourceVisible,type Resource,type Scope} from './sc
 import {isRetained} from './gateway';
 import type {ItemRow} from './repository';
 import {reject} from './errors';
-import {checkedSubscription,endpointHash,sendBrowserPush,type PushConfig} from './browser-push';
+import {checkedSubscription,endpointHash,sendBrowserPush,reminderPushMessage,type PushConfig} from './browser-push';
 import {reminderCalendar} from './reminder-calendar';
 import {syncReminderJobs,flushReminderJobs,reminderDeliveryState,type ReminderPublisher} from './reminder-jobs';
 import {aliyunJobs,type AliyunOptions} from './aliyun-reminder-jobs';
@@ -16,7 +16,7 @@ import {aliyunJobs,type AliyunOptions} from './aliyun-reminder-jobs';
 type Notification=ReminderNotification&{reminderId?:string;watchId?:string;sent:Record<string,'sending'|'sent'|'failed'|'skipped'>};
 type StoredReminder=Reminder&{generation:string;fired:number[]};
 interface State {reminders:StoredReminder[];watches:NoticeWatch[];notifications:Notification[];lastScan?:number;more?:boolean;lastTest?:number}
-interface Options {now?:()=>number;push?:PushConfig;send?:typeof sendBrowserPush;minuteMode?:boolean;queue?:ReminderPublisher;aliyun?:AliyunOptions}
+interface Options {now?:()=>number;push?:PushConfig;send?:typeof sendBrowserPush;minuteMode?:boolean;queue?:ReminderPublisher;aliyun?:AliyunOptions;currentSchoolRequired?:boolean}
 const day=86400000;
 const cleanText=(value:unknown,max:number,fallback='')=>{
   if(typeof value!=='string'||value.length>max||/[\x00-\x1f\x7f]/.test(value))reject('VALIDATION_FAILED','提醒文字过长或包含无效字符。');
@@ -109,6 +109,10 @@ export function reminderService(pool:SqlPool,options:Options={}){
     const owner=identity.dataOwnerId;
     if(action.startsWith('reminders.email.')){
       if(!options.aliyun?.email)reject('EMAIL_UNAVAILABLE','邮件提醒待配置。');
+      if(action==='reminders.email.bind'){
+        if(identity.kind!=='guest')reject('FORBIDDEN','账号提醒邮箱来自登录会话，不能由客户端指定。');
+        return options.aliyun.email.bindGuest(owner,input.email);
+      }
       return options.aliyun.email.handle(action,input,owner);
     }
     if(options.minuteMode&&action.startsWith('reminders.watch.'))reject('ACTION_NOT_ALLOWED','学校与关键词关注已移除。');
@@ -136,22 +140,34 @@ export function reminderService(pool:SqlPool,options:Options={}){
     if(action==='reminders.push.test'){
       if(!options.push)reject('PUSH_UNAVAILABLE','当前环境尚未启用浏览器推送。');
       if(typeof input.endpoint!=='string'||input.endpoint.length>2048)reject('VALIDATION_FAILED','推送设备信息无效。');
-      const {rows}=await pool.query("UPDATE campus_push_devices SET last_test_at=$3 WHERE owner_id=$1 AND endpoint_hash=$2 AND (last_test_at IS NULL OR last_test_at < $3::timestamptz - interval '1 minute') RETURNING subscription",[owner,endpointHash(input.endpoint),new Date(now()).toISOString()]);
-      if(!rows.length)reject('PUSH_NOT_READY','请先开启此浏览器推送；测试每分钟最多一次。');
-      try{await send(checkedSubscription(rows[0].subscription),options.push,'campus-reader-test');}catch{reject('PUSH_FAILED','推送服务未确认接收，请检查网络与系统通知权限后重试。');}
+      const hash=endpointHash(input.endpoint);
+      const {rows}=await pool.query("UPDATE campus_push_devices SET last_test_at=$3 WHERE owner_id=$1 AND endpoint_hash=$2 AND (last_test_at IS NULL OR last_test_at <= $3::timestamptz - interval '1 minute') RETURNING subscription,binding_id",[owner,hash,new Date(now()).toISOString()]);
+      if(!rows.length){
+        const binding=await pool.query('SELECT last_test_at FROM campus_push_devices WHERE owner_id=$1 AND endpoint_hash=$2',[owner,hash]);
+        if(binding.rows.length)reject('PUSH_RATE_LIMIT','测试通知每分钟最多一次，请等待60秒后重试。');
+        reject('PUSH_NOT_READY','此设备的推送订阅已失效，请重新开启此浏览器推送。');
+      }
+      try{await send(checkedSubscription(rows[0].subscription),options.push,'campus-reader-test',{title:'校园阅览室｜测试通知',body:'这是一条推送测试消息。看到此通知，表示当前设备可以显示网站推送。'});}
+      catch(error){
+        if([404,410].includes(Number((error as {statusCode?:number})?.statusCode))){
+          await pool.query('DELETE FROM campus_push_devices WHERE owner_id=$1 AND endpoint_hash=$2 AND binding_id=$3',[owner,hash,rows[0].binding_id]);
+          reject('PUSH_NOT_READY','此设备的推送订阅已失效，请重新开启此浏览器推送。');
+        }
+        reject('PUSH_FAILED','推送服务未确认接收，请检查网络与系统通知权限后重试。');
+      }
       return{accepted:true};
     }
     return transaction(owner,async(state,client)=>{
       const repo=repoFor(client),time=now();
       if(action==='reminders.add'){
         const schoolId=identifier(input.schoolId);
-        const school=await authorizeSchool(repo,owner,schoolId);
+        const school=await authorizeSchool(repo,owner,schoolId,options.currentSchoolRequired!==false);
         if(!Array.isArray(input.itemIds)||!input.itemIds.length||input.itemIds.length>20)reject('VALIDATION_FAILED','一次请选择1至20篇公告。');
         const itemIds=[...new Set(input.itemIds.map(identifier))];
         // Validate the entire selection before writing any draft. Added notices
         // do not acquire a guessed time or create notifications/AI requests.
         const rows=[];
-        for(const itemId of itemIds)rows.push(await authorizedItem(repo,owner,schoolId,itemId,time));
+        for(const itemId of itemIds)rows.push(await authorizedItem(repo,owner,schoolId,itemId,time,options.currentSchoolRequired!==false));
         const additions=rows.filter(row=>!state.reminders.some(r=>r.schoolId===schoolId&&r.itemId===row._id));
         if(state.reminders.length+additions.length>100)reject('REMINDER_LIMIT','每个账号最多保存100条提醒，请先移除已完成事项。');
         state.reminders.unshift(...additions.map(row=>({id:id(),schoolId,itemId:row._id,label:'报名／事项截止',dueAt:null,days:[],title:String(row.title||'未命名公告').slice(0,300),schoolName:school.name,createdAt:new Date(time).toISOString(),generation:id(),fired:[]})));
@@ -159,7 +175,7 @@ export function reminderService(pool:SqlPool,options:Options={}){
         if(input.channels!==undefined&&(input.channels===null||typeof input.channels!=='object'||Array.isArray(input.channels)||Object.keys(input.channels).some(k=>!['browser','email'].includes(k))||typeof (input.channels as any).browser!=='boolean'||typeof (input.channels as any).email!=='boolean'))reject('VALIDATION_FAILED','请选择有效的提醒发送方式。');
         const existing=input.id===undefined?undefined:state.reminders.find(r=>r.id===identifier(input.id));
         if(input.id&&!existing)reject('NOT_FOUND','提醒不存在或不属于当前账号。');
-        const schoolId=identifier(input.schoolId),itemId=identifier(input.itemId),row=await authorizedItem(repo,owner,schoolId,itemId,time,!existing);
+        const schoolId=identifier(input.schoolId),itemId=identifier(input.itemId),row=await authorizedItem(repo,owner,schoolId,itemId,time,!existing&&options.currentSchoolRequired!==false);
         const school=await repo.school(schoolId),label=cleanText(input.label,80,'事项截止');
         if(typeof input.dueAt!=='string'||!/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.000Z$/.test(input.dueAt)||!Number.isFinite(Date.parse(input.dueAt))||new Date(input.dueAt).toISOString()!==input.dueAt||Date.parse(input.dueAt)<=time||Date.parse(input.dueAt)>time+2*366*day)reject('VALIDATION_FAILED','请选择未来两年内的有效日期和具体时间。');
         if(!Array.isArray(input.days)||!input.days.length||input.days.some(value=>![0,1,3,7].includes(value)))reject('VALIDATION_FAILED','请选择提前7天、3天、1天或到时提醒。');
@@ -278,11 +294,11 @@ export function reminderService(pool:SqlPool,options:Options={}){
       try{
         const allowed=await transaction(owner,async(state,client)=>{
           await synchronize(state,client,owner);
-          if(!state.reminders.some(r=>r.id===job.reminderId&&r.generation===job.generation))return false;
-          const binding=await client.query('SELECT endpoint_hash FROM campus_push_devices WHERE endpoint_hash=$1 AND owner_id=$2 AND binding_id=$3',[job.endpoint_hash,owner,job.binding_id]);return Boolean(binding.rows.length);
+          const reminder=state.reminders.find(r=>r.id===job.reminderId&&r.generation===job.generation);if(!reminder)return false;
+          const binding=await client.query('SELECT endpoint_hash FROM campus_push_devices WHERE endpoint_hash=$1 AND owner_id=$2 AND binding_id=$3',[job.endpoint_hash,owner,job.binding_id]);return binding.rows.length?reminder:false;
         });
         if(allowed){
-          try{await send(checkedSubscription(job.subscription),push,jobId);outcome='sent';accepted++;}
+          try{await send(checkedSubscription(job.subscription),push,jobId,reminderPushMessage(allowed));outcome='sent';accepted++;}
           catch(error){const code=Number((error as {statusCode?:number})?.statusCode);outcome=Number.isFinite(code)&&code>0?'failed':'unknown';expired=[404,410].includes(code);failed++;}
         }
         await transaction(owner,async(_state,client)=>{

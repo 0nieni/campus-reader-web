@@ -5,6 +5,7 @@ import { authorizeSchool } from './access';
 import { isRetained, originalUrl } from './gateway';
 import { isPrivate, itemVisible, sourceVisible } from './scope';
 import { approvedSchoolUrl } from './school-pages';
+import { publicSearchSource } from './public-search-page';
 import { digest } from './reading-package';
 import { AppError } from './errors';
 
@@ -19,7 +20,7 @@ function canonicalUrl(value: unknown): string | null {
 }
 
 /** Link visibility only. These references must never become model evidence. */
-export async function filterProgramReferences(db: Database, repo: Repository, owner: string, schoolId: string, refs: ChatReference[]): Promise<ChatReference[]> {
+export async function filterProgramReferences(db: Database, repo: Repository, owner: string, schoolId: string, refs: ChatReference[], searchScope: 'school' | 'web' = 'web'): Promise<ChatReference[]> {
   try {
     const school = await authorizeSchool(repo, owner, schoolId);
     if (!refs.length) return [];
@@ -47,44 +48,38 @@ export async function filterProgramReferences(db: Database, repo: Repository, ow
     function unchanged(row: ItemRow, ref: ChatReference): boolean {
       return (row.title || '未命名公告') === ref.title && originalUrl(row) === ref.originalUrl;
     }
-    let known: Map<string, ItemRow[]> | undefined, saturated = false;
-    async function knownRows(url: string): Promise<ItemRow[]> {
-      if (!known) {
-        known = new Map();
-        const seen = new Set<string>();
-        // Include rows regardless of current status/policy: a revoked known URL
-        // must not acquire a fresh snippet identity to bypass that policy.
-        for (let offset = 0; offset < 200; offset += 100) {
-          const page = (await repo.items(scope, offset, 100, since)).slice(0, 100);
-          for (const row of page) {
-            if (seen.has(row._id)) continue;
-            seen.add(row._id);
-            for (const key of new Set([canonicalUrl(originalUrl(row)), canonicalUrl(row.canonicalUrl)])) {
-              if (key) known.set(key, [...(known.get(key) || []), row]);
-            }
-          }
-          if (page.length < 100) break;
-          if (offset === 100) saturated = true;
-        }
-      }
-      return known.get(url) || [];
+    const known = new Map<string, Promise<ItemRow[] | null>>();
+    function knownRows(url: string): Promise<ItemRow[] | null> {
+      if (!known.has(url)) known.set(url, repo.itemsForUrlPolicy ? repo.itemsForUrlPolicy(scope, url) : Promise.resolve(null));
+      return known.get(url)!;
     }
     const accepted: ChatReference[] = [];
     for (const ref of refs.slice(0, 5)) {
       if (!ref || !/^[A-Za-z0-9_-]{1,200}$/.test(ref.itemId) || !ref.title || !ref.originalUrl || !canonicalUrl(ref.originalUrl)) continue;
       const row = await repo.item(ref.itemId) || await readDoc(db, 'items', ref.itemId) as ItemRow | null;
       if (row) {
-        if (unchanged(row, ref) && await visible(row)) accepted.push(ref);
+        if (!unchanged(row, ref) || !await visible(row)) continue;
+        if (ref.itemId.startsWith('ai_search_item_')) {
+          const rows = await knownRows(canonicalUrl(ref.originalUrl)!);
+          if (!rows) continue;
+          let allowed = true;
+          for (const knownRow of rows) if (!unchanged(knownRow, ref) || !await visible(knownRow)) { allowed = false; break; }
+          if (!allowed) continue;
+        }
+        accepted.push(ref);
         continue;
       }
       const schoolSource = { id: schoolId, name: school.name, homepage: school.homepage || school.announcementUrl || '', announcementUrl: school.announcementUrl || school.homepage || '' };
       let url: string;
-      try { url = approvedSchoolUrl(ref.originalUrl, schoolSource).href; } catch { continue; }
+      try {
+        const source = searchScope === 'school' ? schoolSource : publicSearchSource(ref.originalUrl);
+        url = approvedSchoolUrl(ref.originalUrl, source).href;
+      } catch { continue; }
       if (url !== ref.originalUrl || ref.itemId !== 'ai_search_item_' + digest([owner, schoolId, url])) continue;
       const virtualSource = await policy('ai_search_' + digest([owner, schoolId]));
       if (virtualSource && (virtualSource.enabled === false || virtualSource.deleted === true || virtualSource.ownerOpenid !== owner || !virtualSource.schoolIds?.includes(schoolId) || virtualSource.type !== 'ai_search' || virtualSource.autoCollect !== false)) continue;
       const rows = await knownRows(url);
-      if (!rows.length && saturated) continue;
+      if (!rows) continue;
       let allowed = true;
       for (const knownRow of rows) if (!unchanged(knownRow, ref) || !await visible(knownRow)) { allowed = false; break; }
       if (allowed) accepted.push(ref);

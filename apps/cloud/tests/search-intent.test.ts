@@ -5,15 +5,15 @@ import * as intent from '../src/chat-intent';
 // Literal expectations cover the public search decision and outbound privacy boundary.
 for (const [question, expected] of [
   ['查一下', '通知公告 报名'],
-  ['帮我看看学校有没有新的讲座', '讲座'],
-  ['最近我们学校有什么比赛可以报名', '比赛 报名'],
-  ['学校最近有哪些活动？', '活动'],
-  ['本校最近有竞赛吗？', '竞赛'],
-  ['能不能帮我查一下本校比赛', '比赛'],
-  ['你能联网查一下本校比赛吗？', '比赛'],
-  ['再帮我找找本校编程比赛', '编程 比赛'],
-  ['请联网搜索本校奖学金申请通知', '奖学金 申请 通知'],
-  ['帮我检索本校学术论坛', '学术 论坛'],
+  ['帮我看看学校有没有新的讲座', '本校 讲座'],
+  ['最近我们学校有什么比赛可以报名', '本校 比赛 报名'],
+  ['学校最近有哪些活动？', '本校 活动'],
+  ['本校最近有竞赛吗？', '本校 竞赛'],
+  ['能不能帮我查一下本校比赛', '本校比赛'],
+  ['你能联网查一下本校比赛吗？', '本校比赛吗'],
+  ['再帮我找找本校编程比赛', '本校编程比赛'],
+  ['请联网搜索本校奖学金申请通知', '本校奖学金申请通知'],
+  ['帮我检索本校学术论坛', '本校学术论坛'],
 ] as const) {
   test(`school discovery intent: ${question}`, () => {
     assert.equal(intent.chatSearchQuery(question), expected);
@@ -69,36 +69,36 @@ for (const [question, expected] of [
 
 test('outbound query contains only allowed topic words even when the request includes private details', () => {
   const question = '帮我看看学校有没有新的编程比赛可以报名，我的邮箱 private@example.invalid，手机号 13800138000，个人秘密是鸢尾花';
-  assert.equal(intent.chatSearchQuery(question), '编程 比赛 报名');
+  assert.equal(intent.chatSearchQuery(question), '本校 编程 比赛 报名');
   assert.equal(intent.chatSearchQuery('查一下 private@example.invalid 13800138000 个人秘密鸢尾花'), '通知公告 报名');
 });
 
 for (const [question, expected] of [
-  ['帮我查一下本校蓝桥杯报名', '报名 蓝桥杯'],
-  ['帮我查一下本校挑战杯', '挑战杯'],
-  ['帮我查一下本校数学建模', '数学建模'],
-  ['帮我查一下本校大创', '大创'],
-  ['帮我查一下本校四六级', '四六级'],
-  ['帮我查一下本校英语四级', '英语四级'],
-  ['帮我查一下本校英语六级', '英语六级'],
-  ['帮我查一下本校计算机等级', '计算机等级'],
-  ['帮我查一下本校考研', '考研'],
-  ['帮我查一下本校保研', '保研'],
-  ['帮我查一下本校交换生', '交换生'],
-  ['本校最近有没有蓝桥杯比赛可以报名？', '比赛 报名 蓝桥杯'],
+  ['帮我查一下本校蓝桥杯报名', '本校蓝桥杯报名'],
+  ['帮我查一下本校挑战杯', '本校挑战杯'],
+  ['帮我查一下本校数学建模', '本校数学建模'],
+  ['帮我查一下本校大创', '本校大创'],
+  ['帮我查一下本校四六级', '本校四六级'],
+  ['帮我查一下本校英语四级', '本校英语四级'],
+  ['帮我查一下本校英语六级', '本校英语六级'],
+  ['帮我查一下本校计算机等级', '本校计算机等级'],
+  ['帮我查一下本校考研', '本校考研'],
+  ['帮我查一下本校保研', '本校保研'],
+  ['帮我查一下本校交换生', '本校交换生'],
+  ['本校最近有没有蓝桥杯比赛可以报名？', '本校 比赛 报名 蓝桥杯'],
   ['帮我查一下“蓝桥杯”', '蓝桥杯'],
-  ['帮我查一下本校"挑战杯"报名', '报名 挑战杯'],
-  ['帮我查一下本校‘数学建模’', '数学建模'],
-  ['学校最近有哪些「讲座」？', '讲座'],
-  ['帮我查一下本校『交换生』', '交换生'],
+  ['帮我查一下本校"挑战杯"报名', '本校挑战杯报名'],
+  ['帮我查一下本校‘数学建模’', '本校数学建模'],
+  ['学校最近有哪些「讲座」？', '本校 讲座'],
+  ['帮我查一下本校『交换生』', '本校交换生'],
 ] as const) {
   test(`named public campus topic is retained: ${question}`, () => {
     assert.equal(intent.chatSearchQuery(question), expected);
   });
 }
 
-test('named public topics do not permit arbitrary keywords or override non-action guards', () => {
-  assert.equal(intent.chatSearchQuery('帮我查一下本校蓝桥杯报名，我的邮箱 private@example.invalid，个人秘密是鸢尾花'), '报名 蓝桥杯');
+test('named public topics exclude private clauses and do not override non-action guards', () => {
+  assert.equal(intent.chatSearchQuery('帮我查一下本校蓝桥杯报名，我的邮箱 private@example.invalid，个人秘密是鸢尾花'), '本校蓝桥杯报名');
   for (const question of [
     '本校最近有没有蓝桥杯比赛可以报名，但不要联网',
     '“帮我查一下本校蓝桥杯报名”是什么意思？',
@@ -106,4 +106,29 @@ test('named public topics do not permit arbitrary keywords or override non-actio
     '同学问本校最近有没有蓝桥杯比赛可以报名',
     '本校蓝桥杯比赛的报名材料是什么？',
   ]) assert.equal(intent.chatSearchQuery(question), null, question);
+});
+
+for (const [question, expected] of [
+  ['帮我搜索GraphQL新特性', 'GraphQL新特性'],
+  ['联网检索GraphQL新特性', 'GraphQL新特性'],
+  ['上网查找DeepSeek最新版本', 'DeepSeek最新版本'],
+  ['帮我搜索GraphQL新特性，我的邮箱 private@example.invalid', 'GraphQL新特性'],
+  ['帮我搜索GraphQL新特性\n历史中保存了我的个人秘密', 'GraphQL新特性'],
+  ['帮我搜索本校比赛邮箱 private@example.invalid', '比赛'],
+  ['帮我搜索本校比赛手机号13800138000', '比赛'],
+  ['帮我搜索本校比赛密钥sk-fixture-only', '比赛'],
+  ['帮我搜索本校比赛我的个人秘密是鸢尾花', '比赛'],
+  ['帮我搜索本校比赛个人秘密是鸢尾花', '比赛'],
+  ['帮我搜索https://private.example.invalid/GraphQL', '通知公告 报名'],
+] as const) {
+  test(`explicit public-web subject or privacy fallback: ${question}`, () => {
+    assert.equal(intent.chatSearchQuery(question), expected);
+  });
+}
+
+test('explicit public-web subjects keep the existing 200-character outbound limit', () => {
+  const subject = 'GraphQL' + '新特性'.repeat(100);
+  const query = intent.chatSearchQuery(`帮我搜索${subject}`);
+  assert.equal(query?.length, 200);
+  assert.ok(query?.startsWith('GraphQL新特性'));
 });

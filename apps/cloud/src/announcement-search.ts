@@ -65,7 +65,7 @@ async function limitedJson(response: Response, signal: AbortSignal): Promise<unk
 
 /** Search snippets are discovery hints only. Callers must read and re-authorize
  * each candidate through school-pages before treating it as body evidence. */
-export async function searchAnnouncements(school: SearchSchool, query: string, options: { fetch?: typeof fetch; apiKey?: string } = {}): Promise<SearchResult> {
+export async function searchAnnouncements(school: SearchSchool, query: string, options: { fetch?: typeof fetch; apiKey?: string; scope?: 'school' | 'web' } = {}): Promise<SearchResult> {
   const apiKey = (options.apiKey ?? process.env.TAVILY_API_KEY ?? '').trim();
   if (!apiKey) return { state: 'unconfigured', code: 'unconfigured', message: '联网搜索服务未配置，请联系网站管理员。已有公告仍可使用。', candidates: [] };
   const domains = [...new Set([school.homepage, school.announcementUrl].flatMap(value => {
@@ -76,7 +76,8 @@ export async function searchAnnouncements(school: SearchSchool, query: string, o
     const host = url.hostname;
     return [host.endsWith('.edu.cn') ? host.split('.').slice(-3).join('.') : host];
   }))];
-  if (!domains.length) return failed('invalid_scope');
+  const web = options.scope === 'web';
+  if (!web && !domains.length) return failed('invalid_scope');
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
@@ -88,8 +89,8 @@ export async function searchAnnouncements(school: SearchSchool, query: string, o
         method: 'POST', redirect: 'error', signal: controller.signal,
         headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json', accept: 'application/json' },
         body: JSON.stringify({
-          query: `${school.name.trim()} ${query.trim()}`.slice(0, 500),
-          include_domains: domains, include_domains_mode: 'restrict', search_depth: 'basic', topic: 'general',
+          query: (web ? query.trim().replace(/本校|我们学校/g, school.name.trim()) : `${school.name.trim()} ${query.trim()}`).slice(0, 500),
+          ...(!web ? { include_domains: domains, include_domains_mode: 'restrict' } : {}), search_depth: 'basic', topic: 'general',
           max_results: 5, auto_parameters: false, include_answer: false, include_raw_content: false,
         }),
       });
@@ -108,15 +109,18 @@ export async function searchAnnouncements(school: SearchSchool, query: string, o
       for (const item of data.results) {
         if (!item || typeof item !== 'object' || typeof item.url !== 'string' || typeof item.title !== 'string' || !item.title.trim()) continue;
         const url = safeUrl(item.url);
-        if (!url || !domains.some(domain => url.hostname === domain || url.hostname.endsWith('.' + domain)) || seen.has(url.href)) continue;
+        if (!url || (!web && !domains.some(domain => url.hostname === domain || url.hostname.endsWith('.' + domain))) || seen.has(url.href)) continue;
         seen.add(url.href);
         candidates.push({ url: url.href, title: item.title.trim().slice(0, 220), snippet: typeof item.content === 'string' ? item.content.trim().slice(0, 2000) : '' });
         if (candidates.length === 5) break;
       }
       return { state: 'complete', message: candidates.length
         ? '本次联网搜索已完成，搜索摘要仅供发现线索，正文仍需核验。'
-        : '本次联网搜索已完成，未找到符合本校官方域名范围的公告线索。已有公告仍可使用。', candidates };
+        : web ? '本次联网搜索已完成，未找到可用的公开网页线索。已有资料仍可使用。' : '本次联网搜索已完成，未找到符合本校官方域名范围的公告线索。已有公告仍可使用。', candidates };
     })()]);
   } catch { return failed(controller.signal.aborted ? 'timeout' : 'network'); }
   finally { clearTimeout(timer); }
 }
+
+export const searchPublicWeb = (school: SearchSchool, query: string, options: { fetch?: typeof fetch; apiKey?: string } = {}) =>
+  searchAnnouncements(school, query, { ...options, scope: 'web' });

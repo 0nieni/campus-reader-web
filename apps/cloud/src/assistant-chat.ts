@@ -10,14 +10,17 @@ import { buildChatContext, type ContextExchange, type MemorySnapshot, type Memor
 import { chatSearchQuery, isSearchCapabilityQuestion } from './chat-intent';
 import { memoryService, selectMemoryItems } from './assistant-memory';
 import { buildConversationSummary } from './conversation-summary';
+import type { AiProviderRef } from '@campus/contracts';
+import type { ProviderProfiles } from './ai-provider-profiles';
+import { checkedProviderRef } from './provider-endpoints';
 import { filterProgramReferences } from './program-references';
 
 const COLLECTION = 'web_ai_conversations';
 const unreadableMaterial = new Set(['NO_MATERIAL', 'SOURCE_UNAVAILABLE', 'SOURCE_LOGIN_REQUIRED', 'SOURCE_RESTRICTED', 'SOURCE_NOT_FOUND', 'SOURCE_ROBOTS_BLOCKED', 'SOURCE_BUSY', 'SOURCE_DAILY_LIMIT']);
-type SavedTurn = { id: string; question: string; fingerprint: string; taskId: string | null; materialIds: string[]; references: AiChatTurn['references']; reply?: string; programReply?: AiChatTurn['programReply']; error?: string; history: string; summary?: string; evidence?: import('./chat-context').HistoryEvidence[]; memory?: MemorySnapshot; memoryDependencies?: MemoryDependency[]; search?: AiRecommendations['search']; preparing?: boolean; preparationStartedAt?: number; cancelled?: boolean; service: 'official' | 'byok'; provider?: string; model?: string };
+type SavedTurn = { id: string; question: string; fingerprint: string; taskId: string | null; materialIds: string[]; references: AiChatTurn['references']; reply?: string; programReply?: AiChatTurn['programReply']; error?: string; history: string; summary?: string; evidence?: import('./chat-context').HistoryEvidence[]; memory?: MemorySnapshot; memoryDependencies?: MemoryDependency[]; search?: AiRecommendations['search']; preparing?: boolean; preparationStartedAt?: number; cancelled?: boolean; service: 'official' | 'byok'; provider?: string; model?: string; providerProfile?: AiProviderRef };
 type Conversation = { _id: string; owner: string; schoolId: string; createdAt: string; expireAt: string; turns: SavedTurn[]; pendingTurn: string | null; purged?: boolean };
 type Ai = ReturnType<typeof aiService>;
-export function assistantChat(db: Database, repo: Repository, ai: Ai, recommend: (owner: string, schoolId: string, query?: string) => Promise<AiRecommendations>, now = Date.now, discover?: (schoolId: string, query: string, identity: IdentityContext) => Promise<AiRecommendations>) {
+export function assistantChat(db: Database, repo: Repository, ai: Ai, recommend: (owner: string, schoolId: string, query?: string) => Promise<AiRecommendations>, now = Date.now, discover?: (schoolId: string, query: string, identity: IdentityContext) => Promise<AiRecommendations>, providers?: ProviderProfiles) {
   const memory = memoryService(db, repo, now);
   const requestId = (value: unknown) => { const id = identifier(value); if (id.length < 12 || id.length > 100) reject('VALIDATION_FAILED', '请求编号无效。'); return id; };
   async function purge(row: Conversation) {
@@ -34,7 +37,7 @@ export function assistantChat(db: Database, repo: Repository, ai: Ai, recommend:
     await authorizeSchool(repo, owner, row.schoolId); return row;
   }
   function baseTurn(turn: SavedTurn): AiChatTurn {
-    return { id: turn.id, question: turn.question, taskId: turn.taskId, state: turn.cancelled ? 'cancelled' : turn.preparing ? 'running' : turn.error ? 'failed' : 'complete', result: turn.reply || null, message: turn.preparing ? '正在检索或准备资料，请稍后刷新对话状态。' : turn.error || (turn.reply ? '未调用模型，不扣官方次数。' : '正在准备本轮，请先刷新状态。'), references: turn.references, step: 0, totalSteps: 0, quotaHeld: false, service: turn.service, provider: turn.provider || '', model: turn.model || '', ...(turn.search ? { search: turn.search } : {}), ...(turn.programReply ? { programReply: turn.programReply } : {}) };
+    return { id: turn.id, question: turn.question, taskId: turn.taskId, state: turn.cancelled ? 'cancelled' : turn.preparing ? 'running' : turn.error ? 'failed' : 'complete', result: turn.reply || null, message: turn.preparing ? '正在检索或准备资料，请稍后刷新对话状态。' : turn.error || (turn.reply ? '未调用模型，不扣官方次数。' : '正在准备本轮，请先刷新状态。'), references: turn.references, step: 0, totalSteps: 0, quotaHeld: false, service: turn.service, provider: turn.provider || '', model: turn.model || '', ...(turn.providerProfile ? { providerProfile: turn.providerProfile } : {}), ...(turn.search ? { search: turn.search } : {}), ...(turn.programReply ? { programReply: turn.programReply } : {}) };
   }
   async function publicTurn(row: Conversation, turn: SavedTurn): Promise<AiChatTurn> {
     if (turn.preparing && now() - (turn.preparationStartedAt || 0) > 90000) {
@@ -99,12 +102,12 @@ export function assistantChat(db: Database, repo: Repository, ai: Ai, recommend:
     });
     return publicTurn(await load(row._id, row.owner), turn);
   }
-  function searchStatusTurn(row: Conversation, pending: SavedTurn, discovery: AiRecommendations) {
-    const reply = discovery.search.state !== 'complete'
+  function searchStatusTurn(row: Conversation, pending: SavedTurn, discovery: AiRecommendations, explanation?: string) {
+    const reply = explanation || (discovery.search.state !== 'complete'
       ? `这次没有完成联网搜索。${discovery.search.message} 下方保留已收录公告的入口；本轮没有调用模型。`
       : discovery.search.candidateCount === 0
-        ? '联网搜索已完成，但这次没找到符合本校范围的公告线索。下方保留已收录公告入口，不会把它们当成本次新搜到的结果。'
-        : `联网搜索找到了${discovery.search.candidateCount ?? '一些'}条候选，但本次没有取得可用于AI回答的正文。你可以先看下方原文；搜索摘要不会被当作公告正文。`;
+        ? '联网搜索已完成，但这次没找到可用的公开网页线索。下方保留已收录公告入口，不会把它们当成本次新搜到的结果。'
+        : `联网搜索找到了${discovery.search.candidateCount ?? '一些'}条候选，但本次没有取得可用于AI回答的正文。你可以先看下方原文；搜索摘要不会被当作公告正文。`);
     return completeProgramTurn(row, pending, { reply, programReply: 'search_status', search: discovery.search,
       references: discovery.items.slice(0, 5).map((item, index) => ({ reference: `R${index + 1}`, itemId: item.id, title: item.title, originalUrl: item.originalUrl })) });
   }
@@ -152,13 +155,16 @@ export function assistantChat(db: Database, repo: Repository, ai: Ai, recommend:
         if (input.service !== undefined && !['official', 'byok'].includes(String(input.service))) reject('VALIDATION_FAILED', '使用方式无效。');
         if (input.itemIds !== undefined && (!Array.isArray(input.itemIds) || input.itemIds.length > 8)) reject('VALIDATION_FAILED', '一次最多使用八篇公告。');
         const explicitIds = Array.isArray(input.itemIds) ? [...new Set(input.itemIds.map(identifier))] : [];
-        const fingerprint = digest([question, explicitIds, input.service || 'official', input.provider || null, input.model || null]);
+        const providerProfile = input.providerProfile === undefined ? undefined : checkedProviderRef(input.providerProfile);
+        if (providerProfile && (input.service !== 'byok' || input.provider !== undefined || !providers)) reject('VALIDATION_FAILED', '请重新选择已保存的个人服务商配置。');
+        const fingerprint = digest([question, explicitIds, input.service || 'official', input.provider || null, input.model || null, ...(providerProfile ? [providerProfile] : [])]);
         let turn = row.turns.find(t => t.id === id);
         if (turn && turn.fingerprint !== fingerprint) reject('REQUEST_CONFLICT', '同一请求编号不能更换问题、资料或模型。');
         if (turn?.error || turn?.reply || turn?.preparing || turn?.cancelled) return publicTurn(row, turn);
         if (turn?.taskId && await readDoc(db, 'web_ai_tasks', turn.taskId)) return publicTurn(row, turn);
         if (!turn) {
-          const pending: SavedTurn = { id, question, fingerprint, taskId: null, materialIds: [], references: [], history: '', preparing: true, preparationStartedAt: now(), service: input.service === 'byok' ? 'byok' : 'official', ...(input.provider ? { provider: String(input.provider) } : {}), ...(input.model ? { model: String(input.model) } : {}) };
+          if (providerProfile) await providers!.resolve(owner, providerProfile, String(input.model || ''));
+          const pending: SavedTurn = { id, question, fingerprint, taskId: null, materialIds: [], references: [], history: '', preparing: true, preparationStartedAt: now(), service: input.service === 'byok' ? 'byok' : 'official', ...(input.provider ? { provider: String(input.provider) } : {}), ...(input.model ? { model: String(input.model) } : {}), ...(providerProfile ? { providerProfile } : {}) };
           let acquired = false;
           await atomic(db, async tx => {
             const ref = tx.collection(COLLECTION).doc(row._id), current = transactionRow((await ref.get()).data) as Conversation;
@@ -167,6 +173,7 @@ export function assistantChat(db: Database, repo: Repository, ai: Ai, recommend:
             if (existing) { if (existing.fingerprint !== fingerprint) reject('REQUEST_CONFLICT', '请求编号冲突。'); turn = existing; return; }
             if (current.pendingTurn) reject('TASK_BUSY', '请先完成、取消或核查当前轮次，再发送新问题。');
             if (current.turns.length >= 20) reject('CONTEXT_TOO_LONG', '本对话已达到 20 轮，请新建对话。');
+            if (providerProfile) await providers!.guard(tx, owner, providerProfile, String(input.model || ''));
             row.turns = current.turns;
             await ref.update({ turns: [...current.turns, pending], pendingTurn: id });
             acquired = true;
@@ -176,14 +183,17 @@ export function assistantChat(db: Database, repo: Repository, ai: Ai, recommend:
             // Program-owned capability facts and memory management need no model or sources.
             const command = isSearchCapabilityQuestion(question)
               ? { handled: true, message: discover && process.env.TAVILY_API_KEY?.trim()
-                ? '搜索服务已配置，可以帮你找当前学校官方公开的公告。你可以直接问“最近学校有什么比赛可以报名”。是否搜到、正文能否读到，会按本次实际结果说明；这里不是全网通用搜索。'
+                ? '搜索服务已配置，可以帮你搜索公开网页，也可以查当前学校的公告。你可以直接问“最近学校有什么比赛可以报名”。是否搜到、正文能否读到，会按本次实际结果说明；外部网页会标明真实来源，不会冒充学校官方通知。'
                 : '当前还不能实际联网，因为网站的搜索服务尚未配置。请联系网站管理员；已收录的公告仍然可以查看。搜索服务与回答模型是分开配置的，填写自己的模型 Key 不会自动开启联网。' }
               : await memory.command(owner, row.schoolId, { requestId: digest(['chat-memory-command', row._id, id]), question });
             if (command.handled) return completeProgramTurn(row, pending, { reply: command.message || '请说明要修改或删除哪条自动记忆。', programReply: isSearchCapabilityQuestion(question) ? 'search_capability' : 'memory' });
             const searchQuery = discover ? chatSearchQuery(question) : null;
             const discovery = searchQuery ? await discover!(row.schoolId, searchQuery, identity) : null;
             if (discovery && (discovery.search.state !== 'complete' || discovery.search.readableCount === 0)) return searchStatusTurn(row, pending, discovery);
-            let ids = discovery ? discovery.items.filter(item => item.allowAi && (!discovery.search.candidateIds || discovery.search.candidateIds.includes(item.id))).map(item => item.id).slice(0, 5) : explicitIds;
+            if (discovery && explicitIds.length === 8 && discovery.items.some(item => item.allowAi && !explicitIds.includes(item.id) && (!discovery.search.candidateIds || discovery.search.candidateIds.includes(item.id)))) {
+              return searchStatusTurn(row, pending, discovery, `联网搜索已完成，找到${discovery.search.candidateCount ?? '一些'}条候选、取得${discovery.search.readableCount ?? '一些'}篇可读正文。你已选择8篇资料，已达到单次上限；请减少所选资料，为搜索正文留出位置后再提问。本轮未调用模型，不扣官方次数。`);
+            }
+            let ids = discovery ? [...new Set([...explicitIds, ...discovery.items.filter(item => item.allowAi && (!discovery.search.candidateIds || discovery.search.candidateIds.includes(item.id))).map(item => item.id).slice(0, 5)])].slice(0, 8) : explicitIds;
             if (!ids.length && !discovery) {
               const last = [...row.turns].reverse().find(t => t.materialIds.length && !t.error);
               const isFollowup = /^(那|它|这个|这条|这项|什么时候|截止|需要|怎么|能否|可以|还有|报名|材料|费用|地点|你刚才|刚才|之前|第二|第一个|接下来)/.test(question);
@@ -198,14 +208,32 @@ export function assistantChat(db: Database, repo: Repository, ai: Ai, recommend:
               try { await readingPackage(db, repo, owner, row.schoolId, [itemId]); readable.push(itemId); }
               catch (error) {
                 if (!(error instanceof AppError) || !unreadableMaterial.has(error.code)) throw error;
-                if (explicitIds.length && !discovery) missingExplicit = true;
+                if (explicitIds.includes(itemId)) missingExplicit = true;
               }
             }
             if (discovery) {
-              discovery.search = { ...discovery.search, readableCount: readable.length };
-              if (!readable.length) return searchStatusTurn(row, pending, discovery);
+              discovery.search = { ...discovery.search, readableCount: readable.filter(id => !discovery.search.candidateIds || discovery.search.candidateIds.includes(id)).length };
+              if (!discovery.search.readableCount) return searchStatusTurn(row, pending, discovery);
             }
-            if (readable.length && !missingExplicit) pack = await readingPackage(db, repo, owner, row.schoolId, readable);
+            if (readable.length && !missingExplicit) {
+              try { pack = await readingPackage(db, repo, owner, row.schoolId, readable); }
+              catch (error) {
+                if (!discovery || !(error instanceof AppError) || !unreadableMaterial.has(error.code)) throw error;
+                // Reacquisition can fail after successful individual reads. Recheck
+                // candidate bodies for truthful counts, but do not retry model work.
+                let count = 0;
+                for (const itemId of readable) {
+                  try {
+                    await readingPackage(db, repo, owner, row.schoolId, [itemId]);
+                    if (!discovery.search.candidateIds || discovery.search.candidateIds.includes(itemId)) count++;
+                  } catch (recheckError) {
+                    if (!(recheckError instanceof AppError) || !unreadableMaterial.has(recheckError.code)) throw recheckError;
+                  }
+                }
+                discovery.search = { ...discovery.search, readableCount: count };
+                return searchStatusTurn(row, pending, discovery, count ? `联网搜索已完成，找到${discovery.search.candidateCount ?? '一些'}条候选；合并资料时正文暂不可读取，重新核验后仍有${count}篇搜索正文可读。请查看原文或调整选择后重新提问。本轮未调用模型，不扣官方次数。` : undefined);
+              }
+            }
             const profile = await readDoc(db, 'user_profiles', owner);
             const prefs = profile?.aiAssistant?.[row.schoolId]?.preferences;
             const memoryState = await memory.get(owner, row.schoolId);
@@ -230,7 +258,7 @@ export function assistantChat(db: Database, repo: Repository, ai: Ai, recommend:
             const summaryInput = buildConversationSummary(older);
             const { history, evidence, summary, memoryDependencies } = buildChatContext(row.schoolId, prefs, exchanges, pack?.docs.map(doc => doc.title) || [], discovery?.search, summaryInput);
             const taskId = pack ? digest([owner, digest(['chat-turn', row._id, id])]) : null;
-            turn = { id, question, fingerprint, taskId, materialIds: pack?.docs.map(d => d.itemId) || [], references: pack?.docs.map(d => ({ reference: d.reference, itemId: d.itemId, title: d.title, originalUrl: d.originalUrl })) || [], history, summary, evidence, memory: memorySnapshot, memoryDependencies, ...(discovery ? { search: discovery.search } : {}), service: input.service === 'byok' ? 'byok' : 'official', ...(input.provider ? { provider: String(input.provider) } : {}), ...(input.model ? { model: String(input.model) } : {}), ...(!pack ? { reply: missingExplicit ? '所选公告有正文暂时不可读取，请查看原文或调整选择后再提问。此提示未调用模型，不扣官方次数。' : '当前没有可供 AI 阅读的公告正文。请先选择本校公告，或使用联网搜索查找公开公告，再继续提问。此提示未调用模型，不扣官方次数。' } : {}) };
+            turn = { id, question, fingerprint, taskId, materialIds: pack?.docs.map(d => d.itemId) || [], references: pack?.docs.map(d => ({ reference: d.reference, itemId: d.itemId, title: d.title, originalUrl: d.originalUrl })) || [], history, summary, evidence, memory: memorySnapshot, memoryDependencies, ...(discovery ? { search: discovery.search } : {}), service: input.service === 'byok' ? 'byok' : 'official', ...(input.provider ? { provider: String(input.provider) } : {}), ...(input.model ? { model: String(input.model) } : {}), ...(providerProfile ? { providerProfile } : {}), ...(!pack ? { reply: missingExplicit ? '所选公告有正文暂时不可读取，请查看原文或调整选择后再提问。此提示未调用模型，不扣官方次数。' : '当前没有可供 AI 阅读的公告正文。请先选择本校公告，或使用联网搜索查找公开公告，再继续提问。此提示未调用模型，不扣官方次数。' } : {}) };
             const saved = turn;
             await authorizeSchool(repo, owner, row.schoolId);
             await atomic(db, async tx => {
@@ -238,6 +266,7 @@ export function assistantChat(db: Database, repo: Repository, ai: Ai, recommend:
               if (current.purged || Date.parse(current.expireAt) <= now()) reject('RESULT_EXPIRED', '对话已到期或清除。');
               const existing = current.turns.find(t => t.id === id);
               if (!existing?.preparing || current.pendingTurn !== id) { turn = existing || { ...pending, preparing: false, cancelled: true }; return; }
+              if (providerProfile) await providers!.guard(tx, owner, providerProfile, String(input.model || ''));
               await ref.update({ turns: current.turns.map(value => value.id === id ? saved : value), pendingTurn: pack ? id : null });
             });
           } catch (error) {
@@ -251,7 +280,7 @@ export function assistantChat(db: Database, repo: Repository, ai: Ai, recommend:
         if (!turn!.taskId) return publicTurn(row, turn!);
         let task: ReadingTask;
         try {
-          task = await ai.handle('ai.start', { schoolId: row.schoolId, itemIds: turn!.materialIds, requestId: digest(['chat-turn', row._id, id]), service: turn!.service, provider: turn!.provider, model: turn!.model, task: 'answer', question: turn!.question, chat: { history: turn!.history, summary: turn!.summary, evidence: turn!.evidence, memory: turn!.memory, memoryDependencies: turn!.memoryDependencies, expireAt: row.expireAt } }, identity) as ReadingTask;
+          task = await ai.handle('ai.start', { schoolId: row.schoolId, itemIds: turn!.materialIds, requestId: digest(['chat-turn', row._id, id]), service: turn!.service, ...(turn!.providerProfile ? { providerProfile: turn!.providerProfile } : { provider: turn!.provider }), model: turn!.model, task: 'answer', question: turn!.question, chat: { history: turn!.history, summary: turn!.summary, memory: turn!.memory, memoryDependencies: turn!.memoryDependencies, evidence: turn!.evidence, expireAt: row.expireAt } }, identity) as ReadingTask;
         } catch (error) {
           // Preserve idempotency and a safe explanation; do not leave the conversation locked.
           const message = error instanceof AppError ? error.message : '本轮准备未完成，请查询对话状态。';
