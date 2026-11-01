@@ -43,7 +43,7 @@ export function assistantService(db: Database, repo: Repository, ai: ReturnType<
     catch (error) {
       if (!(error instanceof AppError) || error.code !== 'SEARCH_LIMIT') throw error;
       const local = await profile.recommend(identity.dataOwnerId, schoolId, query);
-      return { ...local, search: { state: 'failed', message: error.message } };
+      return { ...local, search: { state: 'failed', code: 'rate_limited', message: error.message } };
     }
   }, providers);
   async function searchBudget(owner: string) {
@@ -60,27 +60,15 @@ export function assistantService(db: Database, repo: Repository, ai: ReturnType<
     if (input.query !== undefined && (typeof input.query !== 'string' || input.query.length > 500)) reject('VALIDATION_FAILED', '搜索问题最多 500 字。');
     if (input.search !== undefined && typeof input.search !== 'boolean') reject('VALIDATION_FAILED', '联网搜索开关无效。');
     const query = String(input.query || '').trim(), local = await profile.recommend(owner, schoolId, query);
-    if (!input.search) return process.env.TAVILY_API_KEY || search !== searchPublicWeb
-      ? { ...local, search: { state: 'idle', message: '联网搜索已配置，点击搜索后执行；当前仅展示已有公告。' } } : local;
-    if (process.env.TAVILY_API_KEY || search !== searchPublicWeb) await searchBudget(owner);
+    if (!input.search) return process.env.TAVILY_API_KEY?.trim() || search !== searchPublicWeb
+      ? { ...local, search: { state: 'idle', message: '联网搜索已配置，点击搜索后执行；当前仅展示已有公告。' } } : { ...local, search: { state: 'unconfigured', code: 'unconfigured', message: '联网搜索尚未配置，请联系网站管理员；当前仅展示已收录公告。' } };
+    if (process.env.TAVILY_API_KEY?.trim() || search !== searchPublicWeb) await searchBudget(owner);
     const found = await search(school, query || '通知公告 报名');
-    const result: AiRecommendations = { ...local, search: { state: found.state, message: found.message } };
+    const result: AiRecommendations = { ...local, search: { state: found.state, message: found.message, ...(found.code ? { code: found.code } : {}) } };
     if (found.state !== 'complete') return result;
-    const scope = await repo.scope(schoolId, owner), current = now();
-    const known = new Map<string, ItemRow[]>(), seen = new Set<string>();
+    const scope = await repo.scope(schoolId, owner);
     let lookupSaturated = false;
-    // Look beyond the five displayed recommendations, while keeping discovery bounded.
-    for (let offset = 0; offset < 200; offset += 100) {
-      const page = (await repo.items(scope, offset, 100, new Date(current - 365 * 86400000).toISOString())).slice(0, 100);
-      for (const row of page) {
-        if (seen.has(row._id) || !publicCandidate(row, scope, current)) continue;
-        seen.add(row._id);
-        for (const url of new Set([canonicalUrl(originalUrl(row)), canonicalUrl(row.canonicalUrl)].filter((url): url is string => Boolean(url))))
-          known.set(url, [...(known.get(url) || []), row]);
-      }
-      if (page.length < 100) break;
-      if (offset + page.length >= 200) lookupSaturated = true;
-    }
+    const discoveredUrls = new Set<string>();
     async function existingCard(rows: ItemRow[]): Promise<RecommendedNotice | null> {
       const cards: RecommendedNotice[] = [];
       for (const row of rows) {
@@ -96,28 +84,38 @@ export function assistantService(db: Database, repo: Repository, ai: ReturnType<
         }
         const displayed = repo.personalize ? await repo.personalize(row, owner) : row;
         const checked = [row.updatedAt, row.discoveredAt, row.createdAt].find(value => typeof value === 'string' && Number.isFinite(Date.parse(value)));
-        cards.push({ ...toNotice(displayed), originalUrl: originalUrl(row), allowAi, readState: row.contentText?.trim() ? 'body' : 'title_only', checkedAt: checked || null,
+        cards.push({ ...toNotice(displayed), originalUrl: originalUrl(row), allowAi, readState: row.contentText?.trim() || row.policyBodyAvailable ? 'body' : 'title_only', checkedAt: checked || null,
           reason: allowAi ? '检索命中已收录公告，沿用原公告与来源权限。' : '沿用已有公告及其来源权限；当前不可用于 AI。' });
       }
       // If duplicate authorized records disagree, do not route around the stricter policy.
       return cards.find(card => !card.allowAi) || cards[0] || null;
     }
-    const knownCard = (url: string) => existingCard(known.get(canonicalUrl(url) || '') || []);
+    async function knownCard(url: string): Promise<RecommendedNotice | null | false> {
+      const normalized = canonicalUrl(url);
+      const rows = normalized && repo.itemsForUrlPolicy ? await repo.itemsForUrlPolicy(scope, normalized) : null;
+      if (!rows) { lookupSaturated = true; return false; }
+      // Foreign-school public/withdrawn rows are policy denial evidence only.
+      // Never revive an inaccessible known URL through a fresh search identity.
+      if (rows.some(row => !publicCandidate(row, scope, now()))) return false;
+      return existingCard(rows);
+    }
     const sourceId = 'ai_search_' + digest([owner, schoolId]);
     const checkedAt = new Date(now()).toISOString();
     const candidates = await Promise.all(found.candidates.slice(0, 5).map(async (candidate, index): Promise<RecommendedNotice | null> => {
       let url: string, source: ReturnType<typeof publicSearchSource>;
       try { source = publicSearchSource(candidate.url); url = approvedSchoolUrl(candidate.url, source).href; } catch { return null; }
+      discoveredUrls.add(url);
       const existing = await knownCard(url);
+      if (existing === false) return null;
       if (existing) return existing;
       const id = 'ai_search_item_' + digest([owner, schoolId, url]);
       const card: RecommendedNotice = { id, title: candidate.title, sourceName: new URL(url).hostname, originalUrl: url, publishedAt: null, categories: [/竞赛|比赛/.test(candidate.title) ? 'competition' : /讲座|学术|论坛/.test(candidate.title) ? 'academic' : 'school'], summary: null, reason: '本次全网搜索发现的公开资料，适用性仍需结合原文判断。', readState: 'snippet_only', checkedAt, allowAi: false };
-      if (lookupSaturated) return { ...card, reason: '本次已有公告核验范围已满，尚未确认此链接是否对应已有来源；仅展示搜索线索。' };
       if (index >= 3) return card;
       try {
         const page = await reader(url, source);
         const finalUrl = approvedSchoolUrl(page.url, source).href;
         const redirected = await knownCard(finalUrl);
+        if (redirected === false) return null;
         if (redirected) return redirected;
         const text = extractArticle(page, source);
         await authorizeSchool(repo, owner, schoolId);
@@ -131,10 +129,18 @@ export function assistantService(db: Database, repo: Repository, ai: ReturnType<
       } catch { return { ...card, readState: 'unavailable', reason: '发现公开网页，但本次正文未读取成功，请查看原文。' }; }
     }));
     await authorizeSchool(repo, owner, schoolId);
-    const merged = [...candidates.filter((n): n is RecommendedNotice => n !== null), ...local.items];
+    const verifiedCandidates = candidates.filter((n): n is RecommendedNotice => n !== null);
+    result.search.candidateCount = discoveredUrls.size;
+    result.search.candidateIds = [...new Set(verifiedCandidates.map(item => item.id))];
+    result.search.readableCount = verifiedCandidates.filter(item => item.readState === 'body' && item.allowAi).length;
+    const merged = [...verifiedCandidates, ...local.items];
     result.items = merged.filter((n, index) => merged.findIndex(other => Boolean(other.originalUrl && other.originalUrl === n.originalUrl) || other.id === n.id) === index).slice(0, 5);
     result.coverage = '网站已有资料与本次全网公开搜索结果；外部网页不代表学校官方公告。搜索摘要不是正文证据，临时正文最多保留 24 小时，不创建来源订阅。';
-    if (lookupSaturated) result.coverage += ' 已有公告链接核验达到 200 条上限，未匹配的新链接仅展示线索，不自动读取或导入。';
+    if (lookupSaturated) {
+      const explanation = '当前链接授权核验范围不足或存在无法确认的旧资料归属，未确认的新链接已隐藏，未读取或导入。请先选用已收录公告，或联系管理员核验。';
+      result.search.message += ` ${explanation}`;
+      result.coverage += ` ${explanation}`;
+    }
     return result;
   }
   return {

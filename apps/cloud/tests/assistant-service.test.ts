@@ -145,24 +145,26 @@ test('known-URL lookup never exposes a private manual notice or a foreign-school
   const search = async () => ({ state: 'complete' as const, message: '搜索完成', candidates: [{ url, title: '本校竞赛报名通知', snippet: '' }] });
   const assistant = assistantService(f.db, f.repo, aiService(f.db, f.repo), Date.now, search, async url => ({ url, html: article }));
   const result = await assistant.handle('ai.recommend', { schoolId: 'bjtu', search: true }, identity) as AiRecommendations;
-  assert.equal(result.items[0].title, '本校竞赛报名通知');
+  assert.ok(!result.items.some(item => item.title === '本校竞赛报名通知'), 'known inaccessible URL cannot be reimported');
   assert.ok(!JSON.stringify(result).includes('不得展示'));
-  assert.ok(!['private', 'foreign'].includes(result.items[0].id));
+  assert.ok(result.items.every(item => !['private', 'foreign'].includes(item.id)));
 });
 
-test('a saturated known-URL lookup keeps unmatched search hints read-only instead of bypassing an unseen policy', async () => {
+test('saturated policy coverage hides uncertain URLs while preserving real search count and actionable status', async () => {
   const f = searchFixture(), template = f.items.get('notice')!;
   f.items.clear();
-  for (let index = 0; index < 201; index++) f.items.set(`known_${index}`, { ...template, _id: `known_${index}`, originalUrl: `https://www.bjtu.edu.cn/known_${index}` });
-  f.items.get('known_200')!.aiProcessing = 'import_only';
+  for (let index = 0; index < 10001; index++) f.items.set(`known_${index}`, { ...template, _id: `known_${index}`, originalUrl: `https://www.bjtu.edu.cn/known_${index}` });
+  f.items.get('known_10000')!.aiProcessing = 'import_only';
   let reads = 0;
-  const search = async () => ({ state: 'complete' as const, message: '搜索完成', candidates: [{ url: 'https://www.bjtu.edu.cn/known_200', title: '竞赛报名通知', snippet: '待核验' }] });
+  const search = async () => ({ state: 'complete' as const, message: '搜索完成', candidates: [{ url: 'https://www.bjtu.edu.cn/known_10000', title: '竞赛报名通知', snippet: '待核验' }] });
   const assistant = assistantService(f.db, f.repo, aiService(f.db, f.repo), Date.now, search, async url => { reads++; return { url, html: article }; });
   const result = await assistant.handle('ai.recommend', { schoolId: 'bjtu', search: true }, identity) as AiRecommendations;
-  const found = result.items.find(row => row.originalUrl === 'https://www.bjtu.edu.cn/known_200')!;
-  assert.equal(found.allowAi, false);
-  assert.equal(found.readState, 'snippet_only');
-  assert.match(found.reason, /范围|核验/);
+  assert.ok(!result.items.some(row => row.originalUrl === 'https://www.bjtu.edu.cn/known_10000'));
+  assert.equal(result.search.state, 'complete');
+  assert.equal(result.search.candidateCount, 1);
+  assert.equal(result.search.readableCount, 0);
+  assert.match(result.search.message, /核验/);
+  assert.match(result.search.message, /已收录|管理员/);
   assert.equal(reads, 0);
   assert.equal(f.rows('items').size, 0);
   assert.equal(f.rows('sources').size, 1);

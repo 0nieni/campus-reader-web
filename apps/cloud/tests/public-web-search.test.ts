@@ -7,6 +7,23 @@ import { approvedSchoolUrl, extractArticle } from '../src/school-pages';
 import { AppError } from '../src/errors';
 
 const school = { id: 'bjtu', name: '北京交通大学', homepage: 'https://www.bjtu.edu.cn/' };
+test('natural campus discovery sends the authorized school name while explicit web subjects stay generic', async () => {
+  for (const [question, expected] of [
+    ['帮我查一下最近学校的比赛', '北京交通大学 比赛'],
+    ['最近我们学校有什么比赛可以报名，我的邮箱 private@example.invalid', '北京交通大学 比赛 报名'],
+    ['帮我看看学校有没有新的讲座', '北京交通大学 讲座'],
+    ['联网搜索 TypeScript 教程', 'TypeScript 教程'],
+    ['联网搜索 学校图书馆管理系统教程', '学校图书馆管理系统教程'],
+  ]) {
+    const query = chatSearchQuery(question);
+    assert.ok(query);
+    const result = await searchPublicWeb(school, query, { apiKey: 'synthetic', fetch: async (_url, init) => {
+      assert.equal(JSON.parse(String(init?.body)).query, expected);
+      return new Response('{"results":[]}');
+    } });
+    assert.equal(result.state, 'complete', question);
+  }
+});
 test('public web search keeps the explicit subject and accepts external domains without an institutional filter', async () => {
   const result = await searchPublicWeb(school, 'TypeScript Promise 教程', { apiKey: 'synthetic-search-key', fetch: async (_url, init) => {
     const body = JSON.parse(String(init?.body));

@@ -23,7 +23,7 @@ test('final conversation invocation receives the complete style policy from Mark
   const expected = markdown.split('## 模型任务指令\n')[1]!.split('## 软件接入约定')[0]!.trim();
   const final = invocations[invocations.length - 1]!;
   assert.equal(final.guide, expected, 'the entire instruction block, including examples, must reach the final model call');
-  assert.ok(final.guide.includes('自然干练、有温度'), 'new personality is active, not just a page label');
+  assert.ok(final.guide.includes('你是我的个人助手') && final.guide.includes('先问我这一个问题'), 'the user-supplied role and clarification policy reach the real final invocation');
   assert.ok(final.guide.includes('不附后续建议'), 'the final model receives the refusal/brief-answer stop condition');
   assert.ok(final.content.includes('积累项目经验') && final.content.includes('只说要交什么，不用给建议'));
   assert.ok(!final.content.includes('七节结构保持完整'));

@@ -14,6 +14,8 @@ export interface ItemRow extends Resource {
   autoSummary?: {text:string;basis:'body'|'title';version:string;checkedAt?:string};
   originalUrl?: string;
   contentText?: string;
+  /** Permission-query metadata only; no body is returned by URL policy lookup. */
+  policyBodyAvailable?: boolean;
   materialExpiresAt?: string;
   inlineMaterial?: boolean;
   materialPending?: boolean;
@@ -42,6 +44,10 @@ export interface Repository {
     feedOptions?: {hiddenSourceIds:string[];shownSourceIds?:string[]},
   ): Promise<ItemRow[]>;
   item(id: string): Promise<ItemRow | null>;
+  /** Normalized URL policy metadata only: keyset pages of 200, up to 10000/5s.
+   * May include foreign-school public rows solely for denial, never display them.
+   * null means the bounded check was inconclusive; never use this as a feed. */
+  itemsForUrlPolicy?(scope: Scope, url: string): Promise<ItemRow[] | null>;
   /** Invoked only after scope/ownership checks. Existing imported bodies are retained. */
   material?(row: ItemRow): Promise<ItemRow>;
   /** Read cache only; never starts extraction or model work. Caller authorizes. */

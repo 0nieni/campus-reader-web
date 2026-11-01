@@ -1,6 +1,7 @@
 import type { Database } from "../src/storage";
 import type { Repository, ItemRow } from "../src/repository";
 import { identify } from "../src/identity";
+import { isPrivate } from '../src/scope';
 export const actor = { uid: "feature-owner", isAnonymous: false };
 export const ownerConfig = { ownerUid: actor.uid };
 export const identity = identify(actor, ownerConfig);
@@ -60,6 +61,16 @@ export function fixtureDb() {
     async schools() { return []; }, async selectSchool(_owner, id) { selected = id; },
     async scope(schoolId, ownerId) { return { schoolId, ownerId, publicSourceIds: ["source"], privateSourceIds: [] }; },
     async items() { return [...items.values()]; }, async item(id) { return items.get(id) || null; },
+    async itemsForUrlPolicy(scope, url) {
+      const rows = [...items.values(), ...collectionRows('items').values() as Iterable<ItemRow>].filter(row =>
+        (row.originalUrl || row.canonicalUrl) && (row.ownerOpenid === scope.ownerId || !isPrivate(row) && !scope.privateSourceIds.includes(row.sourceId || '')));
+      if (rows.length > 10000) return null;
+      return rows.filter(row => [row.originalUrl, row.canonicalUrl].some(value => {
+        if (!value) return false;
+        try { const normalized = new URL(value); normalized.hash = ''; return !normalized.username && !normalized.password && normalized.href === url; }
+        catch { return false; }
+      }));
+    },
   };
   collectionRows("user_profiles").set(identity.dataOwnerId, { _id: identity.dataOwnerId, selectedSchoolId: "bjtu", unrelated: "preserve" });
   collectionRows("sources").set("source", { _id: "source", aiProcessing: "allow" });
