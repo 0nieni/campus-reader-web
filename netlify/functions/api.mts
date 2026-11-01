@@ -34,7 +34,7 @@ async function run(event:unknown,user:NetlifyUser|null,guest:GuestRef|null,aiReq
  if(!guest&&user&&typeof action==='string'&&action.startsWith('reminders.'))await runtime.aliyun.email.bind(workspace.dataOwnerId,user.id,user.email);
  let aiHandler:((action:any,input:any,identity:IdentityContext)=>Promise<any>)|undefined;
  if(typeof action==='string'&&action.startsWith('ai.')){
-  for(const key of ['AI_CHAT_API_KEY','AI_DAILY_LIMIT','AI_PLATFORM_DAILY_CALLS','AI_PLATFORM_DAILY_TOKENS','TAVILY_API_KEY']){const value=Netlify.env.get(key);if(value!==undefined)process.env[key]=value;}
+  for(const key of ['AI_CHAT_API_KEY','AI_DAILY_LIMIT','AI_PLATFORM_DAILY_CALLS','AI_PLATFORM_DAILY_TOKENS']){const value=Netlify.env.get(key);if(value!==undefined)process.env[key]=value;}
   process.env.AI_CHAT_BASE_URL=Netlify.env.get('AI_CHAT_BASE_URL')||'https://api.deepseek.com';
   process.env.AI_CHAT_MODEL=Netlify.env.get('AI_CHAT_MODEL')||'deepseek-flash';process.env.AI_EXECUTION_MODE='direct';process.env.AI_PROVIDER='openai_compatible';
   const providers=providerProfiles(pool,{encryptionKey:()=>Netlify.env.get('AI_PROVIDER_ENCRYPTION_KEY')});
