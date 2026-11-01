@@ -54,12 +54,12 @@ test('natural campus discovery questions actually search once and keep private w
 });
 
 test('capability questions use server configuration instead of searching or generating a cited model answer', async () => {
-  const previous = process.env.TAVILY_API_KEY;
+  const previous = process.env.AI_CHAT_API_KEY,previousModel=process.env.AI_CHAT_MODEL;
   try {
     for (const configured of [false, true]) {
-      if (configured) process.env.TAVILY_API_KEY = 'fixture-search-key'; else delete process.env.TAVILY_API_KEY;
       const f = setup(), c = await f.create();
-      f.items.clear(); delete process.env.AI_CHAT_API_KEY;
+      f.items.clear();delete process.env.AI_CHAT_MODEL;
+      if(configured)process.env.AI_CHAT_API_KEY='fixture-search-key';else delete process.env.AI_CHAT_API_KEY;
       const turn = await f.send(c.id, '你能联网吗');
       assert.equal(turn.state, 'complete'); assert.equal(turn.taskId, null);
       assert.match(turn.result!, configured ? /已配置/ : /未配置|还没配置|尚未配置/);
@@ -73,7 +73,7 @@ test('capability questions use server configuration instead of searching or gene
       await f.send(c.id, '你能联网吗');
       assert.equal(f.queries.length, 0);
     }
-  } finally { if (previous === undefined) delete process.env.TAVILY_API_KEY; else process.env.TAVILY_API_KEY = previous; }
+  } finally { if (previous === undefined) delete process.env.AI_CHAT_API_KEY; else process.env.AI_CHAT_API_KEY = previous;if(previousModel===undefined)delete process.env.AI_CHAT_MODEL;else process.env.AI_CHAT_MODEL=previousModel; }
 });
 
 test('a structured upstream search failure reaches the chat turn without leaking credentials or claiming success', async () => {

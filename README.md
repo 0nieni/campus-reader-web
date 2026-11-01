@@ -30,7 +30,7 @@ AI 阅读的“服务模型调整”支持每账号独立保存加密 API Key、
 
 推荐使用本校最多 200 条已有公告，明确兴趣优先，点击与收藏辅助；行为学习默认关闭，开启后仅使用近 30 天信号，支持清除及“不感兴趣”撤销。保存偏好会更新推荐。打开推荐、搜索和刷新不调用模型、不扣官方次数，搜索服务本身仍可能计费。对话从会话创建起 24 小时到期，不因追问续期；明确兴趣保存至修改或清除。每日清理任务增加对话、临时搜索正文及最多 200 份用户档案的轮转清理，不新增定时器。首次选校引导与离线推送仍由队友负责；本模块读取统一选校记录，提供服务端 `notificationCandidates` 交接能力，不发送通知。
 
-联网搜索使用可选服务端 `TAVILY_API_KEY`，通过 [Tavily Search API](https://docs.tavily.com/documentation/api-reference/endpoint/search) 搜索全网公开资料；不再限定学校官方域名，外部结果按真实网站标注；每账号每天最多 20 次、至少间隔 15 秒。最多五条候选、最多读取前三条正文；缺少 Key 或失败时明确提示并保留已有公告。搜索摘要不作正文证据，新候选不自动订阅，取得的临时正文按账号和学校隔离、24 小时到期。已知链接复用公告 ID 与全部来源许可；URL策略按每页200条安全元数据核验，每次最多10000条、5秒，无法完整核验时停止新正文导入并隐藏不确定入口，明确提示覆盖限制。临时结果用于本次明确搜索的对话或显式选入，不进入后续自动推荐。真实搜索及模型联调需要部署后的有效凭据，当前不声称已完成线上验证。
+联网搜索复用网站后台官方 DeepSeek 的 `AI_CHAT_API_KEY`，通过 [DeepSeek Search / Fetch](https://api-docs.deepseek.com/guides/search/) 搜索和读取全网公开资料；`AI_CHAT_BASE_URL` 须为 DeepSeek 官方地址。个人聊天服务商与搜索独立，不把个人 Key 或中转 Key 发送给 DeepSeek。外部结果按真实网站标注；每账号每天最多 20 次、至少间隔 15 秒，最多五条候选、最多读取前三条正文，搜索和抓取另行计量。正文读取保留公网、robots 和来源许可核验；缺少配置或失败时明确提示并保留已有公告。搜索摘要不作正文证据，新候选不自动订阅，临时正文按账号和学校隔离、24 小时到期。已知链接复用公告 ID 与全部来源许可；URL策略按每页200条安全元数据核验，每次最多10000条、5秒，无法完整核验时停止新正文导入并隐藏不确定入口。临时结果用于本次明确搜索的对话或显式选入，不进入后续自动推荐。配置存在不等于真实搜索成功，实际结果以本轮状态与正文计数为准。
 
 对话 v2 指令由 [对话式阅读指南](docs/ai-reading-guide.md)生成，修改后运行 `node tools/sync-ai-guide.mjs`；`npm run typecheck` 会校验一致性。产品分工、接口与验收见 [重做方案](docs/ai-reading-redesign.md)，最新进度和验证状态见 [PROGRESS.md](PROGRESS.md)。正式迁移在原 main 七份之后追加 `20261022000100_ai_conversations.sql`；AI_module 预览使用独立兼容目录保留已应用的 `20261019000100_ai_conversations.sql` 原名和内容。两条历史由正常部署应用，详见 [迁移历史说明](docs/pr14-migration-history.md)。本地实现不等于线上发布。
 
@@ -59,7 +59,7 @@ npm run build --workspace=@campus/web
 
 将此私有仓库连接到现有 Netlify 项目，保留根目录 netlify.toml。Base directory 和 Package directory 均留空：这是包含网页、服务端函数和迁移的一个完整站点，不单独选择 apps/web 作为站点项目目录。构建命令为 npm run build --workspace=@campus/web，发布目录为 apps/web/dist，函数目录为 netlify/functions。全部 SQL 迁移位于 netlify/database/migrations，由平台在部署生命周期应用，不在网页或函数请求中执行建表。可先运行 npm run netlify:build 检查完整函数与网页产物，该命令不会发布。
 
-服务端环境变量：NETLIFY_OWNER_EMAIL（初始账号邮箱，用于保留原工作区归属，不是成员白名单）、AI_CHAT_API_KEY（DeepSeek Key）；可选 AI_CHAT_BASE_URL、AI_CHAT_MODEL、AI_DAILY_LIMIT、AI_PLATFORM_DAILY_CALLS、AI_PLATFORM_DAILY_TOKENS、TAVILY_API_KEY（联网搜索）。全部通过 Netlify 环境变量配置，不能加入 VITE_ 变量或提交到 Git。
+服务端环境变量：NETLIFY_OWNER_EMAIL（初始账号邮箱，用于保留原工作区归属，不是成员白名单）、AI_CHAT_API_KEY（后台统一 DeepSeek Key，同时用于官方回答及联网搜索）；可选 AI_CHAT_BASE_URL（DeepSeek 官方地址）、AI_CHAT_MODEL、AI_DAILY_LIMIT、AI_PLATFORM_DAILY_CALLS、AI_PLATFORM_DAILY_TOKENS。联网搜索无需 Tavily 账号或 Key。全部通过 Netlify 环境变量配置，不能加入 VITE_ 变量或提交到 Git。
 
 Identity 保持 Invite only，管理员通过控制台邀请其他用户。正式站点允许访问登录页，预览可继续私有。每个可信 Identity UID 独立保存学校偏好、收藏、私人资料、AI 任务和每日三次额度。原始账号继续使用现有数据；不要为新增成员更改 NETLIFY_OWNER_EMAIL。DeepSeek 账单与平台总调用预算仍由站点共同承担。
 

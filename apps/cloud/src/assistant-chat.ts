@@ -8,6 +8,7 @@ import { AppError, reject } from './errors';
 import type { aiService } from './ai-service';
 import { buildChatContext, type ContextExchange, type MemorySnapshot, type MemoryDependency } from './chat-context';
 import { chatSearchQuery, isSearchCapabilityQuestion } from './chat-intent';
+import {deepseekSearchConfigured} from './deepseek-search';
 import { memoryService, selectMemoryItems } from './assistant-memory';
 import { buildConversationSummary } from './conversation-summary';
 import type { AiProviderRef } from '@campus/contracts';
@@ -182,9 +183,9 @@ export function assistantChat(db: Database, repo: Repository, ai: Ai, recommend:
           try {
             // Program-owned capability facts and memory management need no model or sources.
             const command = isSearchCapabilityQuestion(question)
-              ? { handled: true, message: discover && process.env.TAVILY_API_KEY?.trim()
-                ? '搜索服务已配置，可以帮你搜索公开网页，也可以查当前学校的公告。你可以直接问“最近学校有什么比赛可以报名”。是否搜到、正文能否读到，会按本次实际结果说明；外部网页会标明真实来源，不会冒充学校官方通知。'
-                : '当前还不能实际联网，因为网站的搜索服务尚未配置。请联系网站管理员；已收录的公告仍然可以查看。搜索服务与回答模型是分开配置的，填写自己的模型 Key 不会自动开启联网。' }
+              ? { handled: true, message: discover && deepseekSearchConfigured()
+                ? 'DeepSeek 搜索服务已配置，可以帮你搜索公开网页，也可以查当前学校的公告。你可以直接问“最近学校有什么比赛可以报名”。是否搜到、正文能否读到，会按本次实际结果说明；外部网页会标明真实来源，不会冒充学校官方通知。搜索和网页读取由网站后台的 DeepSeek 账户单独计量。'
+                : '当前还不能实际联网，因为网站后台尚未配置可用于搜索的官方 DeepSeek Key。请联系网站管理员；已收录的公告仍然可以查看。个人聊天模型配置不影响后台统一搜索配置。' }
               : await memory.command(owner, row.schoolId, { requestId: digest(['chat-memory-command', row._id, id]), question });
             if (command.handled) return completeProgramTurn(row, pending, { reply: command.message || '请说明要修改或删除哪条自动记忆。', programReply: isSearchCapabilityQuestion(question) ? 'search_capability' : 'memory' });
             const searchQuery = discover ? chatSearchQuery(question) : null;

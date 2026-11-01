@@ -6,8 +6,8 @@ import { atomic, readDoc, seed, transactionRow, type Database } from './storage'
 import { assistantProfile } from './assistant-profile';
 import { assistantChat } from './assistant-chat';
 import { memoryService } from './assistant-memory';
-import { searchPublicWeb } from './announcement-search';
-import { publicSearchSource, publicSearchReader } from './public-search-page';
+import {deepseekSearchPublicWeb as searchPublicWeb,deepseekSearchConfigured,deepseekPublicSearchReader} from './deepseek-search';
+import { publicSearchSource } from './public-search-page';
 import { approvedSchoolUrl, extractArticle, type PageReader } from './school-pages';
 import { beijingDay, type aiService } from './ai-service';
 import { digest } from './reading-package';
@@ -35,7 +35,7 @@ function publicCandidate(row: ItemRow, scope: Scope, current: number): boolean {
 }
 
 const actions = new Set(['ai.memory.get','ai.memory.configure','ai.memory.forget','ai.memory.clear','ai.profile.get','ai.profile.save','ai.profile.clearBehavior','ai.behavior','ai.dismiss','ai.recommend','ai.chat.create','ai.chat.get','ai.chat.send','ai.chat.step','ai.chat.cancel','ai.chat.resolve','ai.chat.clear','ai.chat.latest']);
-export function assistantService(db: Database, repo: Repository, ai: ReturnType<typeof aiService>, now = Date.now, search = searchPublicWeb, reader: PageReader = publicSearchReader, providers?: ProviderProfiles) {
+export function assistantService(db: Database, repo: Repository, ai: ReturnType<typeof aiService>, now = Date.now, search = searchPublicWeb, reader: PageReader = deepseekPublicSearchReader, providers?: ProviderProfiles) {
   const profile = assistantProfile(db, repo, now);
   const memory = memoryService(db, repo, now);
   const chat = assistantChat(db, repo, ai, profile.recommend, now, async (schoolId, query, identity) => {
@@ -60,9 +60,10 @@ export function assistantService(db: Database, repo: Repository, ai: ReturnType<
     if (input.query !== undefined && (typeof input.query !== 'string' || input.query.length > 500)) reject('VALIDATION_FAILED', '搜索问题最多 500 字。');
     if (input.search !== undefined && typeof input.search !== 'boolean') reject('VALIDATION_FAILED', '联网搜索开关无效。');
     const query = String(input.query || '').trim(), local = await profile.recommend(owner, schoolId, query);
-    if (!input.search) return process.env.TAVILY_API_KEY?.trim() || search !== searchPublicWeb
-      ? { ...local, search: { state: 'idle', message: '联网搜索已配置，点击搜索后执行；当前仅展示已有公告。' } } : { ...local, search: { state: 'unconfigured', code: 'unconfigured', message: '联网搜索尚未配置，请联系网站管理员；当前仅展示已收录公告。' } };
-    if (process.env.TAVILY_API_KEY?.trim() || search !== searchPublicWeb) await searchBudget(owner);
+    if (!input.search) return deepseekSearchConfigured() || search !== searchPublicWeb
+      ? { ...local, search: { state: 'idle', message: 'DeepSeek 联网搜索已配置，点击搜索后执行；搜索和网页读取单独计量。' } } : { ...local, search: { state: 'unconfigured', code: 'unconfigured', message: 'DeepSeek 联网搜索尚未配置，请联系管理员检查后台官方 Key；当前仅展示已收录公告。' } };
+    if (deepseekSearchConfigured() || search !== searchPublicWeb) await searchBudget(owner);
+    const searchDeadline=Date.now()+24000;
     const found = await search(school, query || '通知公告 报名');
     const result: AiRecommendations = { ...local, search: { state: found.state, message: found.message, ...(found.code ? { code: found.code } : {}) } };
     if (found.state !== 'complete') return result;
@@ -104,6 +105,7 @@ export function assistantService(db: Database, repo: Repository, ai: ReturnType<
     const candidates = await Promise.all(found.candidates.slice(0, 5).map(async (candidate, index): Promise<RecommendedNotice | null> => {
       let url: string, source: ReturnType<typeof publicSearchSource>;
       try { source = publicSearchSource(candidate.url); url = approvedSchoolUrl(candidate.url, source).href; } catch { return null; }
+      if(reader===deepseekPublicSearchReader)source.readDeadline=searchDeadline;
       discoveredUrls.add(url);
       const existing = await knownCard(url);
       if (existing === false) return null;

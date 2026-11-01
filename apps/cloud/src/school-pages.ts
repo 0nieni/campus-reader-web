@@ -6,7 +6,7 @@ import { load } from 'cheerio/slim';
 import { publicAddress } from './model-provider';
 import { AppError } from './errors';
 
-export interface SchoolSource { id: string; name: string; announcementUrl: string; homepage: string; listSelector?: string; articleSelector?: string; dateSelector?:string; exactHost?:boolean; allowedPath?:(url:string)=>boolean; rawResponse?:boolean }
+export interface SchoolSource { id: string; name: string; announcementUrl: string; homepage: string; listSelector?: string; articleSelector?: string; dateSelector?:string; exactHost?:boolean; allowedPath?:(url:string)=>boolean; rawResponse?:boolean; readDeadline?:number }
 export interface SchoolPage { html: string; url: string }
 export type PageReader = (url: string, school: SchoolSource) => Promise<SchoolPage>;
 const compact = (s: string) => s.replace(/\s+/g, ' ').trim();

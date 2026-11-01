@@ -40,23 +40,23 @@ test('assistant gateway authenticates new actions and rejects forged owner field
 });
 
 test('unconfigured search retains local notices and makes no model calls', async () => {
-  const f = fixtureDb(); let calls = 0; const old = process.env.TAVILY_API_KEY; delete process.env.TAVILY_API_KEY;
+  const f = fixtureDb(); let calls = 0; const old = process.env.AI_CHAT_API_KEY; delete process.env.AI_CHAT_API_KEY;
   try {
     const assistant = assistantService(f.db, f.repo, aiService(f.db, f.repo, async () => { calls++; return ''; }));
     const result = await assistant.handle('ai.recommend', { schoolId: 'bjtu', query: '竞赛', search: true }, identity) as AiRecommendations;
     assert.equal(result.search.state, 'unconfigured'); assert.ok(result.items.length); assert.equal(calls, 0);
-  } finally { if (old !== undefined) process.env.TAVILY_API_KEY = old; }
+  } finally { if (old !== undefined) process.env.AI_CHAT_API_KEY = old; }
 });
 
 test('configured search stays idle on page open without falsely claiming it is unconfigured', async () => {
-  const f = fixtureDb(); const old = process.env.TAVILY_API_KEY; process.env.TAVILY_API_KEY = 'fixture-key-never-sent';
+  const f = fixtureDb(); const old = process.env.AI_CHAT_API_KEY; process.env.AI_CHAT_API_KEY = 'fixture-key-never-sent';
   try {
     let searches = 0;
     const assistant = assistantService(f.db, f.repo, aiService(f.db, f.repo), Date.now, async () => { searches++; throw new Error('must not search on open'); });
     const result = await assistant.handle('ai.recommend', { schoolId: 'bjtu' }, identity) as AiRecommendations;
     assert.equal(result.search.state, 'idle'); assert.equal(searches, 0);
     assert.ok(!result.search.message.includes('未配置'));
-  } finally { if (old === undefined) delete process.env.TAVILY_API_KEY; else process.env.TAVILY_API_KEY = old; }
+  } finally { if (old === undefined) delete process.env.AI_CHAT_API_KEY; else process.env.AI_CHAT_API_KEY = old; }
 });
 
 test('search candidates require real body evidence and are scoped, expiring, non-subscribed imports', async () => {
