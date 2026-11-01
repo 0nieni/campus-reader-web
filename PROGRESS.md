@@ -666,3 +666,10 @@ npm ci、typecheck、完整 606 项测试（web 229 / cloud 377）、普通构�
 - npm ci、指南同步/typecheck、全量906项（web300/cloud606、0失败）、npm run build、npm run netlify:build通过；完整产物.netlify-staging/20261101073129434含网页、16函数与原迁移，未上传。日志output/resume-final-*.log。用户提示词实际进入最终模型调用的接线回归通过，8场景dry-run/providerCalls0/languageReview pending；没有真实收费调用。
 - neat-freak：代码/合同/README/设计/排查/提示词/接续文档changed-and-verified；规则verified-current，未改AGENTS；个人Codex记忆generated-read-only未写；真实Tavily/模型/账号联调pending，生产发布out-of-scope。保留11项依赖审计告警（6 moderate/5 high）、四条未批准脚本和LF/CRLF受控提示；本轮不升级依赖、不更改批准或全局Git配置，验收/日志/旧备份保留不清场。
 - 原中断合并已由a327e9e保全；最新main e9bf410已无冲突合入。原先“未提交/推送”和200总量方案为中间历史，以本段和接下来的分支同步记录为准。分支推送与交付目录复制/依赖验证现在执行，不将准备步骤写成已完成。
+
+
+### 分支交付与根目录同步完成（2026-11-01）
+
+实现提交d4a4e17a0690ecc90cef24daf7a1460ef5620c0b已正常推送AI_module，git ls-remote核对一致。推送前远端AI_module仍69e4339、main仍e9bf410；正常快进，无强推、未合并回main、未主动部署。根目录368份跟踪文件逐字节同步（85更新、153新增、0不一致），旧版备份output/chat-handoff-before-sync-20261101，清单output/chat-handoff-sync-20261101.json。根目录npm ci/typecheck再次通过，保留相同11项告警及4条脚本提示；没有停止其他进程、改密钥或升级依赖。
+
+最终906项测试与双构建证据同上一节；用户提供提示词已进入conversation-v2.7实际指令，原文完整性与final invocation均验证。README、设计、排查、运行时指南、计划、接续记录和本进度已同步，38处文档相对链接有效。最终定向复核ADDR；真实模型/搜索/账号联调pending，发布out-of-scope，个人记忆只读，检出/验收/备份保留。本条与接续终态作为文档提交同步。
