@@ -673,3 +673,16 @@ npm ci、typecheck、完整 606 项测试（web 229 / cloud 377）、普通构�
 实现提交d4a4e17a0690ecc90cef24daf7a1460ef5620c0b已正常推送AI_module，git ls-remote核对一致。推送前远端AI_module仍69e4339、main仍e9bf410；正常快进，无强推、未合并回main、未主动部署。根目录368份跟踪文件逐字节同步（85更新、153新增、0不一致），旧版备份output/chat-handoff-before-sync-20261101，清单output/chat-handoff-sync-20261101.json。根目录npm ci/typecheck再次通过，保留相同11项告警及4条脚本提示；没有停止其他进程、改密钥或升级依赖。
 
 最终906项测试与双构建证据同上一节；用户提供提示词已进入conversation-v2.7实际指令，原文完整性与final invocation均验证。README、设计、排查、运行时指南、计划、接续记录和本进度已同步，38处文档相对链接有效。最终定向复核ADDR；真实模型/搜索/账号联调pending，发布out-of-scope，个人记忆只读，检出/验收/备份保留。本条与接续终态作为文档提交同步。
+
+
+## 内容区与文字间距调整（2026-11-01，AI_module分支交付）
+
+用户要求每页白色底纹更大、文字行距更舒展。仅调整apps/web/src/template-bridge.css的模板适配层：主内容左右留白缩至22~40px，功能页白色面板增加24~40px内边距和视口最小高度；正文行高1.8~1.95、标题/说明/段落间距统一放宽，小说明字号与行高提升。首页公告卡片加大留白；详情与账号弹窗最大宽度由560/720增至900px；登录表单最大宽度390增至500px，输入区和表单间隔增大。手机保留紧凑外边距，AI资料栏在窄窗口改上下布局，日期独立一行避免挤窄公告标题；701~900px登录双栏另设自适应列。
+
+原两份用户模板CSS字节不变，300项前端测试中的原模板哈希门禁通过；未改Vue/TS业务逻辑、账号/匿名浏览/AI登录限制、接口、依赖、迁移或模型指令。预览专用示例来源、收藏/提醒和详情数据只在output/local-preview内，不进入生产或Git。
+
+验证：npm ci、typecheck、全量906项测试（web300/cloud606，0失败）、普通build通过；前端300项另行复跑通过；最终响应式版本完成typecheck/Netlify完整构建与多宽度浏览器验收，最终产物.netlify-staging/20261101080343103含网页与16函数，未上传。日志output/spacing-*.log。Playwright真实App配独立示例Transport，1440/1024/390三个宽度检查8种页面/弹窗共24组，0pageerror、0横向溢出；320/375/720/768另核对首页/AI/登录共12组，均无溢出。截图和computed样式在交付根output/playwright/spacing-*；桌面AI白色面板实测1113px宽、37.44px内边距，搜索说明14px/25.9px行高。模拟浏览器不代表真实账号或云端服务验收。
+
+neat-freak判定：样式和本地预览changed-and-verified；进度同步，本次无新的产品机制文档需求，README/设计/AGENTS改动not-applicable；个人Codex记忆generated-read-only未写，生产发布out-of-scope。只读核对既有依赖告警和验收残留，未升级、删除或清场。改动已同步交付目录和运行中的本机预览，保留output/local-preview/template-bridge-before-spacing.css供复核；首轮按本地查看范围保留，随后用户明确要求“上传”，按下一条交付验收同步分支。
+
+上传验收（2026-11-01）：用户明确授权上传本轮样式。重新核对真实AI_module检出，远端仍为a695a3c，与本地HEAD一致；推送前再次typecheck和全量906项测试（web300/cloud606，0失败）通过，日志output/spacing-upload-*.log。提交范围仅template-bridge.css和本进度，QA示例/截图/日志不加入Git；正常推送AI_module，不合并main、不主动部署，保留复核现场。具体提交与远端SHA以Git交付记录为准。
