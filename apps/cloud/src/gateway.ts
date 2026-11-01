@@ -19,6 +19,10 @@ import { filtersOf, filterSince, matchesFilters } from "./filters";
 import { checkedLabels, displayedCategories, originalCategories } from './notice-labels';
 import {noticeSourceAliases} from './school-sources';
 import {guestActionAllowed} from './guest-access';
+async function cachedBrief(repo:Repository,row:ItemRow,schoolId:string,at:number):Promise<import('../../../packages/contracts/src/notice-brief').NoticeBrief>{
+ try{return repo.brief?await repo.brief(row,schoolId):{state:'unavailable',checkedAt:new Date(at).toISOString(),attachmentsRead:false,message:'此环境暂未启用公告摘要。'};}
+ catch{return{state:'failed',checkedAt:new Date(at).toISOString(),attachmentsRead:false,message:'摘要状态暂不可读取，可继续阅读正文。'};}
+}
 
 const fields: Record<string, string[]> = {
   'ai.providers.list': [],
@@ -78,6 +82,7 @@ const fields: Record<string, string[]> = {
   "school.request": ["schoolName"],
   "feed.list": ["schoolId", "cursor", "keyword", "categories", "period","sourceId"],
   "feed.detail": ["schoolId", "itemId"],
+  'feed.brief':['schoolId','itemId'],
   "feed.labels.set": ["schoolId", "itemId", "categories"],
   "favorites.list": ["schoolId", "cursor"],
   "favorites.set": ["schoolId", "itemId", "saved"],
@@ -328,6 +333,7 @@ export function createGateway(
         await repo.setLabels(identity.dataOwnerId,row._id,categories);
         return {ok:true,data:{categories:categories ?? originalCategories(row),customized:categories !== null}};
       }
+      if(action==='feed.brief')return{ok:true,data:await cachedBrief(repo,row,schoolId,now())};
       let materialNote = '';
       if (repo.material) {
         try { row = await repo.material(row); }
@@ -339,6 +345,7 @@ export function createGateway(
       if (repo.personalize) row = await repo.personalize(row,identity.dataOwnerId);
       const detail: NoticeDetail = {
         ...toNotice(row),
+        ...(repo.brief?{brief:await cachedBrief(repo,row,schoolId,now())}:{}),
         text: row.contentText || "",
         defaultCategories: originalCategories(row),
         categoriesCustomized: row.personalCategories !== undefined,

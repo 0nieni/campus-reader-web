@@ -330,6 +330,11 @@ export function workspaceStore(transport: Transport) {
           detailLoading.value = false;
       }
     }
+    async function refreshBrief(){
+      const schoolId=workspace.value?.school?.id,itemId=detail.value?.id,ticket=epoch,request=detailEpoch;if(!schoolId||!itemId)return;
+      try{const brief=await transport.call('feed.brief',{schoolId,itemId});if(ticket===epoch&&request===detailEpoch&&detail.value?.id===itemId)detail.value.brief=brief;}
+      catch{if(ticket===epoch&&request===detailEpoch&&detail.value?.id===itemId)detail.value.brief={state:'failed',checkedAt:new Date().toISOString(),attachmentsRead:false,message:'摘要状态暂不可读取，可继续阅读正文。'};}
+    }
     function closeNotice() {
       detailEpoch++;
       detail.value = null;
@@ -381,6 +386,7 @@ export function workspaceStore(transport: Transport) {
       noticeLabelsChanged,
       loadSchools,
       openNotice,
+      refreshBrief,
       closeNotice,
       watchSession,
     };

@@ -30,33 +30,40 @@
 
 Files: new packages/contracts/src/search-intent.ts; apps/cloud/src/chat-intent.ts; new apps/cloud/tests/search-intent.test.ts.
 
-- [ ] TDD：三条已复现自然查询由null变为主题词；显式旧命令兼容；否定/引用/假设/他人/普通事实追问/能力询问不搜索；邮箱或个人秘密不出现在返回值。
-- [ ] Shared exports chatSearchQuery(question:string):string|null and isSearchCapabilityQuestion(question:string):boolean。原apps/cloud/src/chat-intent.ts只重导出，保持后端旧import兼容。root在contracts/index.ts导出两函数。
-- [ ] 能力询问支持“你能联网吗”“你可以联网搜索吗”“这里支持联网搜索吗”，与实际“能不能帮我查一下本校比赛”区分；问定义/实现/教程不冒充能力询问。
-- [ ] 独立测试与报告，不提交/改共享PROGRESS或其他文件。
+- [x] TDD：三条已复现自然查询由null变为主题词；显式旧命令兼容；否定/引用/假设/他人/普通事实追问/能力询问不搜索；邮箱或个人秘密不出现在返回值。
+- [x] Shared exports chatSearchQuery(question:string):string|null and isSearchCapabilityQuestion(question:string):boolean。原apps/cloud/src/chat-intent.ts只重导出，保持后端旧import兼容。root在contracts/index.ts导出两函数。
+- [x] 能力询问支持“你能联网吗”“你可以联网搜索吗”“这里支持联网搜索吗”，与实际“能不能帮我查一下本校比赛”区分；问定义/实现/教程不冒充能力询问。
+- [x] 独立测试与报告，不提交/改共享PROGRESS或其他文件。
 
 ## Task 2 搜索失败诊断（search_adapter agent）
 
 Files: apps/cloud/src/announcement-search.ts and tests/announcement-search.test.ts only.
 
-- [ ] TDD：缺配置、401/403、429、432/433、5xx、超时、断网、JSON错误、学校域名错误、空成功分别可辨，候选过滤和大小/重定向限制继续生效。
-- [ ] SearchResult增加可选code（沿用Global Constraints类型）；HTTP状态诊断不得读取/回显原始错误；成功无code，空结果明确“未找到”且不冒充失败。保留8秒超时与有界读取。
-- [ ] 语气简短、说清现状及下一步；未配置提示联系网站管理员，密钥无效提示搜索服务授权异常，不能暗示用户输入模型Key可解锁搜索。
-- [ ] 测试与cloud类型检查报告，不改合同/共享PROGRESS或提交。
+- [x] TDD：缺配置、401/403、429、432/433、5xx、超时、断网、JSON错误、学校域名错误、空成功分别可辨，候选过滤和大小/重定向限制继续生效。
+- [x] SearchResult增加可选code（沿用Global Constraints类型）；HTTP状态诊断不得读取/回显原始错误；成功无code，空结果明确“未找到”且不冒充失败。保留8秒超时与有界读取。
+- [x] 语气简短、说清现状及下一步；未配置提示联系网站管理员，密钥无效提示搜索服务授权异常，不能暗示用户输入模型Key可解锁搜索。
+- [x] 测试与cloud类型检查报告，不改合同/共享PROGRESS或提交。
 
 ## Task 3 页面真实状态（search_ui agent）
 
 Files: apps/web/src/components/AssistantPanel.vue; apps/web/tests/assistant.test.ts only.
 
-- [ ] TDD：能力询问在无模型/0官方次数/BYOK无Key时也能发送，实际搜索/普通问题不绕过模型额度；能力询问使用official程序路径、不附BYOK或选中文章。
-- [ ] import shared isSearchCapabilityQuestion via @campus/contracts（待Task1创建后可用）。兼容可选status.searchConfigured；sidebar按钮明确“联网找公告”，配置状态清楚且不把configured当作联网成功；缺配置时仍可查询状态，不声称可用。
-- [ ] 搜索状态/真实候选与正文计数前置；搜索成功但正文不可读有区别。programReply能力/搜索状态标明未调用模型，不做无关记忆/推荐刷新，含丢响应恢复；旧接口无标识行为兼容。保留账号/学校epoch及丢响应只读恢复，无假流式/推送/后台任务。
-- [ ] 组件测试、web类型检查、报告，不改合同/其他文件/共享PROGRESS、不提交。
+- [x] TDD：能力询问在无模型/0官方次数/BYOK无Key时也能发送，实际搜索/普通问题不绕过模型额度；能力询问使用official程序路径、不附BYOK或选中文章。
+- [x] import shared isSearchCapabilityQuestion via @campus/contracts（待Task1创建后可用）。兼容可选status.searchConfigured；sidebar按钮明确“联网找资料”，配置状态清楚且不把configured当作联网成功；缺配置时仍可查询状态，不声称可用。
+- [x] 搜索状态/真实候选与正文计数前置；搜索成功但正文不可读有区别。programReply能力/搜索状态标明未调用模型，不做无关记忆/推荐刷新，含丢响应恢复；旧接口无标识行为兼容。保留账号/学校epoch及丢响应只读恢复，无假流式/推送/后台任务。
+- [x] 组件测试、web类型检查、报告，不改合同/其他文件/共享PROGRESS、不提交。
 
 ## Task 4 后端接线与验收（root）
 
-- [ ] contracts定义可选search.code及status.searchConfigured，导出共享helpers。assistantService保留found.code并在无search请求时准确说明已配置/未配置。
-- [ ] TDD后在assistantChat准备锁取得后拦截能力询问，可信学校授权后保存程序回复，不查询来源/搜索/模型、不扣官方次数；结果区分configured与实际可用。请求重试仍幂等，取消/切校后迟到返回无效。
-- [ ] 集成测试三种自然查询确实调用discover一次且不外发隐私；权限/失效/失败/未配置依旧显示真实状态。ai.status测试只返回配置布尔值不泄露值。
-- [ ] 更新README/设计/PROGRESS与新docs/ai-search-troubleshooting.md，明确线上未验证、Tavily为独立服务端依赖、当前校园阅读流程导致生硬的已知边界；不声称本轮解决通用聊天或所有引用澄清问题。
-- [ ] npm ci/guide check/typecheck/test/build/netlify:build，独立非Astra任务与最终审查，neat-freak。最终只正常提交推AI_module、同步交付目录并记录真实证据。
+- [x] contracts定义可选search.code及status.searchConfigured，导出共享helpers。assistantService保留found.code并在无search请求时准确说明已配置/未配置。
+- [x] TDD后在assistantChat准备锁取得后拦截能力询问，可信学校授权后保存程序回复，不查询来源/搜索/模型、不扣官方次数；结果区分configured与实际可用。请求重试仍幂等，取消/切校后迟到返回无效。
+- [x] 集成测试三种自然查询确实调用discover一次且不外发隐私；权限/失效/失败/未配置依旧显示真实状态。ai.status测试只返回配置布尔值不泄露值。
+- [x] 更新README/设计/PROGRESS与新docs/ai-search-troubleshooting.md，明确线上未验证、Tavily为独立服务端依赖、当前校园阅读流程导致生硬的已知边界；不声称本轮解决通用聊天或所有引用澄清问题。
+- [x] npm ci/guide check/typecheck/test/build/netlify:build，独立非Astra任务与最终审查，neat-freak。最终只正常提交推AI_module、同步交付目录并记录真实证据。
+
+
+## 接续验收结果（2026-11-01）
+
+原计划四项已完成实现与非Astra审查，后续保留最新main e9bf410的全网公开搜索、个人服务商、资料库/MCP/匿名工作区及公告简讯；原学校域名限定以Global Constraints更新为准。用户新提供的个人规划提示词纳入实际指南v2.7，原文仅调整标题层级。
+
+最终指南/typecheck、全量906项（web300/cloud606）、普通build、Netlify完整构建通过，产物含16函数；实际最终请求收到用户提示词，八场景dry-run零供应商调用。SQL定向15项及整体222项专项通过。文档/生成指令同步，独立复核闭合；真实模型、Tavily及生产账号/语言效果pending。分支推送和交付目录结果以PROGRESS最终记录为准，不合main、不主动部署、不清场。

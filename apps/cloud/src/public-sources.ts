@@ -84,7 +84,7 @@ export function publicSources(pool:SqlPool,repo:Repository,readers:Readers,schoo
   if(!definition?.url)throw new AppError('NOT_FOUND','来源不存在、没有公开入口或不属于当前学校的公共目录。');
   return collectSource({id,name:definition.name,entryUrl:websiteUrl(definition.url),categories:definition.categories},owner,true);
  }
- async function material(row:ItemRow,settings:{force?:boolean;deadline?:number}={}){
+ async function material(row:ItemRow,settings:{force?:boolean;deadline?:number;articleOnly?:boolean}={}){
   const definition=competitionSources.find(source=>source.id===row.sourceId);
   if(!archive||row.ownerOpenid||row.scope!=='global'||!row.sourceId)throw new AppError('NO_MATERIAL','公共资料来源暂不可读取。');
   const policy=definition?undefined:(await pool.query("SELECT body FROM campus_documents WHERE collection='sources' AND id=$1",[row.sourceId])).rows[0]?.body;

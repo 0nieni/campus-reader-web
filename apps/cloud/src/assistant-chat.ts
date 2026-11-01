@@ -107,7 +107,7 @@ export function assistantChat(db: Database, repo: Repository, ai: Ai, recommend:
       ? `这次没有完成联网搜索。${discovery.search.message} 下方保留已收录公告的入口；本轮没有调用模型。`
       : discovery.search.candidateCount === 0
         ? '联网搜索已完成，但这次没找到可用的公开网页线索。下方保留已收录公告入口，不会把它们当成本次新搜到的结果。'
-        : `联网搜索找到了${discovery.search.candidateCount ?? '一些'}条候选，但本次没有取得可用于AI回答的正文。你可以先看下方原文；搜索摘要不会被当作公告正文。`);
+        : `联网搜索找到了${discovery.search.candidateCount ?? '一些'}条候选，但本次没有取得可用于AI回答的正文。${discovery.search.message} 你可以查看仍可访问的原文入口；搜索摘要不会被当作公告正文。`);
     return completeProgramTurn(row, pending, { reply, programReply: 'search_status', search: discovery.search,
       references: discovery.items.slice(0, 5).map((item, index) => ({ reference: `R${index + 1}`, itemId: item.id, title: item.title, originalUrl: item.originalUrl })) });
   }
@@ -193,7 +193,9 @@ export function assistantChat(db: Database, repo: Repository, ai: Ai, recommend:
             if (discovery && explicitIds.length === 8 && discovery.items.some(item => item.allowAi && !explicitIds.includes(item.id) && (!discovery.search.candidateIds || discovery.search.candidateIds.includes(item.id)))) {
               return searchStatusTurn(row, pending, discovery, `联网搜索已完成，找到${discovery.search.candidateCount ?? '一些'}条候选、取得${discovery.search.readableCount ?? '一些'}篇可读正文。你已选择8篇资料，已达到单次上限；请减少所选资料，为搜索正文留出位置后再提问。本轮未调用模型，不扣官方次数。`);
             }
-            let ids = discovery ? [...new Set([...explicitIds, ...discovery.items.filter(item => item.allowAi && (!discovery.search.candidateIds || discovery.search.candidateIds.includes(item.id))).map(item => item.id).slice(0, 5)])].slice(0, 8) : explicitIds;
+            // Validate all bounded search candidates before allocating remaining
+            // document slots; an unreadable first hit must not hide a later body.
+            let ids = discovery ? [...new Set([...explicitIds, ...discovery.items.filter(item => item.allowAi && (!discovery.search.candidateIds || discovery.search.candidateIds.includes(item.id))).map(item => item.id).slice(0, 5)])] : explicitIds;
             if (!ids.length && !discovery) {
               const last = [...row.turns].reverse().find(t => t.materialIds.length && !t.error);
               const isFollowup = /^(那|它|这个|这条|这项|什么时候|截止|需要|怎么|能否|可以|还有|报名|材料|费用|地点|你刚才|刚才|之前|第二|第一个|接下来)/.test(question);
@@ -216,7 +218,8 @@ export function assistantChat(db: Database, repo: Repository, ai: Ai, recommend:
               if (!discovery.search.readableCount) return searchStatusTurn(row, pending, discovery);
             }
             if (readable.length && !missingExplicit) {
-              try { pack = await readingPackage(db, repo, owner, row.schoolId, readable); }
+              const packIds = discovery ? [...readable.filter(id => explicitIds.includes(id)), ...readable.filter(id => !explicitIds.includes(id)).slice(0, 8 - explicitIds.length)] : readable;
+              try { pack = await readingPackage(db, repo, owner, row.schoolId, packIds); }
               catch (error) {
                 if (!discovery || !(error instanceof AppError) || !unreadableMaterial.has(error.code)) throw error;
                 // Reacquisition can fail after successful individual reads. Recheck

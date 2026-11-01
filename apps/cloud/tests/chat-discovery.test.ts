@@ -146,6 +146,24 @@ test('a candidate losing its body during authorized acquisition cannot be replac
 const bodyReader: NonNullable<Parameters<typeof assistantService>[5]> = async url => ({ url, html: '<article>竞赛报名公告。报名需要提交项目简介和报名表，具体资格以原公告为准。本段合成正文用于验证最后合包阶段失效和八篇明确选材的真实处理行为。</article>' });
 const freshSearch: NonNullable<Parameters<typeof assistantService>[4]> = async () => ({ state: 'complete', message: '搜索完成', candidates: [{ title: '新比赛公告', url: 'https://www.bjtu.edu.cn/final-pack', snippet: '不是正文' }] });
 
+test('seven explicit materials leave the final slot for a genuinely readable later search candidate', async () => {
+  const f = setup(async () => ({ state: 'complete', message: '搜索完成', candidates: [
+    { title: '首条比赛', url: 'https://www.bjtu.edu.cn/first-unreadable', snippet: '' },
+    { title: '第二条比赛', url: 'https://www.bjtu.edu.cn/second-readable', snippet: '' },
+  ] }), bodyReader), c = await f.create();
+  const template = f.items.get('notice')!;
+  const itemIds = Array.from({ length: 7 }, (_, index) => 'selected_' + index);
+  for (const id of itemIds) f.items.set(id, { ...template, _id: id, title: id });
+  f.repo.material = async row => row.originalUrl?.endsWith('/first-unreadable') ? { ...row, contentText: '' } : row;
+  const turn = await f.call('ai.chat.send', { conversationId: c.id, question: '再找找本校比赛', requestId: 'seven-selection-search-01', itemIds }) as AiChatTurn;
+  assert.equal(turn.state, 'ready'); assert.equal(turn.search?.readableCount, 1);
+  const docs = f.rows('web_ai_tasks').get(turn.taskId!)!.docs;
+  assert.equal(docs.length, 8);
+  assert.ok(itemIds.every(id => docs.some((doc: any) => doc.itemId === id)), 'all seven explicit materials are preserved');
+  assert.ok(docs.some((doc: any) => doc.originalUrl === 'https://www.bjtu.edu.cn/second-readable'));
+  assert.ok(!docs.some((doc: any) => doc.originalUrl === 'https://www.bjtu.edu.cn/first-unreadable'));
+});
+
 test('eight explicit selections keep truthful search body counts and ask for room without reserving model quota', async () => {
   const f = setup(undefined, bodyReader), c = await f.create();
   const template = f.items.get('notice')!;

@@ -1,6 +1,7 @@
 import type { Database } from "../src/storage";
 import type { Repository, ItemRow } from "../src/repository";
 import { identify } from "../src/identity";
+import { isPrivate } from '../src/scope';
 export const actor = { uid: "feature-owner", isAnonymous: false };
 export const ownerConfig = { ownerUid: actor.uid };
 export const identity = identify(actor, ownerConfig);
@@ -62,9 +63,13 @@ export function fixtureDb() {
     async items() { return [...items.values()]; }, async item(id) { return items.get(id) || null; },
     async itemsForUrlPolicy(scope, url) {
       const rows = [...items.values(), ...collectionRows('items').values() as Iterable<ItemRow>].filter(row =>
-        (row.originalUrl?.split('#')[0] === url || row.canonicalUrl?.split('#')[0] === url) &&
-        (row.ownerOpenid === scope.ownerId || !row.ownerOpenid && row.scope !== 'private' && (row.scope === 'global' || row.schoolIds?.includes(scope.schoolId) || scope.publicSourceIds.includes(row.sourceId || '') || row.sourceIds?.some(id => scope.publicSourceIds.includes(id)))));
-      return rows.length > 200 ? null : rows;
+        (row.originalUrl || row.canonicalUrl) && (row.ownerOpenid === scope.ownerId || !isPrivate(row) && !scope.privateSourceIds.includes(row.sourceId || '')));
+      if (rows.length > 10000) return null;
+      return rows.filter(row => [row.originalUrl, row.canonicalUrl].some(value => {
+        if (!value) return false;
+        try { const normalized = new URL(value); normalized.hash = ''; return !normalized.username && !normalized.password && normalized.href === url; }
+        catch { return false; }
+      }));
     },
   };
   collectionRows("user_profiles").set(identity.dataOwnerId, { _id: identity.dataOwnerId, selectedSchoolId: "bjtu", unrelated: "preserve" });

@@ -137,10 +137,10 @@ test('known same-URL policy lookup finds changed titles beyond the feed page', a
   assert.deepEqual(await f.filter([snippet()]), []);
 });
 
-test('saturated exact-URL policy lookup drops uncertain links without scanning feed pages', async () => {
+test('exhausted URL metadata work budget drops uncertain links without scanning feed pages', async () => {
   const f = fixture(), template = f.items.get('notice')!;
   f.items.clear();
-  for (let index = 0; index < 201; index++) f.items.set('row_' + index, { ...template, _id: 'row_' + index, originalUrl: snippet().originalUrl! });
+  for (let index = 0; index < 10001; index++) f.items.set('row_' + index, { ...template, _id: 'row_' + index, originalUrl: snippet().originalUrl! });
   f.repo.items = async () => { throw new Error('must not scan feed'); };
   assert.deepEqual(await f.filter([snippet()]), []);
 });

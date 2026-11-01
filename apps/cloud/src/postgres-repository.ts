@@ -52,15 +52,62 @@ export function postgresRepository(pool: SqlPool): Repository {
     },
     async item(id) { const row=await one('items', id) as ItemRow|null;return row?payload(row):null; },
     async itemsForUrlPolicy(scope, url) {
-      // Deliberately omit status, retention and current item visibility: a
-      // withdrawn known URL must not be republished under a search identity.
-      // Association stays bounded to this owner or public school/source rows.
-      const { rows } = await pool.query(`SELECT id,body FROM campus_documents WHERE collection='items'
-        AND (split_part(body->>'originalUrl','#',1)=$4 OR split_part(body->>'canonicalUrl','#',1)=$4)
-        AND (body->>'ownerOpenid'=$1 OR (coalesce(body->>'ownerOpenid','')='' AND coalesce(body->>'scope','')<>'private'
-          AND (body->>'scope'='global' OR body->'schoolIds' ? $2 OR body->>'sourceId'=ANY($3::text[]) OR body->'sourceIds' ?| $3::text[])))
-        ORDER BY id LIMIT 201`, [scope.ownerId, scope.schoolId, scope.publicSourceIds, url]);
-      return rows.length > 200 ? null : rows.map(row => ({ ...row.body, _id: row.id })) as ItemRow[];
+      // No normalized URL index exists. Keyset pages contain only URL/permission
+      // metadata; foreign-owner documents are excluded and private orphan titles
+      // and bodies never leave SQL. One repeatable-read snapshot prevents gaps
+      // from concurrent updates between pages. Final imports recheck separately.
+      const started = performance.now(), client = await pool.connect();
+      const associated = `d.collection='items' AND coalesce(d.body->>'ownerOpenid','') IN ('',$1)
+        AND (nullif(d.body->>'originalUrl','') IS NOT NULL OR nullif(d.body->>'canonicalUrl','') IS NOT NULL)`;
+      const matches = (value: unknown) => {
+        if (typeof value !== 'string') return false;
+        try {
+          const normalized = new URL(value); normalized.hash = '';
+          return ['http:', 'https:'].includes(normalized.protocol) && !normalized.username && !normalized.password && normalized.href === url;
+        } catch { return false; }
+      };
+      try {
+        await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+        let cursor = '', count = 0;
+        const matched: ItemRow[] = [];
+        for (;;) {
+          const remaining = 5000 - Math.ceil(performance.now() - started);
+          if (remaining <= 0) return null;
+          await client.query("SELECT set_config('statement_timeout',$1,true)", [String(remaining)]);
+          if (count === 10000) {
+            const more = await client.query(`SELECT 1 FROM campus_documents d WHERE ${associated} AND d.id>$2 ORDER BY d.id LIMIT 1`, [scope.ownerId, cursor]);
+            return more.rows.length || performance.now() - started >= 5000 ? null : matched;
+          }
+          const { rows } = await client.query(`SELECT d.id,d.body->>'originalUrl' AS original_url,d.body->>'canonicalUrl' AS canonical_url,
+            CASE WHEN denied.blocked THEN NULL ELSE jsonb_strip_nulls(jsonb_build_object(
+              'title',d.body->'title','sourceName',d.body->'sourceName','originalUrl',d.body->'originalUrl','canonicalUrl',d.body->'canonicalUrl',
+              'scope',d.body->'scope','ownerOpenid',d.body->'ownerOpenid','schoolIds',d.body->'schoolIds','sourceId',d.body->'sourceId','sourceIds',d.body->'sourceIds',
+              'type',d.body->'type','category',d.body->'category','categories',d.body->'categories','key',d.body->'key','importKind',d.body->'importKind',
+              'status',d.body->'status','deleted',d.body->'deleted','aiProcessing',d.body->'aiProcessing','aiSearchExpiresAt',d.body->'aiSearchExpiresAt',
+              'publishedAt',d.body->'publishedAt','discoveredAt',d.body->'discoveredAt','createdAt',d.body->'createdAt','updatedAt',d.body->'updatedAt',
+              'policyBodyAvailable',coalesce(d.body->>'contentText','') ~ '[^[:space:]]' AND NOT coalesce(d.body->>'materialExpiresAt'<$3,false)
+            )) END AS metadata
+            FROM campus_documents d CROSS JOIN LATERAL (SELECT coalesce(d.body->>'ownerOpenid','')='' AND (
+              d.body->>'scope'='private' OR d.body->>'type'='manual' OR d.body->>'category'='mail'
+              OR coalesce(d.body->'categories' ? 'mail',false) OR d.body->>'key' IN ('mail-inbox','manual-inbox')
+              OR coalesce(d.body->>'canonicalUrl','') ~* '^(mail|manual):'
+              OR EXISTS(SELECT 1 FROM campus_documents s WHERE s.collection='sources' AND (s.id=d.body->>'sourceId' OR d.body->'sourceIds' ? s.id)
+                AND (coalesce(s.body->>'ownerOpenid','')<>'' OR s.body->>'scope'='private' OR s.body->>'type'='manual' OR s.body->>'category'='mail'
+                  OR coalesce(s.body->'categories' ? 'mail',false) OR s.body->>'key' IN ('mail-inbox','manual-inbox')
+                  OR coalesce(s.body->>'canonicalUrl','') ~* '^(mail|manual):'))
+            ) AS blocked) denied
+            WHERE ${associated} AND d.id>$2 ORDER BY d.id LIMIT 200`, [scope.ownerId, cursor, new Date().toISOString()]);
+          if (performance.now() - started >= 5000) return null;
+          for (const row of rows) if (matches(row.original_url) || matches(row.canonical_url)) {
+            if (!row.metadata) return [{ _id: 'url-policy-denied', status: 'withdrawn' }];
+            matched.push({ ...row.metadata, _id: row.id } as ItemRow);
+          }
+          count += rows.length;
+          if (rows.length < 200) return matched;
+          cursor = rows.at(-1)!.id;
+        }
+      } catch { return null; }
+      finally { await client.query('ROLLBACK').catch(() => {}); client.release(); }
     },
     async personalize(row, owner) {
       const {rows} = await pool.query('SELECT categories FROM campus_notice_labels WHERE owner_id=$1 AND item_id=$2',[owner,row._id]);
