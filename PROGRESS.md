@@ -673,3 +673,10 @@ npm ci、typecheck、完整 606 项测试（web 229 / cloud 377）、普通构�
 实现提交d4a4e17a0690ecc90cef24daf7a1460ef5620c0b已正常推送AI_module，git ls-remote核对一致。推送前远端AI_module仍69e4339、main仍e9bf410；正常快进，无强推、未合并回main、未主动部署。根目录368份跟踪文件逐字节同步（85更新、153新增、0不一致），旧版备份output/chat-handoff-before-sync-20261101，清单output/chat-handoff-sync-20261101.json。根目录npm ci/typecheck再次通过，保留相同11项告警及4条脚本提示；没有停止其他进程、改密钥或升级依赖。
 
 最终906项测试与双构建证据同上一节；用户提供提示词已进入conversation-v2.7实际指令，原文完整性与final invocation均验证。README、设计、排查、运行时指南、计划、接续记录和本进度已同步，38处文档相对链接有效。最终定向复核ADDR；真实模型/搜索/账号联调pending，发布out-of-scope，个人记忆只读，检出/验收/备份保留。本条与接续终态作为文档提交同步。
+
+
+### 2026-11-03 AI 搭子自动联网设计（待确认）
+
+用户提供 AstrBot 分析分享页，要求借鉴模型工具调用方式改进 AI 搭子联网。已读取分享页、核对 DeepSeek 官方 Search / Fetch 和 Tool Calls 文档，确认最新 main 为 ea95541（已上线 DeepSeek 接口，但聊天主要依靠规则搜索、模型适配器仍拒绝工具调用）。从 main 建立独立分支 codex/assistant-auto-web-tools，保留旧分支及交付目录。
+
+方案 docs/superpowers/specs/2026-11-03-assistant-auto-web-tools-design.md 已写并经独立 builder check，无重要遗漏；推荐模型自动决定 Search / Fetch，按步骤执行，沿用统一后台 Key、每日搜索20次及15秒限频、官方一轮一次额度、来源许可和24小时保留。用户可选择默认自动或增加允许联网开关。当前仅完成设计，等待确认；未改产品代码、运行收费模型、推送远端或部署。using-superpowers / brainstorming 缺失时按项目约定通过 find-skills 找到原作者技能，副本仅保存在根交付目录的 .github-tools/reference-skills，不进入产品仓库。
