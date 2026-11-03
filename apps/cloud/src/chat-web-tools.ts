@@ -8,7 +8,7 @@ export interface ChatWebTools {
 }
 
 export function webSearchAllowed(question: string): boolean {
-  return !/(?:不用|不要|别|无需|不需要|先不|不必|不想)\s*(?:再)?\s*(?:联网|上网|搜索|搜|查找|找找)|(?:只|仅)(?:查看|使用|阅读|查询|检索|看|用|读|查|搜)(?:已有|现有|已收录|本地)/i.test(question);
+  return !/(?:不用|不要|别|无需|不需要|先不|不必|不想)\s*(?:再)?\s*(?:联网|上网|搜索|搜|查找|找找)|(?:只|仅)(?:查看|使用|阅读|查询|检索|看|用|读|查|搜)(?:已有|现有|已收录|本地)|\b(?:do not|don't|never|without|no)\s+(?:use\s+)?(?:browse|browsing|search|web|internet|online)|\bstay offline\b/i.test(question);
 }
 
 /** Constrain model-authored queries to this question's public topic, not model memory. */
@@ -21,6 +21,6 @@ export function publicToolQuery(question: string, query: string, schoolName: str
   // Check whole Latin/numeric tokens and contiguous Chinese pairs, rather than
   // accepting arbitrary entities found only in prior conversation or documents.
   const tokens = normalize(query).match(/[a-z0-9_+-]+|[\p{Script=Han}]+/gu) || [];
-  if (!tokens.length || tokens.some(token => /^[a-z0-9]/.test(token) ? !allowed.split(/[^a-z0-9_+-]+/).includes(token) : Array.from(token).some((_, index, chars) => index + 1 < chars.length && !allowed.includes(chars[index]! + chars[index + 1]!)))) return null;
+  if (!tokens.length || tokens.some(token => /^[a-z0-9]/.test(token) ? !allowed.split(/[^a-z0-9_+-]+/).includes(token) : token.length < 2 || Array.from(token).some((_, index, chars) => index + 1 < chars.length && !allowed.includes(chars[index]! + chars[index + 1]!)))) return null;
   return query.trim();
 }

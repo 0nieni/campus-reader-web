@@ -32,6 +32,29 @@ function fakeTransport(override?: (action: string, input: any) => unknown): Tran
 const mounted: ReturnType<typeof mount>[] = [];
 function open(fake: Transport, selection: Notice[] = []) { const w = mount(AssistantPanel, { props: { transport: fake, schoolId: 'bjtu', selection } }); mounted.push(w); return w; }
 afterEach(() => { mounted.splice(0).forEach(w => w.unmount()); vi.useRealTimers(); vi.restoreAllMocks(); });
+it('an unselected question advances automatic web steps and renders verified sources with step progress', async () => {
+  let step = 0;
+  const refs = [{ reference: 'R1', itemId: 'web-doc', title: 'TypeScript 官方文档', originalUrl: 'https://www.typescriptlang.org/docs/' }];
+  const fake = fakeTransport(a => a === 'ai.status' ? { quota: { limit: 3, used: 0, held: 0, remaining: 3 }, officialConfigured: true, officialModel: 'chat', searchConfigured: true, providers: [] }
+    : a === 'ai.chat.send' ? { ...turn, references: [], totalSteps: 1, search: { state: 'idle', message: '模型尚未请求联网搜索。' } }
+    : a === 'ai.chat.step' ? { ...turn, references: step < 2 ? [] : refs, step: ++step, totalSteps: step + (step === 4 ? 0 : 1), state: step === 4 ? 'complete' : 'ready', result: step === 4 ? '阅读文档可了解类型。[R1]' : null, quotaHeld: step !== 4, message: '正在核验正文', search: { state: 'complete', message: '本次公开搜索已完成', candidateCount: 3, readableCount: step >= 3 ? 1 : 0 } } : undefined);
+  const w = open(fake); await flushPromises();
+  expect(w.text()).toContain('按需联网');
+  await w.get('#assistant-question').setValue('介绍最新 TypeScript');
+  await w.get('form.assistant-composer').trigger('submit'); await flushPromises();
+  expect(step).toBe(4);
+  expect(w.get('.turn-search-counts').text()).toContain('可读正文 1 篇');
+  expect(w.get('.answer-references a').attributes('href')).toBe('https://www.typescriptlang.org/docs/');
+  expect(w.get('.turn-meta').text()).toContain('4/4 步');
+  expect(vi.mocked(fake.call).mock.calls.some(([a, i]) => a === 'ai.recommend' && (i as any).search)).toBe(false);
+});
+
+it('a direct non-search answer does not show an idle search status as a performed search', async () => {
+  const direct = { ...turn, references: [], state: 'complete' as const, result: '你好。', quotaHeld: false, search: { state: 'idle' as const, message: '模型尚未请求联网搜索。' } };
+  const w = open(fakeTransport(a => a === 'ai.chat.latest' ? { conversation: conversation([direct]) } : undefined));
+  await flushPromises(); expect(w.find('.turn-search-status').exists()).toBe(false);
+  expect(w.get('.markdown-content').text()).toBe('你好。');
+});
 it.each([
   { officialConfigured: false, remaining: 3, question: '你能联网吗' },
   { officialConfigured: true, remaining: 0, question: '你可以联网搜索吗' },

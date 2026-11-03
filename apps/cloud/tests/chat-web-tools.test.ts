@@ -36,4 +36,6 @@ test('automatic queries cannot carry memory facts, personal clauses, credentials
   assert.equal(p.publicToolQuery('今天学校有什么比赛', '北京交通大学 比赛', '北京交通大学'), '北京交通大学 比赛');
   assert.equal(p.publicToolQuery('不要联网，介绍 TypeScript', 'TypeScript', '北京交通大学'), null);
   assert.equal(p.publicToolQuery('介绍 TypeScript', 'https://127.0.0.1/admin', '北京交通大学'), null);
+  assert.equal(p.publicToolQuery('介绍 TypeScript 教程', '秘 密', '北京交通大学'), null);
+  assert.equal(p.publicToolQuery('Do not browse the web. Explain TypeScript', 'TypeScript', '北京交通大学'), null);
 });
