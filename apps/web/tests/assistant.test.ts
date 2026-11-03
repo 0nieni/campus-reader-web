@@ -1,6 +1,9 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { mount, flushPromises } from '@vue/test-utils';
 import AssistantPanel from '../src/components/AssistantPanel.vue';
+import AiReadingSettings from '../src/components/AiReadingSettings.vue';
+import { defineComponent,h,ref } from 'vue';
+import type { ReadingSettingsChange } from '../src/lib/transport';
 import type { AiChatTurn, AiConversation, AiProviderState, AiMemoryItem, AiMemoryState, AuthSession, Notice } from '@campus/contracts';
 import type { Transport } from '../src/lib/transport';
 import { ClientError } from '../src/lib/errors';
@@ -31,6 +34,40 @@ function fakeTransport(override?: (action: string, input: any) => unknown): Tran
 }
 const mounted: ReturnType<typeof mount>[] = [];
 function open(fake: Transport, selection: Notice[] = []) { const w = mount(AssistantPanel, { props: { transport: fake, schoolId: 'bjtu', selection } }); mounted.push(w); return w; }
+function openWithSettings(fake:Transport) {
+ const Harness=defineComponent({props:['transport','schoolId','selection'],setup(props){
+  const change=ref<ReadingSettingsChange|null>(null),snapshot=ref<AiMemoryState|null>(null);
+  return()=>h('div',[
+   h(AssistantPanel,{transport:props.transport,schoolId:props.schoolId,selection:props.selection||[],readingChange:change.value,onMemoryLoaded:(value:AiMemoryState)=>{snapshot.value=value;}}),
+   h(AiReadingSettings,{transport:props.transport,schoolId:props.schoolId,memorySnapshot:snapshot.value,onChanged:(value:ReadingSettingsChange)=>{change.value=value;}}),
+  ]);
+ }});
+ const w=mount(Harness,{props:{transport:fake,schoolId:'bjtu',selection:[]}});mounted.push(w);return w;
+}
+it('saving workspace preferences during a model request cannot replace its completed answer with a stale conversation', async () => {
+  let complete!: (value: AiChatTurn) => void, latest!: (value: AiConversation) => void, reads = 0;
+  const step = new Promise<AiChatTurn>(resolve => { complete = resolve; });
+  const stale = new Promise<AiConversation>(resolve => { latest = resolve; });
+  const fake = fakeTransport(a => a === 'ai.chat.step' ? step : a === 'ai.chat.latest' ? reads++ === 0 ? { conversation: null } : stale.then(conversation => ({ conversation })) : undefined);
+  const w = openWithSettings(fake); await flushPromises();
+  await w.get('#assistant-question').setValue('需要什么材料？'); await w.get('form.assistant-composer').trigger('submit'); await flushPromises();
+  await w.get('[data-test="save-preferences"]').trigger('click'); await flushPromises();
+  complete({ ...turn, state: 'complete', result: '已经完成的回答。', quotaHeld: false }); await flushPromises();
+  latest(conversation([{ ...turn, state: 'running' }])); await flushPromises();
+  expect(w.get('.markdown-content').text()).toBe('已经完成的回答。');
+  expect(w.text()).not.toContain('正在回答');
+});
+it('the latest workspace preference refresh wins over an older delayed recommendation response', async () => {
+  let finish!: (value: unknown) => void, calls = 0;
+  const delayed = new Promise(resolve => { finish = resolve; });
+  const result = (reason: string) => ({ items: [{ ...notice, reason, originalUrl: null, readState: 'title_only', checkedAt: null, allowAi: true }], search: { state: 'idle', message: '' }, coverage: '' });
+  const fake = fakeTransport(a => a === 'ai.recommend' ? ++calls === 2 ? delayed : result(calls > 2 ? '最新偏好推荐' : '初始推荐') : undefined);
+  const w = openWithSettings(fake); await flushPromises();
+  await w.get('[data-test="save-preferences"]').trigger('click'); await flushPromises();
+  await w.get('[data-test="save-preferences"]').trigger('click'); await flushPromises();
+  finish(result('较早的迟到推荐')); await flushPromises();
+  expect(w.text()).toContain('最新偏好推荐'); expect(w.text()).not.toContain('较早的迟到推荐');
+});
 afterEach(() => { mounted.splice(0).forEach(w => w.unmount()); vi.useRealTimers(); vi.restoreAllMocks(); });
 it('an unselected question advances automatic web steps and renders verified sources with step progress', async () => {
   let step = 0;
@@ -178,56 +215,12 @@ it.each(['search_capability', 'search_status'] as const)('refreshes chat status 
   expect(fake.call).toHaveBeenCalledWith('ai.chat.get', { conversationId: 'chat-1' });
   for (const action of ['ai.memory.get', 'ai.recommend']) expect(vi.mocked(fake.call).mock.calls.filter(([a]) => a === action)).toHaveLength(1);
 });
-it('loads automatic memory independently from behavior learning without writing or asking for confirmation', async () => {
-  const fake = fakeTransport(a => a === 'ai.memory.get' ? memory([memoryItem, { ...memoryItem, id: 'major', slot: 'major', text: '我是计算机专业', expiresAt: null }]) : undefined);
-  const w = open(fake); await flushPromises();
-  const section = w.get('[data-test="memory-section"]');
-  expect(section.get('summary').text()).toBe('AI记住的信息');
-  expect(section.text()).toContain('自动保存'); expect(section.text()).toContain('无需逐条确认');
-  expect(section.text()).toContain('我准备参加程序设计比赛'); expect(section.text()).toContain('到期'); expect(section.text()).toContain('无固定到期');
-  expect((section.get('[data-test="memory-enabled"]').element as HTMLInputElement).checked).toBe(true);
-  expect((w.get('.learning-toggle input').element as HTMLInputElement).checked).toBe(false);
-  expect(vi.mocked(fake.call).mock.calls.some(([action]) => ['ai.memory.configure', 'ai.memory.forget', 'ai.memory.clear', 'ai.profile.save'].includes(action))).toBe(false);
-});
-it('deletes an automatic memory immediately and clears only automatic memories on explicit clicks', async () => {
-  const confirm = vi.spyOn(window, 'confirm');
-  const fake = fakeTransport(a => a === 'ai.memory.get' ? memory([memoryItem, { ...memoryItem, id: 'major', slot: 'major', text: '我是计算机专业', expiresAt: null }]) : a === 'ai.memory.forget' ? { ...memory([{ ...memoryItem, id: 'major', slot: 'major', text: '我是计算机专业', expiresAt: null }]), version: 3 } : a === 'ai.memory.clear' ? { ...memory(), version: 4 } : undefined);
-  const w = open(fake); await flushPromises();
-  await w.get('[data-test="forget-memory-goal"]').trigger('click'); await flushPromises();
-  expect(fake.call).toHaveBeenCalledWith('ai.memory.forget', { schoolId: 'bjtu', id: 'goal', version: 2 });
-  expect(w.text()).not.toContain('我准备参加程序设计比赛'); expect(w.text()).toContain('我是计算机专业');
-  await w.get('[data-test="clear-memory"]').trigger('click'); await flushPromises();
-  expect(fake.call).toHaveBeenCalledWith('ai.memory.clear', { schoolId: 'bjtu', version: 3 });
-  expect(w.text()).not.toContain('我是计算机专业'); expect(w.text()).toContain('暂无自动记忆'); expect(w.text()).toContain('手动偏好已保留');
-  expect((w.get('#assistant-interests').element as HTMLInputElement).value).toBe('招聘'); expect(confirm).not.toHaveBeenCalled();
-});
-it('configures automatic memory from a user toggle without enabling behavior learning', async () => {
-  const fake = fakeTransport((a, input) => a === 'ai.memory.configure' ? { ...memory(), enabled: input.enabled, version: 3 } : undefined);
-  const w = open(fake); await flushPromises(); await w.get('[data-test="memory-enabled"]').setValue(false); await flushPromises();
-  expect(fake.call).toHaveBeenCalledWith('ai.memory.configure', { schoolId: 'bjtu', enabled: false, version: 2 });
-  expect((w.get('[data-test="memory-enabled"]').element as HTMLInputElement).checked).toBe(false);
-  expect(w.text()).toContain('已关闭自动记忆'); expect((w.get('.learning-toggle input').element as HTMLInputElement).checked).toBe(false);
-  expect(vi.mocked(fake.call).mock.calls.some(([action]) => action === 'ai.profile.save')).toBe(false);
-});
-it.each(['configure', 'forget', 'clear'])('reloads memory after a %s version conflict without retrying the write', async action => {
-  let reads = 0;
-  const fake = fakeTransport(a => {
-    if (a === 'ai.memory.get') return { ...memory(reads++ ? [{ ...memoryItem, text: '其他页面保存的新目标' }] : [memoryItem]), version: reads === 1 ? 2 : 7 };
-    if (a === `ai.memory.${action}`) throw new ClientError('MEMORY_CONFLICT', '版本冲突');
-  });
-  const w = open(fake); await flushPromises();
-  if (action === 'configure') await w.get('[data-test="memory-enabled"]').setValue(false);
-  else await w.get(`[data-test="${action === 'forget' ? 'forget-memory-goal' : 'clear-memory'}"]`).trigger('click');
-  await flushPromises(); expect(w.text()).toContain('其他页面保存的新目标'); expect(w.text()).toContain('已加载最新记忆');
-  expect(vi.mocked(fake.call).mock.calls.filter(([a]) => a === `ai.memory.${action}`)).toHaveLength(1);
-  expect((w.get('[data-test="memory-enabled"]').element as HTMLInputElement).checked).toBe(true);
-});
 it('refreshes automatic memories after an answer completes', async () => {
   let reads = 0;
   const fake = fakeTransport(a => a === 'ai.memory.get' ? memory(reads++ ? [memoryItem] : []) : undefined);
   const w = open(fake); await flushPromises(); expect(w.text()).not.toContain(memoryItem.text);
   await w.get('#assistant-question').setValue('我准备参加程序设计比赛'); await w.get('form.assistant-composer').trigger('submit'); await flushPromises();
-  expect(w.get('[data-test="memory-section"]').text()).toContain(memoryItem.text);
+  expect(JSON.stringify(w.emitted('memoryLoaded')?.at(-1))).toContain(memoryItem.text);
   expect(vi.mocked(fake.call).mock.calls.filter(([a]) => a === 'ai.memory.get')).toHaveLength(2);
 });
 it('refreshes automatic memories after recovering a lost completed answer without a second model call', async () => {
@@ -238,33 +231,8 @@ it('refreshes automatic memories after recovering a lost completed answer withou
     if (a === 'ai.chat.get') return conversation([{ ...turn, state: 'complete', result: '已完成回答', quotaHeld: false }]);
   });
   const w = open(fake); await flushPromises(); await w.get('#assistant-question').setValue('问题'); await w.get('form.assistant-composer').trigger('submit'); await flushPromises();
-  expect(w.get('[data-test="memory-section"]').text()).toContain(memoryItem.text); expect(w.text()).toContain('已完成回答');
+  expect(JSON.stringify(w.emitted('memoryLoaded')?.at(-1))).toContain(memoryItem.text); expect(w.text()).toContain('已完成回答');
   expect(vi.mocked(fake.call).mock.calls.filter(([a]) => a === 'ai.chat.step')).toHaveLength(1);
-});
-it.each(['read', 'mutation'])('discards an old-school memory %s response after switching school', async operation => {
-  let finish!: (value: AiMemoryState) => void;
-  const pending = new Promise<AiMemoryState>(resolve => { finish = resolve; });
-  const fake = fakeTransport((a, input) => {
-    if (a === 'ai.memory.get') return input.schoolId === 'other' ? { ...memory([{ ...memoryItem, text: '新学校目标' }]), schoolId: 'other' } : operation === 'read' ? pending : memory([memoryItem]);
-    if (a === 'ai.memory.clear') return pending;
-  });
-  const w = open(fake); await flushPromises();
-  if (operation === 'mutation') { await w.get('[data-test="clear-memory"]').trigger('click'); await flushPromises(); }
-  await w.setProps({ schoolId: 'other' }); await flushPromises(); finish(memory([{ ...memoryItem, text: '旧学校迟到记忆' }])); await flushPromises();
-  expect(w.text()).toContain('新学校目标'); expect(w.text()).not.toContain('旧学校迟到记忆');
-});
-it('does not transfer a delayed memory response to the next account component', async () => {
-  let finish!: (value: AiMemoryState) => void; const pending = new Promise<AiMemoryState>(resolve => { finish = resolve; });
-  const old = open(fakeTransport(a => a === 'ai.memory.get' ? pending : undefined)); await flushPromises(); old.unmount();
-  const next = open(fakeTransport(a => a === 'ai.memory.get' ? memory([{ ...memoryItem, text: '新账号目标' }]) : undefined)); await flushPromises();
-  finish(memory([{ ...memoryItem, text: '旧账号私人目标' }])); await flushPromises();
-  expect(next.text()).toContain('新账号目标'); expect(next.text()).not.toContain('旧账号私人目标');
-});
-it('keeps the authoritative memory toggle when configuration fails', async () => {
-  const fake = fakeTransport(a => { if (a === 'ai.memory.configure') throw new Error('network unavailable'); });
-  const w = open(fake); await flushPromises(); await w.get('[data-test="memory-enabled"]').setValue(false); await flushPromises();
-  expect((w.get('[data-test="memory-enabled"]').element as HTMLInputElement).checked).toBe(true);
-  expect(w.find('.error-message').exists()).toBe(true);
 });
 it.each(['configure', 'forget', 'clear'])('refreshes recommendations after a successful memory %s', async action => {
   let changed = false;
@@ -273,7 +241,7 @@ it.each(['configure', 'forget', 'clear'])('refreshes recommendations after a suc
     if (a === `ai.memory.${action}`) { changed = true; return { ...memory(action === 'configure' ? [memoryItem] : []), enabled: action !== 'configure', version: 3 }; }
     if (a === 'ai.recommend') return { items: [{ ...notice, originalUrl: null, reason: changed ? '当前手动偏好推荐' : '基于自动记忆中的旧目标推荐', readState: 'title_only', checkedAt: null, allowAi: true }], search: { state: 'idle', message: '' }, coverage: '' };
   });
-  const w = open(fake); await flushPromises(); expect(w.text()).toContain('基于自动记忆中的旧目标推荐');
+  const w = openWithSettings(fake); await flushPromises(); expect(w.text()).toContain('基于自动记忆中的旧目标推荐');
   if (action === 'configure') await w.get('[data-test="memory-enabled"]').setValue(false);
   else await w.get(`[data-test="${action === 'forget' ? 'forget-memory-goal' : 'clear-memory'}"]`).trigger('click');
   await flushPromises(); expect(w.text()).not.toContain('基于自动记忆中的旧目标推荐'); expect(w.text()).toContain('当前手动偏好推荐');
@@ -286,7 +254,7 @@ it.each(['configure', 'forget', 'clear'])('keeps a successful memory %s when its
     if (a === `ai.memory.${action}`) { changed = true; return { ...memory(action === 'configure' ? [memoryItem] : []), enabled: action !== 'configure', version: 3 }; }
     if (a === 'ai.recommend' && changed) throw new Error('recommendation refresh unavailable');
   });
-  const w = open(fake); await flushPromises();
+  const w = openWithSettings(fake); await flushPromises();
   if (action === 'configure') await w.get('[data-test="memory-enabled"]').setValue(false);
   else await w.get(`[data-test="${action === 'forget' ? 'forget-memory-goal' : 'clear-memory'}"]`).trigger('click');
   await flushPromises();
@@ -305,7 +273,7 @@ it('ignores an old-school recommendation refresh after a memory deletion', async
       return { items: [{ ...notice, title: input.schoolId === 'other' ? '新学校推荐资料' : '原学校资料', originalUrl: null, reason: '当前推荐', readState: 'title_only', checkedAt: null, allowAi: true }], search: { state: 'idle', message: '' }, coverage: '' };
     }
   });
-  const w = open(fake); await flushPromises(); await w.get('[data-test="forget-memory-goal"]').trigger('click'); await flushPromises();
+  const w = openWithSettings(fake); await flushPromises(); await w.get('[data-test="forget-memory-goal"]').trigger('click'); await flushPromises();
   expect(w.find('.recommendation').exists()).toBe(false);
   await w.setProps({ schoolId: 'other' }); await flushPromises();
   finish({ items: [{ ...notice, title: '旧学校迟到推荐', originalUrl: null, reason: '旧理由', readState: 'title_only', checkedAt: null, allowAi: true }], search: { state: 'idle', message: '' }, coverage: '' }); await flushPromises();
@@ -318,18 +286,6 @@ it('shows a nonblocking memory failure next to a successful answer without resen
   expect(w.find('.error-message').exists()).toBe(false);
   expect(vi.mocked(fake.call).mock.calls.filter(([a]) => a === 'ai.chat.send')).toHaveLength(1); expect(vi.mocked(fake.call).mock.calls.filter(([a]) => a === 'ai.chat.step')).toHaveLength(1);
   await w.get('#assistant-question').setValue('下个问题'); expect(w.get('[data-test="send"]').attributes('disabled')).toBeUndefined();
-});
-it('hides expired automatic memories on read and expiry without polling or starting another timer', async () => {
-  vi.useFakeTimers(); const now = Date.now();
-  const fake = fakeTransport(a => a === 'ai.memory.get' ? memory([
-    { ...memoryItem, text: '已到期目标', expiresAt: new Date(now).toISOString() },
-    { ...memoryItem, id: 'progress', slot: 'progress', text: '即将到期进展', expiresAt: new Date(now + 1000).toISOString() },
-  ]) : undefined);
-  const w = open(fake); await flushPromises(); expect(w.text()).not.toContain('已到期目标'); expect(w.text()).toContain('即将到期进展');
-  expect(vi.getTimerCount()).toBe(1);
-  await vi.advanceTimersByTimeAsync(1000); expect(w.text()).not.toContain('即将到期进展'); expect(w.text()).toContain('暂无自动记忆');
-  expect(vi.mocked(fake.call).mock.calls.filter(([a]) => a === 'ai.memory.get')).toHaveLength(1);
-  expect(vi.mocked(fake.call).mock.calls.some(([a]) => ['ai.memory.configure', 'ai.memory.forget', 'ai.memory.clear'].includes(a))).toBe(false);
 });
 it('opening loads factual context but never starts a conversation, searches or calls a model', async () => {
   const fake = fakeTransport(); const w = open(fake); await flushPromises();
@@ -385,7 +341,7 @@ it('explicit send includes selected sources and steps into a rendered answer; fo
 });
 it('exhausted official quota prevents sending while preferences and explicit search remain available', async () => {
   const fake = fakeTransport(a => a === 'ai.status' ? { quota: { limit: 3, remaining: 0, used: 3, held: 0 }, officialConfigured: true, officialModel: 'chat', providers: [] } : undefined);
-  const w = open(fake); await flushPromises(); await w.get('#assistant-question').setValue('你好'); expect(w.get('[data-test="send"]').attributes('disabled')).toBeDefined();
+  const w = openWithSettings(fake); await flushPromises(); await w.get('#assistant-question').setValue('你好'); expect(w.get('[data-test="send"]').attributes('disabled')).toBeDefined();
   await w.get('#assistant-interests').setValue('招聘，竞赛, 科研'); await w.get('#assistant-goals').setValue('寻找实习'); await w.get('[data-test="save-preferences"]').trigger('click'); await flushPromises();
   expect(fake.call).toHaveBeenCalledWith('ai.profile.save', { schoolId: 'bjtu', interests: ['招聘', '竞赛', '科研'], goals: '寻找实习', learningEnabled: false, version: 2 });
   await w.get('#assistant-search').setValue('实习'); await w.get('form.source-search').trigger('submit'); await flushPromises();
@@ -458,7 +414,7 @@ it('uncertain held quota is settled only after an explicit charged or not-charge
   expect(vi.mocked(fake.call).mock.calls.some(([a]) => ['ai.chat.send', 'ai.chat.step'].includes(a))).toBe(false);
 });
 it('source selection records only an explicit action and respects the server opt-out without enabling learning', async () => {
-  const fake = fakeTransport(); const w = open(fake); await flushPromises();
+  const fake = fakeTransport(); const w = openWithSettings(fake); await flushPromises();
   expect(vi.mocked(fake.call).mock.calls.some(([a]) => a === 'ai.behavior')).toBe(false);
   await w.get('[data-test="select-source"]').trigger('click'); await flushPromises();
   expect(fake.call).toHaveBeenCalledWith('ai.behavior', { schoolId: 'bjtu', itemId: 'one' });
@@ -505,22 +461,11 @@ it.each(['save', 'clear'])('refreshes recommendation reasons after preferences %
     if (a === 'ai.profile.clearBehavior') { changed = true; return { schoolId: 'bjtu', interests: ['招聘'], goals: '', learningEnabled: false, version: 3 }; }
     if (a === 'ai.recommend') return { items: [{ ...notice, originalUrl: null, reason: changed ? '当前手动偏好推荐' : '旧行为学习推荐理由', readState: 'title_only', checkedAt: null, allowAi: true }], search: { state: 'idle', message: '' }, coverage: '已收录公告' };
   });
-  const w = open(fake); await flushPromises(); expect(w.text()).toContain('旧行为学习推荐理由');
+  const w = openWithSettings(fake); await flushPromises(); expect(w.text()).toContain('旧行为学习推荐理由');
   if (action === 'save') await w.get('[data-test="save-preferences"]').trigger('click');
   else await w.findAll('button').find(b => b.text() === '清除行为记录')!.trigger('click');
   await flushPromises(); expect(w.text()).not.toContain('旧行为学习推荐理由'); expect(w.text()).toContain('当前手动偏好推荐');
   expect(vi.mocked(fake.call).mock.calls.filter(([a]) => a === 'ai.recommend')).toHaveLength(2);
-});
-it('profile version conflicts reload the latest version and allow the user to reapply edits', async () => {
-  let reads = 0, saves = 0;
-  const fake = fakeTransport((a, input) => {
-    if (a === 'ai.profile.get') { reads++; return { schoolId: 'bjtu', interests: reads === 1 ? ['招聘'] : ['科研'], goals: '', learningEnabled: false, version: reads === 1 ? 2 : 7 }; }
-    if (a === 'ai.profile.save') { saves++; if (saves === 1) throw new ClientError('PROFILE_CONFLICT', '版本冲突'); return { ...input, version: 8 }; }
-  });
-  const w = open(fake); await flushPromises(); await w.get('#assistant-interests').setValue('实习'); await w.get('[data-test="save-preferences"]').trigger('click'); await flushPromises();
-  expect((w.get('#assistant-interests').element as HTMLInputElement).value).toBe('科研'); expect(w.text()).toContain('重新填写后保存');
-  await w.get('#assistant-interests').setValue('实习'); await w.get('[data-test="save-preferences"]').trigger('click'); await flushPromises();
-  expect(fake.call).toHaveBeenCalledWith('ai.profile.save', expect.objectContaining({ version: 7, interests: ['实习'] })); expect(w.text()).toContain('偏好已保存');
 });
 it('a pending refreshed recommendation cannot overwrite the next school recommendation', async () => {
   let recCalls = 0, finish!: (value: unknown) => void;
@@ -528,7 +473,7 @@ it('a pending refreshed recommendation cannot overwrite the next school recommen
   const fake = fakeTransport((a, input) => {
     if (a === 'ai.recommend') { recCalls++; if (recCalls === 2) return pending; if (input.schoolId === 'other') return { items: [{ ...notice, title: '新学校推荐', originalUrl: null, reason: '本校资料', readState: 'title_only', checkedAt: null, allowAi: true }], search: { state: 'idle', message: '' }, coverage: '新学校' }; }
   });
-  const w = open(fake); await flushPromises(); await w.get('[data-test="save-preferences"]').trigger('click'); await flushPromises();
+  const w = openWithSettings(fake); await flushPromises(); await w.get('[data-test="save-preferences"]').trigger('click'); await flushPromises();
   await w.setProps({ schoolId: 'other' }); await flushPromises();
   finish({ items: [{ ...notice, title: '过时旧推荐', originalUrl: null, reason: '旧学校资料', readState: 'title_only', checkedAt: null, allowAi: true }], search: { state: 'idle', message: '' }, coverage: '旧学校' }); await flushPromises();
   expect(w.text()).toContain('新学校推荐'); expect(w.text()).not.toContain('过时旧推荐');
@@ -712,31 +657,6 @@ it('account changes discard unsaved provider keys and old configuration response
   finish({ ...structuredClone(savedState), profiles: [{ ...savedState.profiles[0]!, name: '旧账号配置' }] }); await flushPromises();
   expect(w.text()).not.toContain('旧账号配置'); expect(w.html()).not.toContain('old-account-secret');
 });
-it('shows independent goals and identifies the goal belonging to each progress item', async () => {
-  const items: AiMemoryItem[] = [
-    { ...memoryItem, id: 'goal-exam', text: '准备考研' },
-    { ...memoryItem, id: 'goal-work', text: '准备实习' },
-    { ...memoryItem, id: 'progress-exam', slot: 'progress', text: '已复习数学第一章', goalId: 'goal-exam' },
-    { ...memoryItem, id: 'progress-work', slot: 'progress', text: '已完成简历', goalId: 'goal-work' },
-    { ...memoryItem, id: 'progress-unlinked', slot: 'progress', text: '旧版未关联进展' },
-  ];
-  const fake = fakeTransport(a => a === 'ai.memory.get' ? memory(items) : undefined);
-  const w = open(fake); await flushPromises();
-  const rows = w.findAll('.memory-list li');
-  expect(rows).toHaveLength(5);
-  expect(rows.find(row => row.text().includes('已复习数学第一章'))!.text()).toContain('所属目标：准备考研');
-  expect(rows.find(row => row.text().includes('已完成简历'))!.text()).toContain('所属目标：准备实习');
-  expect(rows.find(row => row.text().includes('旧版未关联进展'))!.text()).toContain('未关联目标');
-  expect(rows.find(row => row.text().includes('准备考研'))!.text()).toContain('到期：');
-});
-it('deletes a goal using its actual stable string id without deleting a different goal', async () => {
-  const exam = { ...memoryItem, id: 'goal-exam', text: '准备考研' }, work = { ...memoryItem, id: 'goal-work', text: '准备实习' };
-  const fake = fakeTransport(a => a === 'ai.memory.get' ? memory([exam, work]) : a === 'ai.memory.forget' ? { ...memory([work]), version: 3 } : undefined);
-  const w = open(fake); await flushPromises();
-  await w.get('[data-test="forget-memory-goal-exam"]').trigger('click'); await flushPromises();
-  expect(fake.call).toHaveBeenCalledWith('ai.memory.forget', { schoolId: 'bjtu', id: 'goal-exam', version: 2 });
-  expect(w.get('.memory-list').text()).not.toContain('准备考研'); expect(w.get('.memory-list').text()).toContain('准备实习');
-});
 it.each([
   '忘掉我的专业', '清空自动记忆', '我现在不准备考研了', '把目标考研改成准备实习', '我的专业改成数学专业',
 ])('sends the explicit memory command %s without a configured model or available quota', async command => {
@@ -780,7 +700,7 @@ it('waits for command completion before refreshing authoritative memory and reco
   });
   const w = open(fake); await flushPromises(); await w.get('#assistant-question').setValue('忘掉我的目标');
   await w.get('form.assistant-composer').trigger('submit'); await flushPromises();
-  expect(w.get('.memory-list').text()).toContain(memoryItem.text);
+  expect(JSON.stringify(w.emitted('memoryLoaded')?.at(-1))).toContain(memoryItem.text);
   expect(w.get('[data-test="send"]').attributes('disabled')).toBeDefined();
   changed = true; finish({ ...turn, taskId: null, state: 'complete', quotaHeld: false, result: '已忘记这个目标。' }); await flushPromises();
   expect(w.get('.markdown-content').text()).toContain('已忘记这个目标');
@@ -794,7 +714,7 @@ it('shows an ambiguous command clarification without claiming a deletion or chan
   const w = open(fake); await flushPromises(); await w.get('#assistant-question').setValue('忘掉我的目标');
   await w.get('form.assistant-composer').trigger('submit'); await flushPromises();
   expect(w.get('.markdown-content').text()).toContain('请说明要忘记哪一个目标');
-  expect(w.get('.memory-list').text()).toContain(memoryItem.text); expect(w.text()).not.toContain('已删除这条自动记忆');
+  expect(JSON.stringify(w.emitted('memoryLoaded')?.at(-1))).toContain(memoryItem.text); expect(w.text()).not.toContain('已删除这条自动记忆');
   expect(vi.mocked(fake.call).mock.calls.some(([a]) => ['ai.memory.clear', 'ai.memory.forget', 'ai.chat.step'].includes(a))).toBe(false);
 });
 it('preserves a completed command when recommendation refresh fails instead of recovering or resending it', async () => {
@@ -808,11 +728,6 @@ it('preserves a completed command when recommendation refresh fails instead of r
   await w.get('form.assistant-composer').trigger('submit'); await flushPromises();
   expect(w.get('.markdown-content').text()).toContain('已清空自动记忆'); expect(w.text()).not.toContain(memoryItem.text); expect(w.find('.error-message').exists()).toBe(true);
   expect(vi.mocked(fake.call).mock.calls.some(([a]) => ['ai.chat.get', 'ai.chat.step'].includes(a))).toBe(false);
-});
-it('associates legacy progress with the legacy goal without guessing among new goals', async () => {
-  const fake = fakeTransport(a => a === 'ai.memory.get' ? memory([memoryItem, { ...memoryItem, id: 'progress', slot: 'progress', text: '已开始训练' }]) : undefined);
-  const w = open(fake); await flushPromises();
-  expect(w.findAll('.memory-list li').find(row => row.text().includes('已开始训练'))!.text()).toContain(`所属目标：${memoryItem.text}`);
 });
 it('keeps memory commands blocked while an existing turn holds quota or is unfinished', async () => {
   const fake = fakeTransport(a => a === 'ai.chat.latest' ? { conversation: conversation([{ ...turn, state: 'uncertain' }]) } : undefined);
@@ -829,7 +744,7 @@ it('discards a completed old-school command before refreshing memory or recommen
   await w.get('form.assistant-composer').trigger('submit'); await flushPromises();
   await w.setProps({ schoolId: 'other' }); await flushPromises();
   finish({ ...turn, taskId: null, state: 'complete', quotaHeld: false, result: '旧学校目标已删除。' }); await flushPromises();
-  expect(w.text()).toContain('新学校目标'); expect(w.text()).not.toContain('旧学校目标已删除');
+  expect(JSON.stringify(w.emitted('memoryLoaded')?.at(-1))).toContain('新学校目标'); expect(w.text()).not.toContain('旧学校目标已删除');
   expect(vi.mocked(fake.call).mock.calls.filter(([a]) => a === 'ai.memory.get')).toHaveLength(2);
   expect(vi.mocked(fake.call).mock.calls.filter(([a]) => a === 'ai.recommend')).toHaveLength(2);
 });

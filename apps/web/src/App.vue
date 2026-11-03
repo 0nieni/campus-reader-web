@@ -7,7 +7,7 @@ const BookmarksPanel = defineAsyncComponent({ loader: () => import("./components
 const AssistantPanel = defineAsyncComponent({ loader: () => import('./components/AssistantPanel.vue'), loadingComponent: featureLoading, errorComponent: featureFailed });
 const WebsiteSourcesPanel = defineAsyncComponent({loader:()=>import('./components/WebsiteSourcesPanel.vue'),loadingComponent:featureLoading,errorComponent:featureFailed});
 import { siteTransport as cloudTransport, setupIssues, regionNeedsVerification, isNetlify } from "./lib/site-transport";
-import type { ProviderChange,Transport } from "./lib/transport";
+import type { ProviderChange,ReadingSettingsChange,Transport } from "./lib/transport";
 import { workspaceStore } from "./stores/workspace";
 import { categoryNames, displayTime, safeOriginal } from "./lib/presentation";
 import { safeError, ClientError } from "./lib/errors";
@@ -22,6 +22,9 @@ import PasswordRecoveryPanel from './components/PasswordRecoveryPanel.vue';
 import McpAuthorizationPanel from './components/McpAuthorizationPanel.vue';
 import NoticeBrief from './components/NoticeBrief.vue';
 const AccountSettingsDialog=defineAsyncComponent(()=>import('./components/AccountSettingsDialog.vue'));
+const readingChange=ref<ReadingSettingsChange|null>(null),readingMemory=ref<import('@campus/contracts').AiMemoryState|null>(null);
+function readingChanged(change:ReadingSettingsChange){if(change.schoolId===store.workspace?.school?.id)readingChange.value={...change};}
+function memoryLoaded(value:import('@campus/contracts').AiMemoryState){if(value.schoolId===store.workspace?.school?.id)readingMemory.value=value;}
 const accountOpen=ref(false),providerChange=ref<ProviderChange|null>(null),assistantFeedback=ref('');
 const accountOpener=ref<HTMLElement|null>(null);
 const accountInitialTab=ref<'school'|undefined>();
@@ -34,6 +37,7 @@ const props = defineProps<{
   configurationIssues?: string[];
 }>();
 const store = workspaceStore(props.transport || cloudTransport)();
+watch(()=>store.workspace?.school?.id,()=>{readingChange.value=null;readingMemory.value=null;});
 const transport = props.transport || cloudTransport;
 const authScreen=ref(false),wantAi=ref(false),workspaceMessage=ref('');
 const mcpTicket=ref(transport.mcp?new URLSearchParams(location.search).get('mcp_authorize')||'':'');
@@ -69,7 +73,7 @@ const reminderKeys=ref<string[]>([]),addingReminder=ref(''),reminderFeedback=ref
 let requestedReminders=new URLSearchParams(location.search).get('view')==='reminders';
 const requestingSchool = ref(false), schoolQuery = ref('');
 const matchingSchools = computed(() => store.schools.filter(school=>school.name.includes(schoolQuery.value.trim())));
-watch(() => store.auth?.uid,()=>{requestingSchool.value=false;schoolQuery.value='';accountOpen.value=false;providerChange.value=null;assistantFeedback.value='';});
+watch(() => store.auth?.uid,()=>{requestingSchool.value=false;schoolQuery.value='';accountOpen.value=false;providerChange.value=null;readingChange.value=null;readingMemory.value=null;assistantFeedback.value='';});
 watch(() => store.auth?.uid, () => { view.value = "feed"; selection.value = []; unreadReminders.value=0;reminderKeys.value=[];reminderFeedback.value='';addingReminder.value=''; });
 watch(()=>store.workspace?.capabilities.reminders,enabled=>{if(enabled&&requestedReminders){navigate('reminders');requestedReminders=false;}});
 watch(() => store.workspace?.school?.id, () => { selection.value = [];reminderFeedback.value='';assistantFeedback.value=''; });
@@ -96,7 +100,7 @@ let sourceNavigationEpoch=0;
 watch(()=>store.auth?.uid,()=>{sourceNavigationEpoch++;},{flush:'sync'});
 function openLogin(ai=false){accountOpen.value=false;wantAi.value=ai;authScreen.value=true;store.closeNotice();changeAuthMode('login');}
 function navigate(target: "feed" | "favorites" | "ai" | "sources" | "reminders") { sourceNavigationEpoch++;store.closeNotice();if(target==='ai'&&store.auth?.kind==='guest'&&!store.workspace?.capabilities.ai){openLogin(true);return;} view.value = target; }
-watch(()=>actualAccount.value?.uid,(uid,prior)=>{if(uid!==prior){providerChange.value=null;assistantFeedback.value='';if(!uid&&view.value==='ai')view.value='feed';}});
+watch(()=>actualAccount.value?.uid,(uid,prior)=>{if(uid!==prior){providerChange.value=null;readingChange.value=null;readingMemory.value=null;assistantFeedback.value='';if(!uid&&view.value==='ai')view.value='feed';}});
 async function imported(result:AnonymousImport){
  accountOpen.value=false;selection.value=[];navigate('feed');await store.connect();
  workspaceMessage.value=`已导入 ${result.bookmarks} 条收藏、${result.tags} 条标签、${result.sources} 项来源设置和 ${result.reminders} 条提醒${result.skipped?`，跳过 ${result.skipped} 项失效或私有数据`:''}。邮箱需重新验证，推送需重新检查并授权。`;
@@ -386,11 +390,11 @@ function schoolChanged(event: Event) {
       <BookmarksPanel v-if="view === 'favorites'" :transport="featureTransport" :school-id="store.workspace.school?.id || null" @open="openFavorite" />
       <ReminderCenter v-if="store.workspace.capabilities.reminders" v-show="view==='reminders'" :key="`reminders:${store.auth?.uid}`" :transport="featureTransport" :school-id="store.workspace.school?.id||null" :school-name="store.workspace.school?.name||''" :revision="reminderRevision" :anonymous="store.auth?.kind==='guest'" :visible="view==='reminders'" @unread="unreadReminders=$event" @changed="applyReminderState" @open="openReminder" @back="navigate('feed')" />
       <WebsiteSourcesPanel v-if="view === 'sources'" :key="`${store.auth?.uid}:${store.workspace.school?.id}`" :transport="featureTransport" :public-only="store.auth?.kind==='guest'" :school-id="store.workspace.school?.id || null" :school-name="store.workspace.school?.name || ''" :open-school="openSourceSchool" @changed="sourceCenterChanged" @back="navigate('feed')" />
-      <AssistantPanel v-if="view === 'ai'" :key="`assistant:${actualAccount?.uid}:${store.workspace.school?.id}`" :transport="featureTransport" :school-id="store.workspace.school?.id || null" :selection="selection" :provider-change="providerChange" @remove="selection = selection.filter(item => item.id !== $event)" @back="navigate('feed')" />
+      <AssistantPanel v-if="view === 'ai'" :key="`assistant:${actualAccount?.uid}:${store.workspace.school?.id}`" :transport="featureTransport" :school-id="store.workspace.school?.id || null" :selection="selection" :provider-change="providerChange" :reading-change="readingChange" @memory-loaded="memoryLoaded" @remove="selection = selection.filter(item => item.id !== $event)" @back="navigate('feed')" />
 
       </main>
     </div>
-    <AccountSettingsDialog v-if="accountOpen" :key="`${store.auth?.uid}:${actualAccount?.uid||''}`" :transport="featureTransport" :anonymous="store.auth?.kind==='guest'" :username="actualAccount?.username||null" :opener="accountOpener" :initial-tab="accountInitialTab" @close="accountOpen=false" @login="openLogin()" @imported="imported" @providers-changed="providerChange=$event"><template #school>        <label class="school-label" for="school">我的学校</label>
+    <AccountSettingsDialog v-if="accountOpen" :key="`${store.auth?.uid}:${actualAccount?.uid||''}`" :transport="featureTransport" :school-id="store.workspace.school?.id||null" :memory-snapshot="readingMemory" @reading-changed="readingChanged" :anonymous="store.auth?.kind==='guest'" :username="actualAccount?.username||null" :opener="accountOpener" :initial-tab="accountInitialTab" @close="accountOpen=false" @login="openLogin()" @imported="imported" @providers-changed="providerChange=$event"><template #school>        <label class="school-label" for="school">我的学校</label>
         <input v-if="store.schools.length > 10" v-model="schoolQuery" aria-label="搜索学校" placeholder="输入学校名称筛选" maxlength="80" class="school-search">
         <select
           id="school"
