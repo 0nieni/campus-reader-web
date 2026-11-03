@@ -15,6 +15,7 @@ import { AppError, reject } from './errors';
 import { isRetained, originalUrl, toNotice } from './gateway';
 import { isPrivate, itemVisible, sourceVisible, type Scope } from './scope';
 import type { ProviderProfiles } from './ai-provider-profiles';
+import type { ChatWebTools } from './chat-web-tools';
 
 function canonicalUrl(value: unknown): string | null {
   if (typeof value !== 'string') return null;
@@ -55,16 +56,16 @@ export function assistantService(db: Database, repo: Repository, ai: ReturnType<
       await ref.update({ aiSearchBudget: { day: prior.day, count: prior.count + 1, lastAt: now() } });
     });
   }
-  async function recommendations(input: Record<string, unknown>, identity: IdentityContext): Promise<AiRecommendations> {
+  async function recommendations(input: Record<string, unknown>, identity: IdentityContext, internal?: { read: boolean; candidates?: Array<{title:string;url:string;snippet:string}> }): Promise<AiRecommendations> {
     const owner = identity.dataOwnerId, schoolId = identifier(input.schoolId), school = await authorizeSchool(repo, owner, schoolId);
     if (input.query !== undefined && (typeof input.query !== 'string' || input.query.length > 500)) reject('VALIDATION_FAILED', '搜索问题最多 500 字。');
     if (input.search !== undefined && typeof input.search !== 'boolean') reject('VALIDATION_FAILED', '联网搜索开关无效。');
     const query = String(input.query || '').trim(), local = await profile.recommend(owner, schoolId, query);
     if (!input.search) return deepseekSearchConfigured() || search !== searchPublicWeb
       ? { ...local, search: { state: 'idle', message: 'DeepSeek 联网搜索已配置，点击搜索后执行；搜索和网页读取单独计量。' } } : { ...local, search: { state: 'unconfigured', code: 'unconfigured', message: 'DeepSeek 联网搜索尚未配置，请联系管理员检查后台官方 Key；当前仅展示已收录公告。' } };
-    if (deepseekSearchConfigured() || search !== searchPublicWeb) await searchBudget(owner);
+    if (!internal?.candidates && (deepseekSearchConfigured() || search !== searchPublicWeb)) await searchBudget(owner);
     const searchDeadline=Date.now()+24000;
-    const found = await search(school, query || '通知公告 报名');
+    const found = internal?.candidates ? { state: 'complete' as const, message: '按本轮搜索候选核验网页正文。', candidates: internal.candidates } : await search(school, query || '通知公告 报名');
     const result: AiRecommendations = { ...local, search: { state: found.state, message: found.message, ...(found.code ? { code: found.code } : {}) } };
     if (found.state !== 'complete') return result;
     const scope = await repo.scope(schoolId, owner);
@@ -112,7 +113,7 @@ export function assistantService(db: Database, repo: Repository, ai: ReturnType<
       if (existing) return existing;
       const id = 'ai_search_item_' + digest([owner, schoolId, url]);
       const card: RecommendedNotice = { id, title: candidate.title, sourceName: new URL(url).hostname, originalUrl: url, publishedAt: null, categories: [/竞赛|比赛/.test(candidate.title) ? 'competition' : /讲座|学术|论坛/.test(candidate.title) ? 'academic' : 'school'], summary: null, reason: '本次全网搜索发现的公开资料，适用性仍需结合原文判断。', readState: 'snippet_only', checkedAt, allowAi: false };
-      if (index >= 3) return card;
+      if (index >= 3 || internal?.read === false) return card;
       try {
         const page = await reader(url, source);
         const finalUrl = approvedSchoolUrl(page.url, source).href;
@@ -145,7 +146,13 @@ export function assistantService(db: Database, repo: Repository, ai: ReturnType<
     }
     return result;
   }
+  const webTools: ChatWebTools = {
+    configured: () => deepseekSearchConfigured() || search !== searchPublicWeb,
+    search: (schoolId, query, identity) => recommendations({ schoolId, query, search: true }, identity, { read: false }),
+    read: (schoolId, candidate, identity) => recommendations({ schoolId, search: true }, identity, { read: true, candidates: candidate.originalUrl ? [{ title: candidate.title, url: candidate.originalUrl, snippet: '' }] : [] }),
+  };
   return {
+    webTools,
     supports(action: string) { return actions.has(action); },
     async handle(action: string, input: Record<string, unknown>, identity: IdentityContext): Promise<unknown> {
       if (action.startsWith('ai.memory.')) return memory.handle(action, input, identity);
