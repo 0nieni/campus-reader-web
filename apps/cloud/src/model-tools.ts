@@ -5,9 +5,9 @@ import { modelPayload, modelText } from './model-protocols';
 
 export type WebToolName = 'web_search_deepseek' | 'deepseek_fetch_web_page';
 export interface ToolCall { id: string; name: WebToolName; arguments: Record<string, string>; thoughtSignature?: string }
-export interface ToolExchange { calls: ToolCall[]; results: string[] }
+export interface ToolExchange { calls: ToolCall[]; results: string[]; continuation?: Array<Record<string, unknown>> }
 export interface ToolOptions { enabled: boolean; exchanges: ToolExchange[] }
-export interface ToolCompletion { text: string; calls: ToolCall[] }
+export interface ToolCompletion { text: string; calls: ToolCall[]; continuation?: Array<Record<string, unknown>> }
 const invalid = (): never => reject('MODEL_FORMAT_INVALID', '模型返回了无效的工具调用，请检查模型是否支持工具；仍可使用侧栏手动搜索。');
 const object = (value: any): value is Record<string, any> => Boolean(value && typeof value === 'object' && !Array.isArray(value));
 const definitions = [
@@ -29,6 +29,7 @@ function checkedCall(id: unknown, name: unknown, args: unknown, signature?: unkn
 export function toolPayload(protocol: AiProviderProtocol, model: string, guide: string, content: string, maxTokens: number, openai: boolean, deepseek: boolean, options: ToolOptions): any {
   const base: any = modelPayload(protocol, model, guide, content, maxTokens, openai, deepseek);
   for (const exchange of options.exchanges) if (!exchange.calls.length || exchange.calls.length !== exchange.results.length || exchange.results.some(value => typeof value !== 'string')) invalid();
+  if (!options.enabled && !options.exchanges.length) return base;
   if (protocol === 'openai-chat') {
     base.tools = definitions.map(tool => ({ type: 'function', function: tool }));
     base.tool_choice = options.enabled ? 'auto' : 'none'; base.parallel_tool_calls = false;
@@ -40,6 +41,7 @@ export function toolPayload(protocol: AiProviderProtocol, model: string, guide: 
     base.tools = definitions.map(tool => ({ type: 'function', ...tool, strict: false }));
     base.tool_choice = options.enabled ? 'auto' : 'none'; base.parallel_tool_calls = false;
     for (const exchange of options.exchanges) base.input.push(
+      ...(exchange.continuation || []),
       ...exchange.calls.map(call => ({ type: 'function_call', call_id: call.id, name: call.name, arguments: JSON.stringify(call.arguments) })),
       ...exchange.calls.map((call, index) => ({ type: 'function_call_output', call_id: call.id, output: exchange.results[index] })),
     );
@@ -47,7 +49,7 @@ export function toolPayload(protocol: AiProviderProtocol, model: string, guide: 
     base.tools = definitions.map(({ parameters, ...tool }) => ({ ...tool, input_schema: parameters }));
     base.tool_choice = options.enabled ? { type: 'auto', disable_parallel_tool_use: true } : { type: 'none' };
     for (const exchange of options.exchanges) base.messages.push(
-      { role: 'assistant', content: exchange.calls.map(call => ({ type: 'tool_use', id: call.id, name: call.name, input: call.arguments })) },
+      { role: 'assistant', content: [...(exchange.continuation || []), ...exchange.calls.map(call => ({ type: 'tool_use', id: call.id, name: call.name, input: call.arguments }))] },
       { role: 'user', content: exchange.calls.map((call, index) => ({ type: 'tool_result', tool_use_id: call.id, content: exchange.results[index] })) },
     );
   } else {
@@ -63,6 +65,7 @@ export function toolPayload(protocol: AiProviderProtocol, model: string, guide: 
 
 export function toolResponse(protocol: AiProviderProtocol, value: any, enabled: boolean): ToolCompletion {
   let calls: ToolCall[] = [];
+  let continuation: Array<Record<string, unknown>> | undefined;
   if (protocol === 'openai-chat') {
     const choice = value?.choices?.[0], raw = choice?.message?.tool_calls;
     if (raw?.length) {
@@ -72,13 +75,15 @@ export function toolResponse(protocol: AiProviderProtocol, value: any, enabled: 
   } else if (protocol === 'openai-responses') {
     const raw = value?.output;
     if (Array.isArray(raw) && raw.some(item => item?.type === 'function_call')) {
-      if (value.status !== 'completed' || raw.some(item => !item || !['function_call', 'reasoning'].includes(item.type))) invalid();
+      if (value.status !== 'completed' || raw.some(item => !item || !['function_call', 'reasoning', 'message'].includes(item.type))) invalid();
+      continuation = raw.filter(item => item.type === 'reasoning');
       calls = raw.filter(item => item.type === 'function_call').map(item => checkedCall(item.call_id, item.name, item.arguments));
     }
   } else if (protocol === 'anthropic') {
     const raw = value?.content;
     if (Array.isArray(raw) && raw.some(item => item?.type === 'tool_use')) {
-      if (value.stop_reason !== 'tool_use' || raw.some(item => !item || !['tool_use', 'text'].includes(item.type))) invalid();
+      if (value.stop_reason !== 'tool_use' || raw.some(item => !item || !['tool_use', 'text', 'thinking', 'redacted_thinking'].includes(item.type))) invalid();
+      continuation = raw.filter(item => ['thinking', 'redacted_thinking'].includes(item.type));
       calls = raw.filter(item => item.type === 'tool_use').map(item => checkedCall(item.id, item.name, item.input));
     }
   } else {
@@ -90,5 +95,6 @@ export function toolResponse(protocol: AiProviderProtocol, value: any, enabled: 
   }
   if (!calls.length) return { text: modelText(protocol, value), calls: [] };
   if (!enabled || calls.length > 5 || new Set(calls.map(call => call.id)).size !== calls.length) invalid();
-  return { text: '', calls };
+  if (continuation && JSON.stringify(continuation).length > 4000) invalid();
+  return { text: '', calls, ...(continuation?.length ? { continuation } : {}) };
 }

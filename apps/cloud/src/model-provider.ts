@@ -22,7 +22,7 @@ export function validateConnection(c: Connection) {
   return provider
 }
 /** Credentials are used only by this call. Errors never include raw provider bodies, headers or key. */
-export interface CompletionResult {text:string;calls?:ToolCall[];usage?:{inputTokens:number;outputTokens:number;totalTokens:number}}
+export interface CompletionResult {text:string;calls?:ToolCall[];continuation?:ToolCompletion['continuation'];usage?:{inputTokens:number;outputTokens:number;totalTokens:number}}
 export async function modelCompletion(c: Connection, guide: string, content: string, maxTokens = 1800, officialEndpoint?: string, tools?: ToolOptions): Promise<CompletionResult> {
   const provider = validateConnection(c); const target = checkedHttpsEndpoint(officialEndpoint || provider.endpoint)
   const protocol = c.protocol || 'openai-chat'
@@ -67,4 +67,4 @@ export async function modelCompletion(c: Connection, guide: string, content: str
 }
 /** Existing AI reading and BYOK calls keep the original string interface. */
 export async function userCompletion(c:Connection,guide:string,content:string,maxTokens=1800,officialEndpoint?:string):Promise<string>{return(await modelCompletion(c,guide,content,maxTokens,officialEndpoint)).text;}
-export async function userToolCompletion(c:Connection,guide:string,content:string,maxTokens:number,officialEndpoint:string|undefined,options:ToolOptions):Promise<ToolCompletion>{const result=await modelCompletion(c,guide,content,maxTokens,officialEndpoint,options);return{text:result.text,calls:result.calls||[]};}
+export async function userToolCompletion(c:Connection,guide:string,content:string,maxTokens:number,officialEndpoint:string|undefined,options:ToolOptions):Promise<ToolCompletion>{const result=await modelCompletion(c,guide,content,maxTokens,officialEndpoint,options);return{text:result.text,calls:result.calls||[],...(result.continuation?{continuation:result.continuation}:{})};}

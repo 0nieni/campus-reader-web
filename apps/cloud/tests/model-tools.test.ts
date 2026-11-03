@@ -62,5 +62,15 @@ test('malformed, unknown, disabled or duplicate calls never become executable in
   assert.throws(() => p.toolResponse('openai-chat', response([raw]), false));
   assert.throws(() => p.toolPayload('openai-chat', 'm', 'g', 'q', 100, false, true, { enabled: true, exchanges: [{ calls: [call], results: [] }] }));
   const disabled = p.toolPayload('openai-chat', 'm', 'g', 'q', 100, false, true, { enabled: false, exchanges: [] });
-  assert.equal(disabled.tool_choice, 'none');
+  assert.equal(disabled.tools, undefined, 'a local-only turn must work on models without tool support');
+});
+
+test('reasoning continuation accompanying a Responses tool call is returned to the same model intact', () => {
+  const p = api();
+  const reasoning = { type: 'reasoning', id: 'reasoning_1', summary: [], encrypted_content: 'opaque-encrypted-state' };
+  const value = { status: 'completed', output: [reasoning, { type: 'function_call', call_id: call.id, name: call.name, arguments: JSON.stringify(call.arguments) }] };
+  const result = p.toolResponse('openai-responses', value, true);
+  assert.deepEqual(result.continuation, [reasoning]);
+  const replay = p.toolPayload('openai-responses', 'm', 'g', 'q', 100, true, false, { enabled: true, exchanges: [{ ...result, results: ['done'] }] });
+  assert.deepEqual(replay.input[2], reasoning);
 });

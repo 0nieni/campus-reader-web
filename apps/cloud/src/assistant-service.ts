@@ -151,6 +151,7 @@ export function assistantService(db: Database, repo: Repository, ai: ReturnType<
     search: (schoolId, query, identity) => recommendations({ schoolId, query, search: true }, identity, { read: false }),
     read: (schoolId, candidate, identity) => recommendations({ schoolId, search: true }, identity, { read: true, candidates: candidate.originalUrl ? [{ title: candidate.title, url: candidate.originalUrl, snippet: '' }] : [] }),
   };
+  ai.setChatWebTools(webTools);
   return {
     webTools,
     supports(action: string) { return actions.has(action); },
