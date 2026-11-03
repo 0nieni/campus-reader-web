@@ -27,3 +27,4 @@ export interface ProviderChange {
   state: AiProviderState;
   activate: 'saved' | 'official' | null;
 }
+export interface ReadingSettingsChange { schoolId: string; kind: 'profile' | 'memory' }

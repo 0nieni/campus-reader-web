@@ -75,6 +75,8 @@ export interface AiQuota { day: string; timezone: "Asia/Shanghai"; limit: number
 export interface ReadingDocument { reference: string; itemId: string; schoolId: string | null; title: string; originalUrl: string | null; version: string; markdown: string }
 export interface ReadingPackage { docs: ReadingDocument[]; guide: string; manifest: Record<string, unknown>; batches: number; maxCalls: number; fingerprint: string }
 export interface ReadingTask {
+  references?: import('./assistant').ChatReference[];
+  search?: import('./assistant').AiRecommendations['search'];
   id: string; schoolId: string; service: "official" | "byok"; provider: string; model: string;
   task: "summary" | "outline" | "answer"; state: "ready" | "running" | "complete" | "failed" | "uncertain" | "cancelled";
   step: number; totalSteps: number; title: string; result: string | null; message: string; failureCode?: string;

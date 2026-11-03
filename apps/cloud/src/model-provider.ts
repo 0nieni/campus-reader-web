@@ -5,6 +5,7 @@ import { reject as problem } from './errors'
 import { providerHttpCode } from './model-diagnostics'
 import { checkedHttpsEndpoint, checkedModel, checkedProtocol, publicAddress } from './provider-endpoints'
 import { modelHeaders, modelPayload, modelText, modelUsage } from './model-protocols'
+import { toolPayload, toolResponse, type ToolOptions, type ToolCall, type ToolCompletion } from './model-tools'
 export { publicAddress } from './provider-endpoints'
 
 export const PROVIDERS = {
@@ -21,11 +22,11 @@ export function validateConnection(c: Connection) {
   return provider
 }
 /** Credentials are used only by this call. Errors never include raw provider bodies, headers or key. */
-export interface CompletionResult {text:string;usage?:{inputTokens:number;outputTokens:number;totalTokens:number}}
-export async function modelCompletion(c: Connection, guide: string, content: string, maxTokens = 1800, officialEndpoint?: string): Promise<CompletionResult> {
+export interface CompletionResult {text:string;calls?:ToolCall[];continuation?:ToolCompletion['continuation'];usage?:{inputTokens:number;outputTokens:number;totalTokens:number}}
+export async function modelCompletion(c: Connection, guide: string, content: string, maxTokens = 1800, officialEndpoint?: string, tools?: ToolOptions): Promise<CompletionResult> {
   const provider = validateConnection(c); const target = checkedHttpsEndpoint(officialEndpoint || provider.endpoint)
   const protocol = c.protocol || 'openai-chat'
-  if (guide.length + content.length > 22000) problem('CONTEXT_TOO_LONG', '本批资料过长，请减少选中文章。')
+  if (guide.length + content.length + (tools ? JSON.stringify(tools.exchanges).length : 0) > 22000) problem('CONTEXT_TOO_LONG', '本批资料过长，请减少选中文章。')
   let timer: ReturnType<typeof setTimeout> | undefined
   const addresses = await Promise.race([
     lookup(target.hostname, { family: 4, all: true }),
@@ -35,7 +36,7 @@ export async function modelCompletion(c: Connection, guide: string, content: str
   const pinned = addresses[0]!
   // DeepSeek defaults to thinking. Reading batches need the final text within their output budget.
   // Keep this vendor extension off other OpenAI-compatible endpoints.
-  const payload = Buffer.from(JSON.stringify(modelPayload(protocol, c.model, guide, content, maxTokens, c.provider === 'openai' || target.hostname === 'api.openai.com', target.hostname === 'api.deepseek.com')))
+  const payload = Buffer.from(JSON.stringify(tools ? toolPayload(protocol, c.model, guide, content, maxTokens, c.provider === 'openai' || target.hostname === 'api.openai.com', target.hostname === 'api.deepseek.com', tools) : modelPayload(protocol, c.model, guide, content, maxTokens, c.provider === 'openai' || target.hostname === 'api.openai.com', target.hostname === 'api.deepseek.com')))
   if (payload.length > 120000) problem('INPUT_TOO_LONG', '请求超过大小限制，请缩小资料范围。')
   return new Promise((resolve, reject) => {
     let settled = false
@@ -55,7 +56,7 @@ export async function modelCompletion(c: Connection, guide: string, content: str
         if (settled) return
         try {
           const value = JSON.parse(Buffer.concat(chunks).toString('utf8'))
-          finish(undefined, {text:modelText(protocol, value),usage:modelUsage(protocol,value)})
+          finish(undefined, {...(tools ? toolResponse(protocol,value,tools.enabled) : {text:modelText(protocol, value)}),usage:modelUsage(protocol,value)})
         } catch (caught) { finish(caught instanceof Error && 'code' in caught ? caught : error('MODEL_FORMAT_INVALID', '服务商返回格式无法解析。')) }
       })
     })
@@ -66,3 +67,4 @@ export async function modelCompletion(c: Connection, guide: string, content: str
 }
 /** Existing AI reading and BYOK calls keep the original string interface. */
 export async function userCompletion(c:Connection,guide:string,content:string,maxTokens=1800,officialEndpoint?:string):Promise<string>{return(await modelCompletion(c,guide,content,maxTokens,officialEndpoint)).text;}
+export async function userToolCompletion(c:Connection,guide:string,content:string,maxTokens:number,officialEndpoint:string|undefined,options:ToolOptions):Promise<ToolCompletion>{const result=await modelCompletion(c,guide,content,maxTokens,officialEndpoint,options);return{text:result.text,calls:result.calls||[],...(result.continuation?{continuation:result.continuation}:{})};}

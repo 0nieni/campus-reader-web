@@ -1,5 +1,6 @@
 import type { AiProviderProtocol } from '@campus/contracts';
 import { reject } from './errors';
+export { toolPayload, toolResponse } from './model-tools';
 
 export function modelPayload(protocol: AiProviderProtocol, model: string, guide: string, content: string, maxTokens: number, openai: boolean, deepseek: boolean) {
   const messages = [{ role: 'system', content: guide }, { role: 'user', content }];
