@@ -202,9 +202,9 @@ export function assistantChat(db: Database, repo: Repository, ai: Ai, recommend:
               const last = [...row.turns].reverse().find(t => t.materialIds.length && !t.error);
               const isFollowup = /^(那|它|这个|这条|这项|什么时候|截止|需要|怎么|能否|可以|还有|报名|材料|费用|地点|你刚才|刚才|之前|第二|第一个|接下来)/.test(question);
               ids = last && isFollowup ? last.materialIds : automatic ? [] : (await recommend(owner, row.schoolId, question)).items.filter(n => n.allowAi).map(n => n.id).slice(0, 5);
-              if (automatic && isFollowup && !ids.length) {
+              if (automatic && isFollowup) {
                 const prior = [...row.turns].reverse().find(t => t.taskId && !t.error);
-                if (prior) ids = (await publicTurn(row, prior)).references.map(reference => reference.itemId);
+                ids = prior ? (await publicTurn(row, prior)).references.map(reference => reference.itemId) : [];
               }
             }
             let pack: Pick<ReadingPackage, 'docs'> | null = null;

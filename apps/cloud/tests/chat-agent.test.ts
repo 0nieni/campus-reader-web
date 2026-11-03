@@ -4,6 +4,8 @@ import type { AiChatTurn, AiConversation } from '@campus/contracts';
 import { fixtureDb, identity } from './feature-fixture';
 import { aiService } from '../src/ai-service';
 import { assistantService } from '../src/assistant-service';
+import { agentContent } from '../src/chat-agent';
+import { CHAT_READING_GUIDE } from '../src/chat-guide';
 const url = 'https://example.org/typescript';
 const searchCall = { id: 'search_1', name: 'web_search_deepseek', arguments: { query: 'TypeScript 教程' } };
 const readCall = { id: 'read_1', name: 'deepseek_fetch_web_page', arguments: { url } };
@@ -14,7 +16,7 @@ function setup(respond?: (index: number, options: any) => Promise<any>, search?:
   const item = f.repo.item;
   f.repo.item = async id => await item(id) || f.rows('items').get(id) as any || null;
   const requests: any[] = [], reads: string[] = [], searches: string[] = [];
-  const ai = (aiService as any)(f.db, f.repo, async () => 'unused', Date.now, undefined, undefined, async (_c: any, _g: string, _text: string, _max: number, _e: any, options: any) => {
+  const ai = (aiService as any)(f.db, f.repo, async () => 'A公告笔记。[R1](https://www.bjtu.edu.cn/test)', Date.now, undefined, undefined, async (_c: any, _g: string, _text: string, _max: number, _e: any, options: any) => {
     const index = requests.length; requests.push(structuredClone(options));
     return respond ? respond(index, options) : index === 0 ? { text: '', calls: [searchCall] } : index === 1 ? { text: '', calls: [readCall] } : { text: `这是读到的教程。[R1](${url})`, calls: [] };
   });
@@ -118,4 +120,37 @@ test('uncertain model requests are paused with their quota hold and never automa
   turn = await f.step(c.id, turn);
   assert.equal(turn.state, 'uncertain'); assert.equal(turn.quotaHeld, true);
   await f.step(c.id, turn); assert.equal(f.requests.length, 1);
+});
+
+test('the answer request fits the combined guide/content/tool budget even after three long page reads', () => {
+  const docs = Array.from({ length: 8 }, (_, i) => ({ reference: `R${i + 1}`, title: '公开资料标题'.repeat(20), originalUrl: `https://example.org/${i}/` + 'a'.repeat(200), itemId: `doc${i}`, markdown: '正文'.repeat(1000), version: '1', schoolId: 'bjtu' }));
+  const task = { schoolId: 'bjtu', question: '公开问题'.repeat(320), docs, notes: ['笔记'.repeat(1100)], chat: { history: '历史'.repeat(700), summary: '摘要'.repeat(200), memory: { enabled: false, generation: 0, items: [] }, expireAt: new Date(Date.now() + 86400000).toISOString() } };
+  const exchangeSize = 8982;
+  const maxContent = 22000 - CHAT_READING_GUIDE.length - exchangeSize - 128;
+  const content = (agentContent as any)(task, '北京交通大学', Date.now(), maxContent);
+  assert.ok(CHAT_READING_GUIDE.length + content.length + exchangeSize <= 22000);
+  assert.ok(content.includes(task.question), 'the current question must remain complete');
+  assert.match(content, /截断|缩短/);
+});
+
+test('a followup uses the latest automatically-read document rather than an older explicitly selected notice', async () => {
+  const f = setup(async index => index === 0 ? { text: 'A公告信息。[R1](https://www.bjtu.edu.cn/test)', calls: [] }
+    : index === 1 ? { text: '', calls: [searchCall] } : index === 2 ? { text: '', calls: [readCall] } : { text: `B教程内容。[R1](${url})`, calls: [] });
+  f.items.set('notice', { _id: 'notice', title: '旧公告A', contentText: '旧公告A的报名说明，不是新的教程内容。', sourceId: 'source', scope: 'school', schoolIds: ['bjtu'], status: 'published', publishedAt: new Date().toISOString(), originalUrl: 'https://www.bjtu.edu.cn/test', updatedAt: 'v1' });
+  const c = await f.create();
+  let a = await f.call('ai.chat.send', { conversationId: c.id, requestId: 'older-explicit-turn-1', question: '介绍公告A', itemIds: ['notice'] }) as AiChatTurn;
+  while (a.state === 'ready') a = await f.step(c.id, a);
+  assert.equal(a.state, 'complete');
+  let b = await f.send(c.id);
+  while (b.state === 'ready') b = await f.step(c.id, b);
+  assert.equal(b.references[0].originalUrl, url);
+  const follow = await f.call('ai.chat.send', { conversationId: c.id, requestId: 'followup-latest-web-1', question: '它的截止时间是什么' }) as AiChatTurn;
+  assert.equal(follow.references[0].originalUrl, url);
+});
+
+test('a common explicit offline phrase disables tool execution at the model boundary', async () => {
+  const f = setup(async (_index, options) => { assert.equal(options.enabled, false); return { text: '仅使用已有信息。', calls: [] }; });
+  const c = await f.create(); const turn = await f.send(c.id, '不要进行联网搜索，介绍 TypeScript');
+  const final = await f.step(c.id, turn);
+  assert.equal(final.state, 'complete'); assert.equal(f.searches.length, 0);
 });

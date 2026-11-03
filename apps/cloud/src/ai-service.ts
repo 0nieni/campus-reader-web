@@ -285,7 +285,7 @@ export function aiService(db: Database, repo: Repository, complete = userComplet
             patch = { chat: { ...task.chat, agent: result.state }, ...(result.pack ? { docs: result.pack.docs, versions: result.pack.fingerprint } : {}), message: result.state.pending ? '正在逐项核验工具请求。' : '工具结果已核验，正在继续回答。' };
           } else {
             const school = await authorizeSchool(repo, owner, task.schoolId);
-            const content = agentContent({ ...task, chat: task.chat }, school.name, now());
+            const content = agentContent({ ...task, chat: task.chat }, school.name, now(), 22000 - CHAT_READING_GUIDE.length - JSON.stringify(agent.exchanges).length - 128);
             const options = { enabled: agentToolsEnabled(agent, task.question), exchanges: agent.exchanges };
             if (task.service === 'official') await platformBudget(CHAT_READING_GUIDE.length + content.length + JSON.stringify(agent.exchanges).length, FINAL_OUTPUT_TOKENS);
             submitted = true;

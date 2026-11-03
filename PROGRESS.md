@@ -680,3 +680,16 @@ npm ci、typecheck、完整 606 项测试（web 229 / cloud 377）、普通构�
 用户提供 AstrBot 分析分享页，要求借鉴模型工具调用方式改进 AI 搭子联网。已读取分享页、核对 DeepSeek 官方 Search / Fetch 和 Tool Calls 文档，确认最新 main 为 ea95541（已上线 DeepSeek 接口，但聊天主要依靠规则搜索、模型适配器仍拒绝工具调用）。从 main 建立独立分支 codex/assistant-auto-web-tools，保留旧分支及交付目录。
 
 方案 docs/superpowers/specs/2026-11-03-assistant-auto-web-tools-design.md 已写并经独立 builder check，无重要遗漏；推荐模型自动决定 Search / Fetch，按步骤执行，沿用统一后台 Key、每日搜索20次及15秒限频、官方一轮一次额度、来源许可和24小时保留。用户可选择默认自动或增加允许联网开关。当前仅完成设计，等待确认；未改产品代码、运行收费模型、推送远端或部署。using-superpowers / brainstorming 缺失时按项目约定通过 find-skills 找到原作者技能，副本仅保存在根交付目录的 .github-tools/reference-skills，不进入产品仓库。
+
+
+### 2026-11-03 AI 搭子默认自动联网实现完成（独立分支）
+
+用户已确认按方案实现，默认自动判断和搜索，复用后台官方DeepSeek Key和原有限额。基于main ea95541建立codex/assistant-auto-web-tools；未覆盖旧检出。模型协议新增OpenAI Chat/Responses、Anthropic、Gemini的真实工具消息与严格解析，保留Responses推理连续状态和Gemini签名；普通阅读与连接测试仍用文本接口。聊天无需先选公告即可决策，Search只给候选，Fetch由模型选读并沿用URL/robots/来源许可，成功正文才进入R引用。
+
+每个ai.chat.step最多一次模型或工具请求；工具阶段最多4次模型、2次Search、3次Fetch，最多8篇资料。已有正文分批继续独立计入平台调用/估算token预算；官方一轮成功只结算一次，取消、幂等、撤权、过期和不明状态不重放。工具记录放在原task.chat中，随原固定24小时清理，不新增依赖、迁移、函数、环境变量或提醒变更。明确不要联网时不提供工具；模型不接受工具时解释原因，仍可手动搜索选正文，以“不要联网”方式走文本接口。
+
+独立整分支复核提出4项重要问题，均先用回归重现再修复：完整校验Unicode搜索词并仅由已校验token重建；常见否定表达禁用联网；按guide/content/transcript统一22k预算保留完整问题和R清单并标明截断；追问优先使用最近任务动态引用。复核确认全部关闭，无其他Important/Critical及未处理minor。实现判断：将工具消息放入已有chat以复用所有清理路径；已有资料分批不算入4次工具阶段模型上限，但每次调用仍计平台预算；注入纯文本完成器而无工具完成器的兼容调用保留旧流程。
+
+最终验证：npm ci --ignore-scripts、完整typecheck、npm test（web302/cloud632，共934项，0失败）、npm run build、npm run netlify:build和diff check通过。全量SQL测试第一次因沙箱本地连接EACCES失败，授权后重跑全部通过。完整产物.netlify-staging/20261103155341284含网页、原16函数与原迁移，未上传。依赖保留原11项审计告警，未改锁或升级依赖。
+
+CUA本地隔离页面通过真实Vue组件→HTTP→现有assistantService/aiService→模拟外部供应商完成5步自动搜索/选读/回答，显示1条候选、1篇正文、R1原文入口及used1/held0。截图与验证日志仅本地保存，不加入生产资料。模拟验证不代表真实供应商兼容和付费调用验收。当前尚未合并main或替换生产；按既有GitHub分支协作方式交付PR预览。
