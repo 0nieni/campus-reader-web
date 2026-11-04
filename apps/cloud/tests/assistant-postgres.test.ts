@@ -55,18 +55,18 @@ test('real local SQL assistant conversations reuse quota, isolate owners and rec
     await db.collection('items').doc('sql-chat-notice').set({ title: 'SQL 报名材料', contentText: '请提交报名材料。', sourceId: 'sql-chat-source', scope: 'school', schoolIds: ['bjtu'], status: 'published', publishedAt: new Date(clock).toISOString(), originalUrl: 'https://www.bjtu.edu.cn/test', updatedAt: 'v1' });
     data(await call('school.select', { schoolId: 'bjtu' })); data(await other('school.select', { schoolId: 'bjtu' }));
 
-    await t.test('five separate concurrent chat sends reserve at most three; same requests and steps remain idempotent', async () => {
+    await t.test('five concurrent chat sends have no daily cap; same requests and steps remain idempotent', async () => {
       const conversations = await Promise.all(Array.from({ length: 5 }, (_, i) => create(`sql-conversation-${i}-0001`)));
       const inputs = conversations.map((conversation, i) => inputFor(conversation.id, `sql-chat-send-${i}-0001`));
       const results = await Promise.all(inputs.map(input => call('ai.chat.send', input)));
-      assert.equal(results.filter(result => result.ok).length, 3, JSON.stringify(results));
-      assert.ok(results.filter(result => !result.ok).every(result => !result.ok && result.code === 'AI_QUOTA_EXHAUSTED'));
+      assert.equal(results.filter(result => result.ok).length, 5, JSON.stringify(results));
+      assert.ok(results.every(result => result.ok));
       for (let i = 0; i < results.length; i++) if (results[i].ok) winners.push({ conversation: conversations[i], turn: data<AiChatTurn>(results[i]), input: inputs[i] });
-      assert.equal((await quota()).held, 3); assert.equal((await quota()).used, 0); assert.equal(calls, 0);
+      assert.equal((await quota()).held, 5); assert.equal((await quota()).used, 0); assert.equal(calls, 0);
       const before = await sql.query("SELECT count(*) AS count FROM campus_documents WHERE collection='web_ai_tasks'");
       const retries = await Promise.all(Array.from({ length: 5 }, () => call('ai.chat.send', winners[0].input)));
       assert.ok(retries.every(result => data<AiChatTurn>(result).taskId === winners[0].turn.taskId));
-      assert.equal((await quota()).held, 3);
+      assert.equal((await quota()).held, 5);
       const after = await sql.query("SELECT count(*) AS count FROM campus_documents WHERE collection='web_ai_tasks'");
       assert.equal(Number(after.rows[0].count), Number(before.rows[0].count));
       const changed = await call('ai.chat.send', { ...winners[0].input, question: '另一个问题' });
@@ -76,6 +76,8 @@ test('real local SQL assistant conversations reuse quota, isolate owners and rec
         assert.equal((stored.data as any).expireAt, winner.conversation.expireAt);
         assert.ok((stored.data as any).chat.history.length <= 3500);
       }
+      for (const extra of winners.splice(3)) data(await call('ai.chat.cancel', { conversationId: extra.conversation.id, turnId: extra.turn.id }));
+      assert.equal((await quota()).held, 3);
     });
 
     await t.test('chat and legacy official tasks share one account; cancel and uncertain resolve release only once', async () => {
@@ -86,8 +88,9 @@ test('real local SQL assistant conversations reuse quota, isolate owners and rec
       legacy = data<ReadingTask>(await call('ai.start', { schoolId: 'bjtu', itemIds: ['sql-chat-notice'], requestId: 'sql-legacy-start-0001', service: 'official', task: 'summary' }));
       assert.equal((await quota()).held, 3);
       const conversation = await create('sql-replacement-chat-01');
-      const blocked = await call('ai.chat.send', inputFor(conversation.id, 'sql-replacement-block-01'));
-      assert.equal(blocked.ok, false); if (!blocked.ok) assert.equal(blocked.code, 'AI_QUOTA_EXHAUSTED');
+      const additional = data<AiChatTurn>(await call('ai.chat.send', inputFor(conversation.id, 'sql-replacement-unlimited-01')));
+      assert.equal((await quota()).held, 4);
+      data(await call('ai.chat.cancel', { conversationId: conversation.id, turnId: additional.id }));
       data(await call('ai.cancel', { taskId: legacy.id })); data(await call('ai.cancel', { taskId: legacy.id }));
       assert.equal((await quota()).held, 2);
       const turn = data<AiChatTurn>(await call('ai.chat.send', inputFor(conversation.id, 'sql-replacement-ready-01')));
@@ -121,7 +124,7 @@ test('real local SQL assistant conversations reuse quota, isolate owners and rec
         const denied = await other(action, input); assert.equal(denied.ok, false); if (!denied.ok) assert.equal(denied.code, 'NOT_FOUND');
       }
       assert.equal(calls, beforeCalls); assert.deepEqual(await quota(), ownerBefore);
-      assert.equal(data<any>(await other('ai.status')).quota.remaining, 3);
+      assert.equal(data<any>(await other('ai.status')).quota.remaining, null);
       const theirs = await create('sql-other-conversation-01', other);
       const theirTurn = data<AiChatTurn>(await other('ai.chat.send', inputFor(theirs.id, winner.input.requestId)));
       assert.notEqual(theirTurn.taskId, winner.turn.taskId); assert.deepEqual(await quota(), ownerBefore);

@@ -372,7 +372,7 @@ function schoolChanged(event: Event) {
           <button class="text-button" :disabled="store.loading" @click="store.applyUpdates()">显示更新</button>
         </div>
         <p v-else-if="store.refreshingSchool && store.items.length" class="muted small" role="status">已显示保存的公告，正在后台检查学校来源…</p>
-        <p class="muted small">公告自动摘要使用独立额度；AI 阅读每人每天 3 次。</p>
+        <p class="muted small">公告自动摘要使用独立额度；AI 阅读不设个人每日提问次数上限。</p>
 
 <p v-if="assistantFeedback" class="feed-update" role="status">{{assistantFeedback}}<button class="text-button" @click="navigate('ai')">查看已加入资料</button></p>
           <div class="section-head" id="notice-feed"><h2 class="section-title">校园动态</h2><span class="section-note">已读取 {{store.items.length}} 条<button class="text-button" :disabled="store.loading||store.refreshingSchool||!store.workspace.school" @click="store.refreshSchool()">{{store.refreshingSchool?'检查更新中…':'刷新'}}</button></span></div>

@@ -24,8 +24,6 @@ import { webSearchAllowed } from './chat-web-tools';
 const TASKS = "web_ai_tasks", ACCOUNTS = "web_ai_accounts";
 export const beijingDay = (now = Date.now()) => new Date(now + 8 * 3600000).toISOString().slice(0, 10);
 const number = (key: string, fallback: number, max: number) => { const value = Number(process.env[key] ?? fallback); return Number.isFinite(value) ? Math.max(0, Math.min(max, Math.floor(value))) : fallback; };
-// Existing hosted AI_DAILY_LIMIT=5 must not keep granting the former allowance.
-export const dailyLimit = () => number("AI_DAILY_LIMIT", 3, 3);
 interface Task extends Omit<ReadingTask, "state" | "totalSteps" | "title"> {
   state: ReadingTask["state"] | "new"; owner: string; fingerprint: string; accountId: string;
   docs: ReadingDocument[]; versions: string; batches: Batch[]; notes: string[]; question: string; inFlight: number | null; startedAt: string | null; testOnly?: boolean; endpointHash?: string; relayLease?: string;
@@ -53,8 +51,8 @@ export function aiService(db: Database, repo: Repository, complete = userComplet
   const taskRef = (tx: Parameters<Parameters<typeof atomic>[1]>[0], id: string) => tx.collection(TASKS).doc(id);
   async function quota(owner: string): Promise<AiQuota> {
     const day = beijingDay(now()), row = await readDoc(db, ACCOUNTS, digest([owner, day]));
-    const used = Number(row?.used || 0), held = Number(row?.held || 0), limit = dailyLimit();
-    return { day, timezone: "Asia/Shanghai", limit, used, held, remaining: Math.max(0, limit - used - held), resetsAt: new Date(Date.parse(`${day}T00:00:00+08:00`) + 86400000).toISOString() };
+    const used = Number(row?.used || 0), held = Number(row?.held || 0);
+    return { day, timezone: "Asia/Shanghai", limit: null, used, held, remaining: null, resetsAt: new Date(Date.parse(`${day}T00:00:00+08:00`) + 86400000).toISOString() };
   }
   async function load(id: string, owner: string, verify = true): Promise<Task> {
     const row = await readDoc(db, TASKS, id) as Task | null;
@@ -82,7 +80,7 @@ export function aiService(db: Database, repo: Repository, complete = userComplet
     return { id: row.id, schoolId: row.schoolId, service: row.service, provider: row.provider, model: row.model, task: row.task,
       state: row.state === "new" ? "failed" : row.state, step: row.step, totalSteps: row.chat?.webTools ? Math.max(row.batches.length + 1, row.step + (row.state === 'complete' ? 0 : 1)) : row.batches.length + 1,
       title: row.state === "new" ? "未开始的阅读任务" : row.testOnly ? "API 连接测试" : row.docs.map(doc => doc.title).join("；"), result: row.state === "complete" ? row.result : null,
-      message: row.state === "new" ? "任务尚未取得额度或未完成创建，请检查额度后重新发起。" : row.message, ...(row.failureCode ? { failureCode: row.failureCode } : {}), ...(row.providerProfile ? { providerProfile: row.providerProfile } : {}), ...(row.chat?.webTools ? { references: row.docs.map(({reference,itemId,title,originalUrl}) => ({reference,itemId,title,originalUrl})), ...(row.chat.agent ? { search: row.chat.agent.search } : {}) } : {}), expireAt: row.expireAt, createdAt: row.createdAt, quotaHeld: row.quotaHeld };
+      message: row.state === "new" ? "任务尚未完成创建，请刷新状态后重新发起。" : row.message, ...(row.failureCode ? { failureCode: row.failureCode } : {}), ...(row.providerProfile ? { providerProfile: row.providerProfile } : {}), ...(row.chat?.webTools ? { references: row.docs.map(({reference,itemId,title,originalUrl}) => ({reference,itemId,title,originalUrl})), ...(row.chat.agent ? { search: row.chat.agent.search } : {}) } : {}), expireAt: row.expireAt, createdAt: row.createdAt, quotaHeld: row.quotaHeld };
   }
   async function finish(id: string, patch: Partial<Task>, success: boolean, expectedStep?: number) {
     await atomic(db, async tx => {
@@ -202,7 +200,6 @@ export function aiService(db: Database, repo: Repository, complete = userComplet
           if (profileRef) await profiles!.guard(tx, owner, profileRef, connection.model);
           if (row.service === "official") {
             const account = tx.collection(ACCOUNTS).doc(row.accountId), a = transactionRow((await account.get()).data);
-            if (Number(a.used) + Number(a.held) >= dailyLimit()) reject("AI_QUOTA_EXHAUSTED", "今日官方次数已用完或被进行中任务预占；我的 API 和搜索仍可使用。");
             await account.update({ held: Number(a.held) + 1 });
           }
           await ref.update({ docs: task.docs, batches: task.batches, notes: [], question: task.question, ...(chat ? { chat } : {}), state: "ready", quotaHeld: row.service === "official" });

@@ -21,7 +21,7 @@ async function diagnose() {
 const stateNames = { ready: "已暂停 / 可继续", running: "正在处理", complete: "已完成", failed: "未完成", uncertain: "状态待核查", cancelled: "已取消" };
 let active = true, epoch = 0, requestId = "", testRequestId = "";
 const validSelection = computed(() => Boolean(props.schoolId && props.selection.length && props.selection.length <= 8));
-const canStart = computed(() => validSelection.value && pack.value && !busy.value && (kind.value !== "answer" || question.value.trim()) && (service.value === "official" ? status.value?.officialConfigured && (status.value?.quota.remaining || 0) > 0 : model.value.trim() && apiKey.value));
+const canStart = computed(() => validSelection.value && pack.value && !busy.value && (kind.value !== "answer" || question.value.trim()) && (service.value === "official" ? status.value?.officialConfigured && (status.value?.quota.remaining === null || (status.value?.quota.remaining || 0) > 0) : model.value.trim() && apiKey.value));
 function invalidate() { epoch++; paused.value = true; busy.value = false; pack.value = null; task.value = null; requestId = ""; error.value = ""; }
 watch(() => props.selection.map(item => item.id).join(","), invalidate);
 watch([service, provider, model, kind, question], () => { requestId = ""; });
@@ -132,7 +132,7 @@ onUnmounted(() => { active = false; epoch++; paused.value = true; apiKey.value =
       <div class="action-row"><button class="secondary" :disabled="!validSelection || busy" @click="preview">预览阅读资料</button><button class="text-button" :disabled="!validSelection || busy" @click="exportDocs">下载 MD / JSON</button></div>
       <fieldset class="service-options"><legend>使用方式</legend><label><input v-model="service" type="radio" value="official" :disabled="busy" />官方 AI</label><label><input v-model="service" type="radio" value="byok" :disabled="busy" />我的 API</label></fieldset>
       <div v-if="service === 'official'" class="quota-note">
-        <template v-if="status"><strong>今日可用 {{ status.quota.remaining }} / {{ status.quota.limit }} 次</strong><p>已用 {{ status.quota.used }} · 进行中预占 {{ status.quota.held }}；北京时间零点恢复。</p><p v-if="!status.officialConfigured">官方模型尚未配置，请完成云端设置或选择“我的 API”。</p><p v-else>模型：{{ status.officialModel }}；同一阅读任务分批和汇总共计一次。</p></template>
+        <template v-if="status"><template v-if="status.quota.limit === null"><strong>官方 AI 不限每日提问次数</strong><p>今日已完成 {{ status.quota.used }} · 进行中 {{ status.quota.held }}。</p></template><template v-else><strong>今日可用 {{ status.quota.remaining }} / {{ status.quota.limit }} 次</strong><p>已用 {{ status.quota.used }} · 进行中预占 {{ status.quota.held }}；北京时间零点恢复。</p></template><p v-if="!status.officialConfigured">官方模型尚未配置，请完成云端设置或选择“我的 API”。</p><p v-else>模型：{{ status.officialModel }}；同一阅读任务分批和汇总共计一次。</p></template>
         <p v-else>额度尚未读取，请检查 AI 云函数与集合配置。</p><button class="text-button" @click="refreshStatus">刷新额度</button>
         <button class="text-button" :disabled="busy || diagnosing" @click="diagnose">{{ diagnosing ? '正在检查…' : '检查官方 AI 连接（不调用模型）' }}</button>
         <p v-if="diagnosis" role="status">{{ diagnosis.message }}（{{ diagnosis.code }}）</p>

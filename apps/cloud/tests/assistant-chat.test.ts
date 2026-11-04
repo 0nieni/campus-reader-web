@@ -19,7 +19,7 @@ function setup(complete?: Parameters<typeof aiService>[2], recommend: Parameters
   return { ...f, call, create, send, finish, ai, prompts, calls: () => calls, advance: (ms: number) => { clock += ms; } };
 }
 
-test('chat supports followups with conversational guide, shared three-round quota and idempotency', async () => {
+test('chat supports followups with conversational guide, unlimited daily usage and idempotency', async () => {
   const f = setup(), c = await f.create();
   assert.equal((await f.create()).id, c.id);
   const t = await f.send(c.id, 'first-request-00001');
@@ -28,11 +28,26 @@ test('chat supports followups with conversational guide, shared three-round quot
   const done = await f.finish(c.id, t); assert.equal(done.state, 'complete'); assert.match(done.result!, /报名材料/);
   await f.finish(c.id, await f.send(c.id, 'second-request-0001', '截止时间呢？'));
   await f.finish(c.id, await f.send(c.id, 'third-request-00001'));
-  await assert.rejects(f.send(c.id, 'fourth-request-0001'), (e: any) => e.code === 'AI_QUOTA_EXHAUSTED');
+  await f.finish(c.id, await f.send(c.id, 'fourth-request-0001'));
   const quota = await f.ai.handle('ai.status', {}, identity) as any;
-  assert.equal(quota.quota.used, 3); assert.equal(quota.quota.held, 0);
+  assert.equal(quota.quota.used, 4); assert.equal(quota.quota.held, 0);
   assert.ok(f.prompts.some(p => p.includes('需要什么材料？') && p.includes('截止时间呢？')));
   assert.ok(!f.prompts.some(p => p.includes('七节结构保持完整')));
+});
+
+test('removing the daily question cap keeps the twenty-turn conversation boundary', async () => {
+  const prior = process.env.AI_PLATFORM_DAILY_TOKENS;
+  process.env.AI_PLATFORM_DAILY_TOKENS = '10000000';
+  try {
+    const f = setup(), c = await f.create();
+    for (let index = 0; index < 20; index++) await f.finish(c.id, await f.send(c.id, `twenty-turn-request-${index}`));
+    await assert.rejects(f.send(c.id, 'twenty-first-request'), { code: 'CONTEXT_TOO_LONG' });
+    assert.equal(f.calls(), 40);
+    const q = (await f.ai.handle('ai.status', {}, identity) as any).quota;
+    assert.deepEqual([q.limit, q.remaining, q.used, q.held], [null, null, 20, 0]);
+  } finally {
+    if (prior === undefined) delete process.env.AI_PLATFORM_DAILY_TOKENS; else process.env.AI_PLATFORM_DAILY_TOKENS = prior;
+  }
 });
 
 test('a followup about the second suggestion receives the prior assistant answer and reuses its materials', async () => {

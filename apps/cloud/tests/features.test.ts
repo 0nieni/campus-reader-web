@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { aiService, beijingDay, dailyLimit } from "../src/ai-service";
+import { aiService, beijingDay } from "../src/ai-service";
 import { bookmarksService } from "../src/bookmarks";
 import { createGateway } from "../src/gateway";
 import { digest, readingPackage, verifyReferences } from "../src/reading-package";
@@ -18,6 +18,38 @@ delete process.env.AI_PROVIDER;
 const start = (requestId = "request_abcdefghijkl", service = "official") => ({ schoolId: "bjtu", itemIds: ["notice"], requestId, service, task: "summary", ...(service === "byok" ? { provider: "deepseek", model: "fixture-model" } : {}) });
 const output = "报名材料见资料。[R1](https://www.bjtu.edu.cn/test)";
 const connection = { provider: "deepseek", model: "fixture-model", apiKey: "test-transient-key-never-real" };
+
+test('official daily questioning is unlimited after more than three successful tasks, with once-only settlement', async () => {
+  const f = fixtureDb(); let calls = 0;
+  const ai = aiService(f.db, f.repo, async () => { calls++; return output; });
+  for (let index = 0; index < 5; index++) {
+    const task = await ai.handle('ai.start', start(`unlimited-official-${index}`), identity) as ReadingTask;
+    await ai.handle('ai.step', { taskId: task.id, step: 0 }, identity);
+    const done = await ai.handle('ai.step', { taskId: task.id, step: 1 }, identity) as ReadingTask;
+    assert.equal(done.state, 'complete');
+    await ai.handle('ai.step', { taskId: task.id, step: 1 }, identity);
+  }
+  const q = (await ai.handle('ai.status', {}, identity) as any).quota;
+  assert.deepEqual([q.limit, q.remaining, q.used, q.held], [null, null, 5, 0]);
+  assert.equal(calls, 10);
+});
+
+test('unlimited personal questions still stop at the platform model budget without an extra provider call', async () => {
+  const prior = process.env.AI_PLATFORM_DAILY_CALLS;
+  process.env.AI_PLATFORM_DAILY_CALLS = '1';
+  try {
+    const f = fixtureDb(); let calls = 0;
+    const ai = aiService(f.db, f.repo, async () => { calls++; return output; });
+    const task = await ai.handle('ai.start', start('unlimited-platform-budget'), identity) as ReadingTask;
+    await ai.handle('ai.step', { taskId: task.id, step: 0 }, identity);
+    const stopped = await ai.handle('ai.step', { taskId: task.id, step: 1 }, identity) as ReadingTask;
+    assert.equal(stopped.state, 'failed'); assert.match(stopped.message, /平台今日模型预算已用完/); assert.equal(calls, 1);
+    const q = (await ai.handle('ai.status', {}, identity) as any).quota;
+    assert.deepEqual([q.limit, q.remaining, q.used, q.held], [null, null, 0, 0]);
+  } finally {
+    if (prior === undefined) delete process.env.AI_PLATFORM_DAILY_CALLS; else process.env.AI_PLATFORM_DAILY_CALLS = prior;
+  }
+});
 
 test('official diagnosis requires the owner and does not reserve quota, create tasks or call a model', async () => {
   const f = fixtureDb(); let checks = 0, completions = 0;
@@ -45,7 +77,7 @@ test('definite model errors preserve safe reasons on refresh and release holds w
     assert.equal(restored.failureCode, code); assert.equal(restored.message, failed.message);
     await ai.handle('ai.step', { taskId: task.id, step: 0 }, identity); assert.equal(calls, 1);
     const q = (await ai.handle('ai.status', {}, identity) as any).quota;
-    assert.deepEqual([q.used, q.held, q.remaining], [0, 0, 3]);
+    assert.deepEqual([q.used, q.held, q.remaining], [0, 0, null]);
   }
 });
 
@@ -88,15 +120,15 @@ test("bookmark gateway rejects forged ownership and cross-school additions", asy
   assert.equal((await gateway({ action: "favorites.set", input: { schoolId: "other", itemId: "notice", saved: true } }, actor)).ok, false);
   assert.equal(f.rows("user_profiles").get(identity.dataOwnerId)!.webBookmarks, undefined);
 });
-test("concurrent official requests cannot reserve more than three, duplicate request IDs reserve once", async () => {
+test("concurrent official requests have no daily cap, duplicate request IDs are tracked once", async () => {
   const f = fixtureDb(), ai = aiService(f.db, f.repo, async () => output);
   const results = await Promise.allSettled(Array.from({ length: 8 }, (_, index) => ai.handle("ai.start", start(`request_concurrent_${index}`), identity)));
-  assert.equal(results.filter(value => value.status === "fulfilled").length, 3);
+  assert.equal(results.filter(value => value.status === "fulfilled").length, 8);
   for (const row of f.rows("web_ai_tasks").values()) if (row.state === "new") {
     assert.deepEqual(row.docs, []); assert.equal(row.question, "");
   }
   const status = await ai.handle("ai.status", {}, identity) as any;
-  assert.deepEqual([status.quota.used, status.quota.held, status.quota.remaining], [0, 3, 0]);
+  assert.deepEqual([status.quota.used, status.quota.held, status.quota.remaining], [0, 8, null]);
   const one = fixtureDb(), ai2 = aiService(one.db, one.repo, async () => output);
   const repeated = await Promise.all(Array.from({ length: 5 }, () => ai2.handle("ai.start", start(), identity))) as ReadingTask[];
   assert.equal(new Set(repeated.map(task => task.id)).size, 1);
@@ -115,7 +147,7 @@ test("official batch replay does not call the next step or double-charge final s
   await ai.handle("ai.step", { taskId: task.id, step: 1 }, identity);
   assert.equal(calls, 2);
   const quota = (await ai.handle("ai.status", {}, identity) as any).quota;
-  assert.deepEqual([quota.used, quota.held, quota.remaining], [1, 0, 2]);
+  assert.deepEqual([quota.used, quota.held, quota.remaining], [1, 0, null]);
 });
 test("BYOK only passes its key to the current provider call and consumes no official quota", async () => {
   const f = fixtureDb(); let received = "";
@@ -222,8 +254,7 @@ test("nonshrinking summaries stop at the declared call budget instead of creatin
   assert.equal(task.state, "failed"); assert.equal(calls, firstBatches); assert.ok(calls <= firstBatches * 2 + 1);
 });
 
- test('official daily quota is three even with the former hosted setting, and resets by Beijing date',()=>{
-  assert.equal(dailyLimit(),3);
+ test('daily usage counters follow the Beijing date',()=>{
   assert.equal(beijingDay(Date.parse('2026-10-18T15:59:59Z')),'2026-10-18');
   assert.equal(beijingDay(Date.parse('2026-10-18T16:00:00Z')),'2026-10-19');
  });
