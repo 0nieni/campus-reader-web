@@ -84,6 +84,15 @@ export function publicSources(pool:SqlPool,repo:Repository,readers:Readers,schoo
   if(!definition?.url)throw new AppError('NOT_FOUND','来源不存在、没有公开入口或不属于当前学校的公共目录。');
   return collectSource({id,name:definition.name,entryUrl:websiteUrl(definition.url),categories:definition.categories},owner,true);
  }
+ // Trusted operator entry only. The public gateway never dispatches here.
+ // The expiring one-off maintenance endpoint supplies its own fixed run budget;
+ // normal workspace requests retain their existing daily 60-request budget.
+ async function maintenanceRefreshSource(id:string){
+  if(competitionSources.some(source=>source.id===id))return refreshSource(id);
+  const definition=competitionDirectory.find(source=>source.id===id);
+  if(!definition)throw new AppError('NOT_FOUND','目标不在本次公共竞赛目录中。');
+  return collectSource({id,name:definition.name,entryUrl:websiteUrl(definition.entryUrl),categories:['competition']},undefined,true);
+ }
  async function material(row:ItemRow,settings:{force?:boolean;deadline?:number;articleOnly?:boolean}={}){
   const definition=competitionSources.find(source=>source.id===row.sourceId);
   if(!archive||row.ownerOpenid||row.scope!=='global'||!row.sourceId)throw new AppError('NO_MATERIAL','公共资料来源暂不可读取。');
@@ -98,5 +107,5 @@ export function publicSources(pool:SqlPool,repo:Repository,readers:Readers,schoo
   if(action==='sources.public.refresh')return manualRefreshSource(identifier(input.sourceId),schoolId,identity.dataOwnerId);
   throw new AppError('ACTION_NOT_ALLOWED','公共来源操作无效。');
  }
- return{handle,catalogue,refreshSource,material,supports:(action:string)=>['sources.catalogue','sources.public.refresh'].includes(action)};
+ return{handle,catalogue,refreshSource,maintenanceRefreshSource,material,supports:(action:string)=>['sources.catalogue','sources.public.refresh'].includes(action)};
 }

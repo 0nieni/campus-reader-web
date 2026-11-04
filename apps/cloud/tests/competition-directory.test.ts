@@ -24,3 +24,9 @@ test('directory inclusion does not promote unverified links to a collector or a 
  assert.equal(directoryCollectionStatus(competitionDirectory.find(row=>row.number===1)!),'pending');
  assert.ok(!competitionSources.some(row=>row.id===pdf.id));
 });
+
+test('trailing navigation annotations remain original file notes rather than live availability claims',()=>{
+ assert.match(competitionDirectory.find(row=>row.number===32)!.note,/无具体公告/);
+ assert.match(competitionDirectory.find(row=>row.number===45)!.note,/无法访问/);
+ assert.match(competitionDirectory.find(row=>row.number===161)!.note,/首页有公告/);
+});

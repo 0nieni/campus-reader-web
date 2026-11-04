@@ -31,6 +31,8 @@
   external_node_modules = ["unpdf", "word-extractor", "xlsx", "yauzl"]
 [functions.material-file]
   external_node_modules = ["unpdf", "word-extractor", "xlsx", "yauzl"]
+[functions.source-directory-audit]
+  external_node_modules = ["unpdf", "word-extractor", "xlsx", "yauzl"]
 [functions.material-schedule]
   schedule = "45 18 * * *"
 

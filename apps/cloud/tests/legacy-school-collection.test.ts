@@ -9,10 +9,19 @@ import {schoolDirectory} from '../src/school-directory';
 import {publicSources} from '../src/public-sources';
 import {createGateway} from '../src/gateway';
 import {materialJobs} from '../src/material-jobs';
-import {extractNotices} from '../src/school-pages';
+import {extractNotices,extractArticle} from '../src/school-pages';
 import {schoolSources} from '../src/school-sources';
 
 const csId='15ff78a66acb889d000bcdb945e4c113',legacyMain='15ff78a66ac1382a00034f3869d0aa1c';
+test('navigation adds the exact innovation column while retaining all three existing school identities',()=>{
+ const sources=schoolSources({id:'bjtu',name:'北京交通大学',status:'ready'});
+ assert.equal(sources.sources.length,4);
+ assert.deepEqual(sources.sources.slice(0,3).map(s=>s.key),['directory','bjtu-bksy','bjtu-cs-tzgg']);
+ const added=sources.sources[3]!;assert.equal(added.announcementUrl,'https://bksy.bjtu.edu.cn/center/cc/638521937252901248.html');assert.match(sources.note,/2024.*历史/);
+ const rows=extractNotices({url:added.announcementUrl,html:'<nav><a href="/info/1001/99000.htm">与栏目无关的其他通知</a></nav><div class="textright_news"><ul><li><a href="/center/cc/news/638561446312347078.html">关于举办2024年校内工程实践竞赛的通知</a></li></ul></div>'},added);
+ assert.equal(rows.length,1);assert.equal(rows[0]!.publishedAt,null);assert.match(rows[0]!.title,/2024/);
+ assert.throws(()=>extractArticle({url:rows[0]!.url,html:'<h3>历史通知标题</h3><iframe src="/UploadFiles/20240709/notice.html"></iframe>'},added),{code:'NO_MATERIAL'});
+});
 test('the undergraduate column retains adjacent publication dates independently of title dates',()=>{
  const source=schoolSources({id:'bjtu',name:'北京交通大学',status:'ready'}).sources.find(row=>row.key==='bjtu-bksy')!;
  const rows=extractNotices({url:source.announcementUrl,html:'<span class="spTime">[2026/06/24]</span><div class="yuanxi2"><a href="/informations/639179144387037529.html">关于2026年7月10日报名截止的通知</a></div>'},source);
