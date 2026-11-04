@@ -3,20 +3,21 @@ import { test } from 'node:test';
 import { fixtureDb, identity } from './feature-fixture';
 import { aiService } from '../src/ai-service';
 import { assistantService } from '../src/assistant-service';
-import * as helpers from '../src/chat-intent';
-import { publicToolQuery } from '../src/chat-web-tools';
+import { automaticSearchQuery } from '../src/chat-web-tools';
 
-test('current Beijing calendar dates stay intact in public queries, including the production rejected year', () => {
-  const now = Date.parse('2026-11-03T23:30:00Z');
-  for (const date of ['2026年', '2026年11月', '2026年11月4日', '2026-11-04']) {
-    const query = `北京交通大学 ${date} 竞赛 通知`;
-    assert.equal(publicToolQuery('最近有什么比赛吗', query, '北京交通大学', now), query);
+test('direct search keeps ordinary joined words, dates and Unicode subjects without a topic whitelist', () => {
+  for (const question of ['最近有什么比赛吗', '2026年11月 学科竞赛 报名通知', 'TypeScript プライベート 教程', '你好']) {
+    assert.equal(automaticSearchQuery(question, '北京交通大学'), `北京交通大学 ${question}`);
   }
-  assert.equal(publicToolQuery('最近有什么比赛吗', '北京交通大学 2027年 竞赛', '北京交通大学', now), null);
-  assert.equal(publicToolQuery('最近有什么比赛吗', '北京交通大学 2026年11月5日 竞赛', '北京交通大学', now), null);
-  assert.equal(publicToolQuery('最近有什么比赛吗', '北京交通大学 2026年 私人单位 竞赛', '北京交通大学', now), null);
-  const newYear = Date.parse('2026-12-31T16:30:00Z');
-  assert.equal(publicToolQuery('最近有什么比赛吗', '北京交通大学 2027年 竞赛', '北京交通大学', newYear), '北京交通大学 2027年 竞赛');
+  assert.equal(Array.from(automaticSearchQuery('长问题'.repeat(200), '北京交通大学')!).length, 128);
+  assert.equal(automaticSearchQuery('TypeScript\n教程', '北京交通大学'), '北京交通大学 TypeScript 教程');
+  assert.equal(automaticSearchQuery('  ', '北京交通大学'), null);
+});
+
+test('explicit offline requests are the exception to default search', () => {
+  for (const question of ['不要联网，介绍 TypeScript', '不要进行联网搜索，介绍 TypeScript', '只看已有公告', 'Do not browse the web. Explain TypeScript']) {
+    assert.equal(automaticSearchQuery(question, '北京交通大学'), null);
+  }
 });
 
 test('agent search discovers leads without reading; only a chosen candidate is fetched through existing policy', async () => {
@@ -39,20 +40,4 @@ test('agent search discovers leads without reading; only a chosen candidate is f
   const denied = await tools.read('bjtu', found.items[0], identity);
   assert.equal(denied.items[0].allowAi, false);
   assert.equal(reads.length, 1, 'known restricted URL must not be fetched again');
-});
-
-test('automatic queries cannot carry memory facts, personal clauses, credentials or a no-network instruction', () => {
-  const p = helpers as any;
-  assert.equal(typeof p.publicToolQuery, 'function');
-  assert.equal(p.publicToolQuery('介绍 TypeScript 教程，我的邮箱 private@example.invalid', 'TypeScript 教程', '北京交通大学'), 'TypeScript 教程');
-  assert.equal(p.publicToolQuery('介绍 TypeScript 教程，我的邮箱 private@example.invalid', 'private@example.invalid', '北京交通大学'), null);
-  assert.equal(p.publicToolQuery('介绍 TypeScript 教程', '我在秘密公司实习 TypeScript', '北京交通大学'), null);
-  assert.equal(p.publicToolQuery('今天学校有什么比赛', '北京交通大学 比赛', '北京交通大学'), '北京交通大学 比赛');
-  assert.equal(p.publicToolQuery('不要联网，介绍 TypeScript', 'TypeScript', '北京交通大学'), null);
-  assert.equal(p.publicToolQuery('介绍 TypeScript', 'https://127.0.0.1/admin', '北京交通大学'), null);
-  assert.equal(p.publicToolQuery('介绍 TypeScript 教程', '秘 密', '北京交通大学'), null);
-  assert.equal(p.publicToolQuery('Do not browse the web. Explain TypeScript', 'TypeScript', '北京交通大学'), null);
-  assert.equal(p.publicToolQuery('介绍 TypeScript 教程', 'TypeScript конфиденциально', '北京交通大学'), null);
-  assert.equal(p.publicToolQuery('介绍 TypeScript 教程', 'TypeScript プライベート', '北京交通大学'), null);
-  assert.equal(p.publicToolQuery('不要进行联网搜索，介绍 TypeScript', 'TypeScript', '北京交通大学'), null);
 });

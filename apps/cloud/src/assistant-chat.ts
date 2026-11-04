@@ -182,7 +182,7 @@ export function assistantChat(db: Database, repo: Repository, ai: Ai, recommend:
           if (!acquired) return publicTurn(row, turn!);
           try {
             // Program-owned capability facts and memory management need no model or sources.
-            const command = isSearchCapabilityQuestion(question)
+            const command = !ai.chatToolsAvailable() && isSearchCapabilityQuestion(question)
               ? { handled: true, message: discover && deepseekSearchConfigured()
                 ? 'DeepSeek 搜索服务已配置，可以帮你搜索公开网页，也可以查当前学校的公告。你可以直接问“最近学校有什么比赛可以报名”。是否搜到、正文能否读到，会按本次实际结果说明；外部网页会标明真实来源，不会冒充学校官方通知。搜索和网页读取由网站后台的 DeepSeek 账户单独计量。'
                 : '当前还不能实际联网，因为网站后台尚未配置可用于搜索的官方 DeepSeek Key。请联系网站管理员；已收录的公告仍然可以查看。个人聊天模型配置不影响后台统一搜索配置。' }
