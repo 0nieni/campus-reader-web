@@ -76,7 +76,7 @@ it('an unselected question advances automatic web steps and renders verified sou
     : a === 'ai.chat.send' ? { ...turn, references: [], totalSteps: 1, search: { state: 'idle', message: '模型尚未请求联网搜索。' } }
     : a === 'ai.chat.step' ? { ...turn, references: step < 2 ? [] : refs, step: ++step, totalSteps: step + (step === 4 ? 0 : 1), state: step === 4 ? 'complete' : 'ready', result: step === 4 ? '阅读文档可了解类型。[R1]' : null, quotaHeld: step !== 4, message: '正在核验正文', search: { state: 'complete', message: '本次公开搜索已完成', candidateCount: 3, readableCount: step >= 3 ? 1 : 0 } } : undefined);
   const w = open(fake); await flushPromises();
-  expect(w.text()).toContain('按需联网');
+  expect(w.text()).toContain('每轮提问会先联网搜索');
   await w.get('#assistant-question').setValue('介绍最新 TypeScript');
   await w.get('form.assistant-composer').trigger('submit'); await flushPromises();
   expect(step).toBe(4);
@@ -138,7 +138,7 @@ it.each([true, false, undefined])('shows only the known search configuration for
   else {
     const configuration = w.get('.search-configuration').text();
     expect(configuration).toContain(searchConfigured ? '已配置' : '尚未配置');
-    if (searchConfigured) { expect(configuration).toContain('实际搜索'); expect(configuration).not.toContain('搜索成功'); }
+    if (searchConfigured) { expect(configuration).toContain('实际结果'); expect(configuration).toContain('不要联网'); expect(configuration).not.toContain('搜索成功'); }
     else expect(configuration).toContain('管理员');
   }
   await w.get('#assistant-search').setValue('讲座'); await w.get('form.source-search').trigger('submit'); await flushPromises();
