@@ -48,7 +48,7 @@ export function schoolDirectory(pool: SqlPool, repo: Repository, reader: PageRea
       const body=cached.rows[0]?.body || {};
       return {state:body.state==='ready'?'ready':body.state==='unavailable'?'unavailable':'checking',count:Number(body.count||0),checkedAt:body.checkedAt||null,changed:false,message:body.state==='checking'?'正在更新学校公开来源，已有公告仍可阅读。':body.message||'正在读取学校公开页面，请稍后刷新。',coverage:config.note,...(body.stats?{stats:body.stats}:{}),...(Array.isArray(body.sources)?{sources:body.sources}:{})};
     }
-    // At most three reviewed public columns per selected school; no crawl of all
+    // At most four reviewed public columns per selected school; no crawl of all
     // schools at login. A failed column never discards another column's results.
     const outcomes=await Promise.all(config.sources.map(async source=>{
       try {const rows=extractNotices(await reader(source.announcementUrl,source),source);

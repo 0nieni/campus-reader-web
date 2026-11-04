@@ -8,7 +8,7 @@ const rows = markdown.split(/\r?\n/)
   .filter(line => /^\|\s*\d+\s*\|/.test(line) && line.split('|').length >= 9)
   .map(line => {
     const cells = line.split('|').slice(1).map(cell => cell.trim());
-    return {number: Number(cells[0]), name: cells[1], entryUrl: cells[5].match(/\]\(([^)]+)\)/)?.[1], entryType: cells[6], note: cells[7]};
+    return {number: Number(cells[0]), name: cells[1], entryUrl: cells[5].match(/\]\(([^)]+)\)/)?.[1], entryType: cells[6], note: cells.slice(7).filter(Boolean).join('；')};
   });
 if (!rows.length || rows.some((row, index) => row.number !== index + 1 || !row.name)) throw new Error('The main project table must contain consecutive unique project numbers.');
 const linked = rows.filter(row => row.entryUrl);

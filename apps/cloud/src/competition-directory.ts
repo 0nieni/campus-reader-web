@@ -299,7 +299,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "“尖烽时刻”全国商业模拟大赛",
     "entryUrl": "https://www.cesim.com/china/pt",
     "entryType": "官网",
-    "note": "Cesim（尖烽时刻）中国区官方赛事页，含报名与赛程"
+    "note": "Cesim（尖烽时刻）中国区官方赛事页，含报名与赛程；（无具体公告）"
   },
   {
     "id": "competition_033",
@@ -315,7 +315,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "德勤全国税务精英挑战赛",
     "entryUrl": "https://www.deloitte.com/cn/zh/services/tax/perspectives/2026-deloitte-tax-championship-kick-off.html",
     "entryType": "官网",
-    "note": "德勤中国官网2026年赛事启动页，含赛制与报名信息"
+    "note": "德勤中国官网2026年赛事启动页，含赛制与报名信息；（无具体公告）"
   },
   {
     "id": "competition_035",
@@ -355,7 +355,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "日日顺物流创客训练营",
     "entryUrl": "https://makers.rrswl.com/",
     "entryType": "官网",
-    "note": "赛事项专题官网，第九届（2024），中国物流学会与日日顺供应链主办"
+    "note": "赛事项专题官网，第九届（2024），中国物流学会与日日顺供应链主办；（无具体公告）"
   },
   {
     "id": "competition_042",
@@ -387,7 +387,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "全国大学生结构设计竞赛",
     "entryUrl": "https://www.structurecontest.com/home",
     "entryType": "官网",
-    "note": "竞赛官网首页，含通知、文件下载与历届资料"
+    "note": "竞赛官网首页，含通知、文件下载与历届资料；（无法访问）"
   },
   {
     "id": "competition_046",
@@ -395,7 +395,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "全国周培源大学生力学竞赛",
     "entryUrl": "http://zpy.cstam.org.cn/articles.aspx?PartNodeId=15",
     "entryType": "官网",
-    "note": "竞赛官方网站最新动态栏目（中国力学学会承办），本站为http访问"
+    "note": "竞赛官方网站最新动态栏目（中国力学学会承办），本站为http访问；（无法访问）"
   },
   {
     "id": "competition_047",
@@ -499,7 +499,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "中美青年创客大赛",
     "entryUrl": "https://www.cscse.cn/chinaus-maker/sy29/index.html",
     "entryType": "官网",
-    "note": "教育部留学服务中心“中美青年创客大赛”专题站报名栏目"
+    "note": "教育部留学服务中心“中美青年创客大赛”专题站报名栏目；（无具体公告）"
   },
   {
     "id": "competition_060",
@@ -507,7 +507,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "全国大学生机器人大赛",
     "entryUrl": "https://www.cnrobocon.net/h-col-104.html",
     "entryType": "官网",
-    "note": "大赛官网通知公告栏目（ROBOCON，本站同时覆盖RoboMaster/RoboTac）"
+    "note": "大赛官网通知公告栏目（ROBOCON，本站同时覆盖RoboMaster/RoboTac）；（无法访问）"
   },
   {
     "id": "competition_061",
@@ -515,7 +515,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "全国三维数字化创新设计大赛",
     "entryUrl": "https://3dds.3ddl.net/index.php?ctl=Informationlist&met=newsdetails&id=712",
     "entryType": "官网",
-    "note": "大赛官网资讯栏目（3DDS），站内另有省赛/精英联赛入口"
+    "note": "大赛官网资讯栏目（3DDS），站内另有省赛/精英联赛入口；（无法访问）"
   },
   {
     "id": "competition_062",
@@ -523,7 +523,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "全国大学生集成电路创新创业大赛",
     "entryUrl": "https://www.ciciec.com/col.jsp?id=282",
     "entryType": "官网",
-    "note": "大赛官网（CICIEC），含通知与报名入口"
+    "note": "大赛官网（CICIEC），含通知与报名入口；（无法访问）"
   },
   {
     "id": "competition_063",
@@ -603,7 +603,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "中国大学生方程式汽车大赛",
     "entryUrl": "http://www.formulastudent.com.cn/announcement.html",
     "entryType": "官网",
-    "note": "中国汽车工程学会方程式赛事官网公告栏目；本站为http访问"
+    "note": "中国汽车工程学会方程式赛事官网公告栏目；本站为http访问；（无法访问）"
   },
   {
     "id": "competition_073",
@@ -707,7 +707,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "IEEE国际未来能源挑战赛",
     "entryUrl": "https://www.simplis.com/IFEC-2026",
     "entryType": "官网",
-    "note": "IFEC 2026赛事官方页面（IEEE未来能源挑战赛）"
+    "note": "IFEC 2026赛事官方页面（IEEE未来能源挑战赛）；(无具体公告)"
   },
   {
     "id": "competition_086",
@@ -755,7 +755,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "全国大学生统计建模大赛",
     "entryUrl": "http://tjjmds.ai-learning.net/dstz/37047.jhtml",
     "entryType": "官网",
-    "note": "大赛官网通知页（第十一届，2025）；2026年为第十二届，官网同域持续发布"
+    "note": "大赛官网通知页（第十一届，2025）；2026年为第十二届，官网同域持续发布；（无法访问）"
   },
   {
     "id": "competition_092",
@@ -771,7 +771,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "美国大学生数学建模竞赛",
     "entryUrl": "https://contest.comap.com/undergraduate/contests/mcm/",
     "entryType": "官网",
-    "note": "COMAP官方MCM/ICM页面，含报名、规则与赛题"
+    "note": "COMAP官方MCM/ICM页面，含报名、规则与赛题；（无具体公告）"
   },
   {
     "id": "competition_094",
@@ -787,7 +787,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "全国大学生化学实验创新设计大赛",
     "entryUrl": "https://slise.btbu.edu.cn/docs/2026-04/3e0dd435c7fb42f48b854ab3bdf981ed.pdf",
     "entryType": "赛区官网",
-    "note": "华北赛区组委会（北京工商大学）发布的第六届赛区文件；全国赛无独立官网，通知分赛区发布"
+    "note": "华北赛区组委会（北京工商大学）发布的第六届赛区文件；全国赛无独立官网，通知分赛区发布；（文件）"
   },
   {
     "id": "competition_096",
@@ -851,7 +851,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "“外研社杯”全国大学生外语能力大赛英语组国际传播综合能力赛",
     "entryUrl": "https://ucc.fltrp.com/",
     "entryType": "官网",
-    "note": "与第112项同一赛事，同属大赛官网；英语组国际传播综合能力赛项"
+    "note": "与第112项同一赛事，同属大赛官网；英语组国际传播综合能力赛项；（无具体公告）"
   },
   {
     "id": "competition_104",
@@ -859,7 +859,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "中国数据新闻大赛",
     "entryUrl": "https://www.cdjcow.com/",
     "entryType": "官网",
-    "note": "赛事官网，设“大赛报名”栏目；https 会自动跳转至 http"
+    "note": "赛事官网，设“大赛报名”栏目；https 会自动跳转至 http；（无法访问）"
   },
   {
     "id": "competition_105",
@@ -907,7 +907,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "“外研社杯”全国大学生外语能力大赛英语组演讲赛",
     "entryUrl": "https://ucc.fltrp.com/",
     "entryType": "官网",
-    "note": "“外研社·国才杯”“理解当代中国”全国大学生外语能力大赛官网，含大赛通知、校赛/国赛报名入口（英语组演讲等赛项）"
+    "note": "“外研社·国才杯”“理解当代中国”全国大学生外语能力大赛官网，含大赛通知、校赛/国赛报名入口（英语组演讲等赛项）；（无具体公告）"
   },
   {
     "id": "competition_111",
@@ -915,7 +915,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "MODEL APEC大会比赛",
     "entryUrl": "https://www.modelapec.com/newsinfo/2271024.html",
     "entryType": "官网",
-    "note": "MODEL APEC官方站点（modelapec.com）赛事资讯页，首页 https://www.modelapec.com/"
+    "note": "MODEL APEC官方站点（modelapec.com）赛事资讯页，首页 https://www.modelapec.com/；（无具体公告）"
   },
   {
     "id": "competition_112",
@@ -923,7 +923,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "“外研社杯”全国大学生外语能力大赛英语组笔译赛",
     "entryUrl": "https://ucc.fltrp.com/",
     "entryType": "官网",
-    "note": "“外研社·国才杯”“理解当代中国”全国大学生外语能力大赛官方站（ucc.fltrp.com），含大赛通知、报名入口；英语组笔译赛项为该赛事赛项"
+    "note": "“外研社·国才杯”“理解当代中国”全国大学生外语能力大赛官方站（ucc.fltrp.com），含大赛通知、报名入口；英语组笔译赛项为该赛事赛项；（无具体公告）"
   },
   {
     "id": "competition_113",
@@ -931,7 +931,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "“外研社杯”全国大学生外语能力大赛英语组口译赛",
     "entryUrl": "https://ucc.fltrp.com/",
     "entryType": "官网",
-    "note": "与第112项同一赛事，同属大赛官网；英语组口译赛项"
+    "note": "与第112项同一赛事，同属大赛官网；英语组口译赛项；（无具体公告）"
   },
   {
     "id": "competition_114",
@@ -939,7 +939,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "“外研社杯”全国大学生外语能力大赛英语组短视频赛",
     "entryUrl": "https://ucc.fltrp.com/",
     "entryType": "官网",
-    "note": "与第112项同一赛事，同属大赛官网；英语组短视频赛项有独立报名指南页面"
+    "note": "与第112项同一赛事，同属大赛官网；英语组短视频赛项有独立报名指南页面；（无具体公告）"
   },
   {
     "id": "competition_115",
@@ -987,7 +987,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "国际大学生微电影盛典",
     "entryUrl": "https://gjwdy.kdcnu.com/index.htm",
     "entryType": "官网",
-    "note": "赛事独立官网，由承办单位首都师范大学科德学院维护，含历届征集与公告"
+    "note": "赛事独立官网，由承办单位首都师范大学科德学院维护，含历届征集与公告；（无具体公告）"
   },
   {
     "id": "competition_121",
@@ -1027,7 +1027,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "微软创新杯全球学生科技大赛",
     "entryUrl": "https://imaginecup.microsoft.com/",
     "entryType": "官网",
-    "note": "微软 Imagine Cup 官方站点（2027 赛季筹备中）；国内参赛通常经微软中国与学校组织"
+    "note": "微软 Imagine Cup 官方站点（2027 赛季筹备中）；国内参赛通常经微软中国与学校组织；（无具体公告）"
   },
   {
     "id": "competition_128",
@@ -1035,7 +1035,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "“中国软件杯”大学生软件设计大赛",
     "entryUrl": "https://www.cnsoftbei.com/content-1-1287-1.html",
     "entryType": "官网",
-    "note": "官网 www.cnsoftbei.com 对自动抓取返回403，标题取自该站被搜索引擎索引的报名说明页；第十五届（2026）"
+    "note": "官网 www.cnsoftbei.com 对自动抓取返回403，标题取自该站被搜索引擎索引的报名说明页；第十五届（2026）；（无法访问）"
   },
   {
     "id": "competition_129",
@@ -1059,7 +1059,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "“红点”设计大奖",
     "entryUrl": "https://www.red-dot.org/zh/",
     "entryType": "官网",
-    "note": "红点设计大奖官网中文版，含Red Dot Award: Product Design等各奖项报名信息"
+    "note": "红点设计大奖官网中文版，含Red Dot Award: Product Design等各奖项报名信息；（无具体公告）"
   },
   {
     "id": "competition_132",
@@ -1067,7 +1067,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "Pentawards国际包装设计奖",
     "entryUrl": "https://pentawards.com/live/en/page/home",
     "entryType": "官网",
-    "note": "Pentawards官网首页（2026赛季），含Competition info报名信息"
+    "note": "Pentawards官网首页（2026赛季），含Competition info报名信息；（无具体公告）"
   },
   {
     "id": "competition_133",
@@ -1075,7 +1075,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "世界包装之星（世界学生之星）",
     "entryUrl": "https://worldstarstudent.org/",
     "entryType": "官网",
-    "note": "世界包装组织（WPO）主办的WorldStar Student包装奖，含报名、类别、获奖等栏目；中国赛区作品经中国包装联合会推荐报送"
+    "note": "世界包装组织（WPO）主办的WorldStar Student包装奖，含报名、类别、获奖等栏目；中国赛区作品经中国包装联合会推荐报送；（无具体公告）"
   },
   {
     "id": "competition_134",
@@ -1083,7 +1083,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "英国黄铅笔奖",
     "entryUrl": "https://www.dandad.org/awards/new-blood-awards",
     "entryType": "官网",
-    "note": "黄铅笔奖即英国D&AD Pencil Awards，学生/新锐组为New Blood Awards（奖项分黄铅笔、石墨铅笔等等级），页面含briefs与参赛规则"
+    "note": "黄铅笔奖即英国D&AD Pencil Awards，学生/新锐组为New Blood Awards（奖项分黄铅笔、石墨铅笔等等级），页面含briefs与参赛规则；（无具体公告）"
   },
   {
     "id": "competition_135",
@@ -1091,7 +1091,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "IFLA国际大学生设计竞赛",
     "entryUrl": "https://www.iflaworld.com/student-competition",
     "entryType": "官网",
-    "note": "国际风景园林师联合会（IFLA）学生设计竞赛常设说明页；每年随IFLA世界大会征集，如2025年大会专题页 ifla2025.com/student-activities/student-competition"
+    "note": "国际风景园林师联合会（IFLA）学生设计竞赛常设说明页；每年随IFLA世界大会征集，如2025年大会专题页 ifla2025.com/student-activities/student-competition；（无具体公告）"
   },
   {
     "id": "competition_136",
@@ -1099,7 +1099,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "UIA霍普杯国际大学生建筑设计竞赛",
     "entryUrl": "https://hypcup.uedmagazine.net/index.php?m=home&c=Lists&a=index&tid=51",
     "entryType": "官网",
-    "note": "UIA-霍普杯官方站点（《城市·环境·设计》杂志运营），含当届题目、报名与往届回顾；2025届已截稿"
+    "note": "UIA-霍普杯官方站点（《城市·环境·设计》杂志运营），含当届题目、报名与往届回顾；2025届已截稿；（无具体公告）"
   },
   {
     "id": "competition_137",
@@ -1107,7 +1107,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "UIA国际大学生建筑设计竞赛",
     "entryUrl": "https://uia2026bcn.org/fr/uia-international-student-competition-3/",
     "entryType": "官网",
-    "note": "UIA国际学生竞赛随三年一届世界建筑师大会举办，此页为2026年巴塞罗那大会（主题Catalysts of Resilience）竞赛公告；每届更换站点"
+    "note": "UIA国际学生竞赛随三年一届世界建筑师大会举办，此页为2026年巴塞罗那大会（主题Catalysts of Resilience）竞赛公告；每届更换站点；（无具体公告）"
   },
   {
     "id": "competition_138",
@@ -1115,7 +1115,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "中央玻璃国际建筑设计大赛",
     "entryUrl": "https://www.cgc-jp.com/kyougi/",
     "entryType": "官网",
-    "note": "第61届（2026）官方英文站，含课题、应募要项、评审与历届作品；日文站为 www.cgco.co.jp/kyougi/，报名经 compe.shinkenchiku.online"
+    "note": "第61届（2026）官方英文站，含课题、应募要项、评审与历届作品；日文站为 www.cgco.co.jp/kyougi/，报名经 compe.shinkenchiku.online；（无具体公告）"
   },
   {
     "id": "competition_139",
@@ -1123,7 +1123,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "Evolo国际高层建筑设计学生竞赛",
     "entryUrl": "https://www.evolo.us/category/competition/",
     "entryType": "官网",
-    "note": "eVolo摩天大楼设计竞赛（eVolo Skyscraper Competition）官方分类页，含当届报名与往届获奖；当届报名入口见 evolo.us/category/2027/"
+    "note": "eVolo摩天大楼设计竞赛（eVolo Skyscraper Competition）官方分类页，含当届报名与往届获奖；当届报名入口见 evolo.us/category/2027/；（无具体公告）"
   },
   {
     "id": "competition_140",
@@ -1131,7 +1131,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "法国昂西国际动画电影节",
     "entryUrl": "https://www.annecyfestival.com/",
     "entryType": "官网",
-    "note": "昂西国际动画电影节暨动画市场（Mifa）官网，学生/毕业作品可投递参赛；2026届征片章程已发布"
+    "note": "昂西国际动画电影节暨动画市场（Mifa）官网，学生/毕业作品可投递参赛；2026届征片章程已发布；（无具体公告）"
   },
   {
     "id": "competition_141",
@@ -1139,7 +1139,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "学生奥斯卡",
     "entryUrl": "https://www.oscars.org/saa",
     "entryType": "官网",
-    "note": "美国电影艺术与科学学院主办的学生奥斯卡（SAA）官方页面，含报名资格与往届获奖；中国区作品一般经院校推荐报送"
+    "note": "美国电影艺术与科学学院主办的学生奥斯卡（SAA）官方页面，含报名资格与往届获奖；中国区作品一般经院校推荐报送；（无具体公告）"
   },
   {
     "id": "competition_142",
@@ -1147,7 +1147,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "ASLA竞赛学生奖",
     "entryUrl": "https://www.asla.org/awards-events-main-landing/honors-awards/pro-student-awards/2026-student-cfe",
     "entryType": "官网",
-    "note": "美国风景园林师协会（ASLA）学生奖2026届征件页；在线报名系统为 asla-student-awards.secure-platform.com"
+    "note": "美国风景园林师协会（ASLA）学生奖2026届征件页；在线报名系统为 asla-student-awards.secure-platform.com；（无具体公告）"
   },
   {
     "id": "competition_143",
@@ -1155,7 +1155,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "A’设计竞赛（A’DESIGN AWARDS & COMPETITION）",
     "entryUrl": "https://competition.adesignaward.com/",
     "entryType": "官网",
-    "note": "A' Design Award 官方竞赛站，含报名、类别、截止日期与评审规则。"
+    "note": "A' Design Award 官方竞赛站，含报名、类别、截止日期与评审规则。；（无具体公告）"
   },
   {
     "id": "competition_144",
@@ -1163,7 +1163,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "IF设计奖",
     "entryUrl": "https://ifdesign.com/",
     "entryType": "官网",
-    "note": "iF国际论坛设计（iF Design）官网，含iF Design Award报名与评审信息；本机抓取该站返回502/TLS错误，域名取自搜索结果，标题据站点名称"
+    "note": "iF国际论坛设计（iF Design）官网，含iF Design Award报名与评审信息；本机抓取该站返回502/TLS错误，域名取自搜索结果，标题据站点名称；（无法访问）"
   },
   {
     "id": "competition_145",
@@ -1171,7 +1171,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "太阳能十项全能竞赛",
     "entryUrl": "https://sdchina.org.cn/",
     "entryType": "官网",
-    "note": "中国国际太阳能十项全能竞赛（Solar Decathlon China）官网；国际总站为 solardecathlon.gov"
+    "note": "中国国际太阳能十项全能竞赛（Solar Decathlon China）官网；国际总站为 solardecathlon.gov；（无法访问）"
   },
   {
     "id": "competition_146",
@@ -1179,7 +1179,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "中国国际动漫电影节“金猴奖”",
     "entryUrl": "https://jhj.cicaf.com/",
     "entryType": "官网",
-    "note": "中国国际动漫节『金猴奖』官方子站，含大赛简介、征集公告与报名；2026届全球征集已启动"
+    "note": "中国国际动漫节『金猴奖』官方子站，含大赛简介、征集公告与报名；2026届全球征集已启动；（无法访问）"
   },
   {
     "id": "competition_147",
@@ -1187,7 +1187,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "亚洲建筑新人赛",
     "entryUrl": "https://arch.ntut.edu.tw/p/406-1086-154865,r2093.php?Lang=zh-tw",
     "entryType": "赛区官网",
-    "note": "亚洲建筑新人战（アジア建築新人戦）未见统一国际官网，此为第15届（2026，总决赛新加坡）台湾代表选拔赛页；大陆学生多经所在院校组织推荐"
+    "note": "亚洲建筑新人战（アジア建築新人戦）未见统一国际官网，此为第15届（2026，总决赛新加坡）台湾代表选拔赛页；大陆学生多经所在院校组织推荐；（无法访问）"
   },
   {
     "id": "competition_148",
@@ -1195,7 +1195,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "VELUX(威卢克斯)建筑与光国际学生建筑设计大赛",
     "entryUrl": "https://www.uia-architectes.org/en/competition/light-of-tomorrow-international-velux-award-2026/",
     "entryType": "主办方页面",
-    "note": "原『International VELUX Award』2026年起更名Light of Tomorrow by VELUX，由VELUX集团与UIA合办，此为UIA官方竞赛页；VELUX新闻见 press.velux.com"
+    "note": "原『International VELUX Award』2026年起更名Light of Tomorrow by VELUX，由VELUX集团与UIA合办，此为UIA官方竞赛页；VELUX新闻见 press.velux.com；（无法访问）"
   },
   {
     "id": "competition_149",
@@ -1299,7 +1299,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "中国（北京）国际大学生动画节",
     "entryUrl": "https://aniwow.cuc.edu.cn/main.htm",
     "entryType": "官网",
-    "note": "Aniwow!中国（北京）国际大学生动画节官网（中国传媒大学主办），2025年为第20届，含白杨奖等单元"
+    "note": "Aniwow!中国（北京）国际大学生动画节官网（中国传媒大学主办），2025年为第20届，含白杨奖等单元；（首页有公告）"
   },
   {
     "id": "competition_162",
@@ -1307,7 +1307,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "全国大学生广告艺术大赛",
     "entryUrl": "https://www.sun-ada.net/",
     "entryType": "官网",
-    "note": "大广赛官网，含新闻、命题与报名入口"
+    "note": "大广赛官网，含新闻、命题与报名入口；（无具体公告）"
   },
   {
     "id": "competition_163",
@@ -1315,7 +1315,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "靳埭强设计奖",
     "entryUrl": "https://www.ktkda.cn/",
     "entryType": "官网",
-    "note": "靳埭强设计奖即“KTK设计奖·全球华人设计比赛”，官网含大赛简介、报名与获奖作品"
+    "note": "靳埭强设计奖即“KTK设计奖·全球华人设计比赛”，官网含大赛简介、报名与获奖作品；（无具体公告）"
   },
   {
     "id": "competition_164",
@@ -1323,7 +1323,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "白金创意国际大学生平面设计大赛",
     "entryUrl": "https://www.platinumaward.org/zh",
     "entryType": "官网",
-    "note": "官网中文版，含赛事章程、往届作品；https 会跳转至 http"
+    "note": "官网中文版，含赛事章程、往届作品；https 会跳转至 http；（无具体公告）"
   },
   {
     "id": "competition_165",
@@ -1331,7 +1331,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "金点设计奖（新秀）",
     "entryUrl": "https://goldenpin.org.tw/goldenpin/zh-TW/participate/young-pin-design-award",
     "entryType": "官网",
-    "note": "金点设计奖之学生组『金点新秀设计奖』官方参赛办法页；2026届报名简章见 goldenpin.org.tw 新闻栏"
+    "note": "金点设计奖之学生组『金点新秀设计奖』官方参赛办法页；2026届报名简章见 goldenpin.org.tw 新闻栏；（无具体公告）"
   },
   {
     "id": "competition_166",
@@ -1339,7 +1339,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "时报金犊奖",
     "entryUrl": "https://www.ad-young.com/",
     "entryType": "官网",
-    "note": "时报金犊奖报名与作品提交平台（ad-young.com），含大赛章程、时程、参赛办法；台湾站为 timesawards.com.tw"
+    "note": "时报金犊奖报名与作品提交平台（ad-young.com），含大赛章程、时程、参赛办法；台湾站为 timesawards.com.tw；（无具体公告）"
   },
   {
     "id": "competition_167",
@@ -1347,7 +1347,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "国际用户体验创新大赛（UXD Award）",
     "entryUrl": "https://uxpa.org.cn/",
     "entryType": "官网",
-    "note": "UXPA中国（国际用户体验专业协会中国分会）官网，UXDA大赛通知与报名入口在此发布；2025年为第17届"
+    "note": "UXPA中国（国际用户体验专业协会中国分会）官网，UXDA大赛通知与报名入口在此发布；2025年为第17届；（无具体公告）"
   },
   {
     "id": "competition_168",
@@ -1355,7 +1355,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "“台达杯”国际太阳能建筑设计竞赛",
     "entryUrl": "https://isbdc.cn/",
     "entryType": "官网",
-    "note": "台达杯官网，含新闻公告与历届作品；2026届竞赛办法见 isbdc.cn/show/227.html"
+    "note": "台达杯官网，含新闻公告与历届作品；2026届竞赛办法见 isbdc.cn/show/227.html；（无具体公告）"
   },
   {
     "id": "competition_169",
@@ -1363,7 +1363,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "“艾景奖”国际园林景观规划设计大赛（学生组）",
     "entryUrl": "https://www.idea-king.org.cn/",
     "entryType": "官网",
-    "note": "艾景奖官网，含学生组竞赛方案与报名；当前为第16届（2027）筹备期，学生组往届方案示例 idea-king.org.cn/article-722.html"
+    "note": "艾景奖官网，含学生组竞赛方案与报名；当前为第16届（2027）筹备期，学生组往届方案示例 idea-king.org.cn/article-722.html；（无具体公告）"
   },
   {
     "id": "competition_170",
@@ -1371,7 +1371,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "学院杯中国室内与环境设计大赛",
     "entryUrl": "https://www.xueyuanbei.com/",
     "entryType": "官网",
-    "note": "赛事官网，含竞赛方案、报名参赛、获奖查询；中国室内装饰协会支持。"
+    "note": "赛事官网，含竞赛方案、报名参赛、获奖查询；中国室内装饰协会支持。；（无具体公告）"
   },
   {
     "id": "competition_171",
@@ -1379,7 +1379,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "中国人居环境设计学年奖",
     "entryUrl": "https://www.xuenianjiang.com/",
     "entryType": "官网",
-    "note": "学年奖官网，含报名流程与往届作品；https 会跳转至 http"
+    "note": "学年奖官网，含报名流程与往届作品；https 会跳转至 http；（无法访问）"
   },
   {
     "id": "competition_172",
@@ -1387,7 +1387,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "全国设计大师奖",
     "entryUrl": "https://dashiaward.cn/",
     "entryType": "官网",
-    "note": "大师奖官网，含历届回顾与参赛办法；https 会跳转至 http"
+    "note": "大师奖官网，含历届回顾与参赛办法；https 会跳转至 http；（无法访问）"
   },
   {
     "id": "competition_173",
@@ -1395,7 +1395,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "全国大学生工业设计大赛",
     "entryUrl": "https://jyt.ah.gov.cn/tsdw/gdjyc/dxsxkhjnjs/40794882.html",
     "entryType": "赛区官网",
-    "note": "全国赛未见独立官网；此为安徽省教育厅发布的2026年赛区通知（含全国赛章程与赛道设置）"
+    "note": "全国赛未见独立官网；此为安徽省教育厅发布的2026年赛区通知（含全国赛章程与赛道设置）；（无具体公告）"
   },
   {
     "id": "competition_174",
@@ -1515,7 +1515,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "Willem C.Vis国际商事仲裁模拟辩论赛",
     "entryUrl": "https://www.vismoot.org/",
     "entryType": "官网",
-    "note": "维也纳 Vis Moot 官方站，第34届（2027年3月），含队伍注册与赛题信息。"
+    "note": "维也纳 Vis Moot 官方站，第34届（2027年3月），含队伍注册与赛题信息。；（无具体公告）"
   },
   {
     "id": "competition_194",
@@ -1523,7 +1523,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "杰赛普（Jessup）国际法模拟法庭比赛",
     "entryUrl": "https://www.ilsa.org/jessup/",
     "entryType": "官网",
-    "note": "主办方ILSA的Jessup官方页面；中国赛区选拔通知由各高校另行发布。"
+    "note": "主办方ILSA的Jessup官方页面；中国赛区选拔通知由各高校另行发布。；（无具体公告）"
   },
   {
     "id": "competition_195",
@@ -1571,7 +1571,7 @@ export const competitionDirectory:readonly CompetitionDirectoryEntry[] = [
     "name": "“强网杯”全国网络安全挑战赛",
     "entryUrl": "https://www.qiangwangbei.com/",
     "entryType": "官网",
-    "note": "赛事官网，第十届（2026）含报名入口、赛程与组织机构。"
+    "note": "赛事官网，第十届（2026）含报名入口、赛程与组织机构。；（无具体公告）"
   },
   {
     "id": "competition_202",

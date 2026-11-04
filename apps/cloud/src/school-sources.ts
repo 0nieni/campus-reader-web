@@ -8,7 +8,7 @@ const entry=(key:string,label:string,url:string,articleSelector?:string):Entry=>
 // Reviewed official public columns, not a claim of access to the campus portal.
 // URLs and selectors are server constants; browser inputs cannot add fetch hosts.
 const reviewed:Record<string,Coverage>={
- bjtu:{note:'覆盖学校主站、本科生院和计算机学院的公开通知；校内登录内容不在采集范围。',entries:[entry('directory','目录公开公告入口','https://www.bjtu.edu.cn/tzgg/'),{...entry('bjtu-bksy','北京交通大学 · 本科生院通知公告','https://bksy.bjtu.edu.cn/Admin/PageList.ashx?pc=271891'),dateSelector:'.spTime'},entry('bjtu-cs-tzgg','北京交通大学 · 计算机学院通知公告','https://cs.bjtu.edu.cn/tzgg/index.htm')]},
+ bjtu:{note:'覆盖学校主站、本科生院、计算机学院和文件所列创新创业中心的公开通知。创新创业中心专题目前仅展示2024年历史通知且列表无发布日期，不代表近期更新；校内登录内容不在采集范围。',entries:[entry('directory','目录公开公告入口','https://www.bjtu.edu.cn/tzgg/'),{...entry('bjtu-bksy','北京交通大学 · 本科生院通知公告','https://bksy.bjtu.edu.cn/Admin/PageList.ashx?pc=271891'),dateSelector:'.spTime'},entry('bjtu-cs-tzgg','北京交通大学 · 计算机学院通知公告','https://cs.bjtu.edu.cn/tzgg/index.htm'),{...entry('bjtu-innovation','北京交通大学 · 创新创业教育中心（历史通知栏目）','https://bksy.bjtu.edu.cn/center/cc/638521937252901248.html'),listSelector:'.textright_news'}]},
  school_001:{note:'覆盖教务部公开通知；学校主站旧公告数据较旧，校内门户内容不在采集范围。',entries:[entry('teaching','教务部 · 通知公告','https://dean.pku.edu.cn/web/notice.php','.newsinfo_box')]},
  school_002:{note:'覆盖以下院系的公开通知和学术活动；学校信息门户需要登录，未接入校内公告。',entries:[entry('statistics','统计与数据科学系 · 通知公告','https://www.stat.tsinghua.edu.cn/xwdt/tzgg.htm'),entry('psychology','心理与认知科学系 · 学术活动','https://www.pcs.tsinghua.edu.cn/xwdt/xshd.htm')]},
  school_003:{note:'覆盖本科生院公开通知，不包括需校内登录的内容。',entries:[entry('teaching','本科生院 · 通知公告','http://jiaowu.ruc.edu.cn/gnsz/sylb/tzggconfig/index.htm','.page-detail .content')]},
@@ -53,7 +53,7 @@ const articleSelectors:Record<string,string>={
 export function schoolSources(school:School):{note:string;sources:PublicSchoolSource[]} {
  const coverage=reviewed[school.id];
  const entries=coverage?.entries || (school.announcementUrl?[entry('directory','目录公开公告入口',school.announcementUrl)]:[]);
- return {note:coverage?.note || '当前仅接入目录所列入口，可能无法覆盖学校全部公告；正文和附件可用性以原站为准。',sources:entries.slice(0,3).map(e=>({id:school.id,name:school.name,key:e.key,label:e.label,announcementUrl:e.url,homepage:e.homepage||school.homepage||e.url,...(e.listSelector?{listSelector:e.listSelector}:{}),...(e.dateSelector?{dateSelector:e.dateSelector}:{}),...((e.articleSelector||articleSelectors[school.id])?{articleSelector:e.articleSelector||articleSelectors[school.id]}:{})}))};
+ return {note:coverage?.note || '当前仅接入目录所列入口，可能无法覆盖学校全部公告；正文和附件可用性以原站为准。',sources:entries.slice(0,4).map(e=>({id:school.id,name:school.name,key:e.key,label:e.label,announcementUrl:e.url,homepage:e.homepage||school.homepage||e.url,...(e.listSelector?{listSelector:e.listSelector}:{}),...(e.dateSelector?{dateSelector:e.dateSelector}:{}),...((e.articleSelector||articleSelectors[school.id])?{articleSelector:e.articleSelector||articleSelectors[school.id]}:{})}))};
 }
 // Keep imported source identities so saved choices and historical notices survive.
 const bjtuLegacyIds:Record<string,string>={'bjtu-bksy':'1233ab626ac140af0003a85f00e57db2','bjtu-cs-tzgg':'15ff78a66acb889d000bcdb945e4c113'};
