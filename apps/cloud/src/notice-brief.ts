@@ -39,6 +39,16 @@ function dateExpressions(quote:string,publishedYear?:string){
  return{text,dates};
 }
 const datesIn=(quote:string,publishedYear?:string)=>dateExpressions(quote,publishedYear).dates.map(row=>row.value);
+function numericText(value:string){
+ // Retain source digit grouping, but a valid calendar date followed by another
+ // number (often a clock) is a boundary, never part of that grouped number.
+ const parsed=dateExpressions(value,'2000');let text=parsed.text;
+ for(const date of [...parsed.dates].reverse()){
+  const gap=text.slice(date.end).match(/^\s+(?=\d)/)?.[0];
+  if(gap)text=text.slice(0,date.end)+'T'+text.slice(date.end+gap.length);
+ }
+ return text.replace(/(?<=\d)\s+(?=\d)/g,'');
+}
 function verifyTime(value:BriefTime,quotes:{text:string;year?:string}[]){
  const date=value.value.slice(0,10);if(!validDate(date)||!quotes.some(quote=>datesIn(quote.text,quote.year).includes(date)))fail();
  if(value.precision==='date'){if(value.value!==date)fail();return;}
@@ -60,7 +70,7 @@ export function validateBrief(output:string,prepared:PreparedBrief,publishedAt?:
   const target=norm(row.quote);if(!target)fail('QUOTE');
   for(let at=compact.indexOf(target);at>=0;at=compact.indexOf(target,at+1)){
    const start=positions[at]!,end=positions[at+target.length-1]!+1;
-   if(/\d/.test(paragraph[start]!)&&/\d/.test(paragraph[start-1]||'')||/\d/.test(paragraph[end-1]!)&&/\d/.test(paragraph[end]||''))continue;
+   if(/\d/.test(target[0]!)&&/\d/.test(compact[at-1]||'')||/\d/.test(target.at(-1)!)&&/\d/.test(compact[at+target.length]||''))continue;
    return{text:paragraph.slice(start,end),prefix:paragraph.slice(0,start)};
   }
   return fail('QUOTE');
@@ -76,7 +86,7 @@ export function validateBrief(output:string,prepared:PreparedBrief,publishedAt?:
   const adjacentYear=calendarText(match.prefix).match(/(?<!\d)(\d{4})\s*[年/.-]\s*$/)?.[1];
   return{text:match.text,year:adjacentYear||(years.length===1?years[0]:years.length?undefined:publishedYear)};
  });}
- function checkText(text:string,proof:string[]){if(forbidden.test(text))fail('VALUE');const supported=norm(proof.join(' ')).toLowerCase();for(const token of significant(text))if(!supported.includes(token.toLowerCase()))fail('VALUE');const numbers=new Set((proof.join(' ').normalize('NFKC').match(/\d+/g)||[]).map(value=>BigInt(value).toString()));for(const token of text.normalize('NFKC').match(/\d+/g)||[])if(!numbers.has(BigInt(token).toString()))fail('VALUE');}
+ function checkText(text:string,proof:string[]){if(forbidden.test(text))fail('VALUE');const supported=norm(proof.join(' ')).toLowerCase();for(const token of significant(text))if(!supported.includes(token.toLowerCase()))fail('VALUE');const numbers=new Set(proof.flatMap(row=>numericText(row).match(/\d+/g)||[]).map(value=>BigInt(value).toString()));for(const token of numericText(text).match(/\d+/g)||[])if(!numbers.has(BigInt(token).toString()))fail('VALUE');}
  if(data.publishedDate){quotes(data.publishedDate.evidence);if(!validDate(data.publishedDate.value)||!calendarProof(data.publishedDate.evidence).some(row=>datesIn(row.text,row.year).includes(data.publishedDate!.value)))fail();if(publication&&publication!==data.publishedDate.value)throw new AppError('BRIEF_DATE_CONFLICT','正文日期与已有发布日期不一致，待人工核对；请阅读原文。');}
  for(const value of [data.audience,...data.requirements,data.submission].filter((row):row is NonNullable<typeof row>=>Boolean(row)))checkText(value.text,quotes(value.evidence));
  for(const row of data.keyDates){const proof=quotes(row.evidence),dates=calendarProof(row.evidence);checkText(row.label,proof);checkText(row.rawText,proof);if(/补交|补充材料|复核/.test(row.label+row.rawText)&&!row.conditions?.trim())fail();if(row.conditions)checkText(row.conditions,proof);if(row.start)verifyTime(row.start,dates);if(row.end)verifyTime(row.end,dates);if(row.start&&row.end&&(row.start.value.slice(0,10)>row.end.value.slice(0,10)||row.start.precision==='minute'&&row.end.precision==='minute'&&Date.parse(row.start.value)>Date.parse(row.end.value)))fail();}

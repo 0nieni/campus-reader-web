@@ -75,3 +75,10 @@ test('evidence matching skips partial numeric occurrences before a later standal
  const p=prepareBrief('审核11月5日完成，报名1月5日截止。');
  assert.doesNotThrow(()=>validateBrief(JSON.stringify({keyDates:[{label:'报名截止',kind:'deadline',rawText:'1月5日',end:{value:'2026-01-05',precision:'date'},evidence:proof('p0001','1月5日')}],requirements:[]}),p,'2026-01-01'));
 });
+
+test('grouped digits in source amounts retain their numeric identity without joining calendar clocks',()=>{
+ for(const gap of ['\u202f','\u00a0',' ']){
+  const p=prepareBrief('报名费用为1'+gap+'000元。'),output=(amount:string)=>JSON.stringify({keyDates:[],requirements:[{text:'报名费用为'+amount+'元。',evidence:proof('p0001',p.body)}]});
+  assert.doesNotThrow(()=>validateBrief(output('1000'),p));assert.throws(()=>validateBrief(output('1'),p),{code:'BRIEF_EVIDENCE'});
+ }
+});
