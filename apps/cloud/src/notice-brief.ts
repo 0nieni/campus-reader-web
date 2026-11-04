@@ -57,10 +57,13 @@ export function validateBrief(output:string,prepared:PreparedBrief,publishedAt?:
   const original=byId.get(row.paragraphId);if(!original)fail('QUOTE');
   const paragraph=original.normalize('NFKC'),positions:number[]=[];let compact='';
   for(let i=0;i<paragraph.length;i++)if(!/\s/.test(paragraph[i]!)){positions.push(i);compact+=paragraph[i];}
-  const target=norm(row.quote),at=compact.indexOf(target);if(!target||at<0)fail('QUOTE');
-  const start=positions[at]!,end=positions[at+target.length-1]!+1;
-  if(/\d/.test(paragraph[start]!)&&/\d/.test(paragraph[start-1]||'')||/\d/.test(paragraph[end-1]!)&&/\d/.test(paragraph[end]||''))fail('QUOTE');
-  return{text:paragraph.slice(start,end),prefix:paragraph.slice(0,start)};
+  const target=norm(row.quote);if(!target)fail('QUOTE');
+  for(let at=compact.indexOf(target);at>=0;at=compact.indexOf(target,at+1)){
+   const start=positions[at]!,end=positions[at+target.length-1]!+1;
+   if(/\d/.test(paragraph[start]!)&&/\d/.test(paragraph[start-1]||'')||/\d/.test(paragraph[end-1]!)&&/\d/.test(paragraph[end]||''))continue;
+   return{text:paragraph.slice(start,end),prefix:paragraph.slice(0,start)};
+  }
+  return fail('QUOTE');
  }
  // Numeric tokens come from the matched source span. Whitespace inserted by
  // the model in a quote cannot turn room 103 into rooms 10 and 3.
@@ -70,7 +73,8 @@ export function validateBrief(output:string,prepared:PreparedBrief,publishedAt?:
   // Only earlier dates in this paragraph can supply the omitted year. A later
   // endpoint's year must not rewrite the beginning of a cross-year range.
   const match=matchedEvidence(row),years=[...new Set([...calendarText(match.prefix).matchAll(/(?<!\d)(\d{4})\s*[年/.-]\s*(\d{1,2})\s*[月/.-]\s*(\d{1,2})(?:\s*日)?(?!\d)/g)].filter(date=>validDate(`${date[1]}-${date[2]!.padStart(2,'0')}-${date[3]!.padStart(2,'0')}`)).map(date=>date[1]!))];
-  return{text:match.text,year:years.length===1?years[0]:years.length?undefined:publishedYear};
+  const adjacentYear=calendarText(match.prefix).match(/(?<!\d)(\d{4})\s*[年/.-]\s*$/)?.[1];
+  return{text:match.text,year:adjacentYear||(years.length===1?years[0]:years.length?undefined:publishedYear)};
  });}
  function checkText(text:string,proof:string[]){if(forbidden.test(text))fail('VALUE');const supported=norm(proof.join(' ')).toLowerCase();for(const token of significant(text))if(!supported.includes(token.toLowerCase()))fail('VALUE');const numbers=new Set((proof.join(' ').normalize('NFKC').match(/\d+/g)||[]).map(value=>BigInt(value).toString()));for(const token of text.normalize('NFKC').match(/\d+/g)||[])if(!numbers.has(BigInt(token).toString()))fail('VALUE');}
  if(data.publishedDate){quotes(data.publishedDate.evidence);if(!validDate(data.publishedDate.value)||!calendarProof(data.publishedDate.evidence).some(row=>datesIn(row.text,row.year).includes(data.publishedDate!.value)))fail();if(publication&&publication!==data.publishedDate.value)throw new AppError('BRIEF_DATE_CONFLICT','正文日期与已有发布日期不一致，待人工核对；请阅读原文。');}

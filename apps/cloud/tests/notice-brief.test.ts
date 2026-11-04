@@ -63,3 +63,15 @@ test('quote whitespace cannot split a source number into different numeric claim
  altered.submission.text='请送至九教北103室。';assert.doesNotThrow(()=>validateBrief(JSON.stringify(altered),room));
  altered.submission.evidence=proof('p0001','  ');assert.throws(()=>validateBrief(JSON.stringify(altered),room),{code:'BRIEF_EVIDENCE'});
 });
+
+test('a shortened date retains its own adjacent explicit year instead of an earlier date year',()=>{
+ const p=prepareBrief('2025年12月1日发布预通知，报名截止2026年11月5日。');
+ const output=(year:string)=>JSON.stringify({keyDates:[{label:'报名截止',kind:'deadline',rawText:'11月5日',end:{value:year+'-11-05',precision:'date'},evidence:proof('p0001','11月5日')}],requirements:[]});
+ assert.doesNotThrow(()=>validateBrief(output('2026'),p,'2026-01-01'));
+ assert.throws(()=>validateBrief(output('2025'),p,'2026-01-01'),{code:'BRIEF_EVIDENCE'});
+});
+
+test('evidence matching skips partial numeric occurrences before a later standalone date',()=>{
+ const p=prepareBrief('审核11月5日完成，报名1月5日截止。');
+ assert.doesNotThrow(()=>validateBrief(JSON.stringify({keyDates:[{label:'报名截止',kind:'deadline',rawText:'1月5日',end:{value:'2026-01-05',precision:'date'},evidence:proof('p0001','1月5日')}],requirements:[]}),p,'2026-01-01'));
+});
