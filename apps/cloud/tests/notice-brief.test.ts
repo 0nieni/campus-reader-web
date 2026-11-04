@@ -82,3 +82,13 @@ test('grouped digits in source amounts retain their numeric identity without joi
   assert.doesNotThrow(()=>validateBrief(output('1000'),p));assert.throws(()=>validateBrief(output('1'),p),{code:'BRIEF_EVIDENCE'});
  }
 });
+
+test('a date-only quote may end before the following source clock',()=>{
+ const p=prepareBrief('报名截止2026-11-05 17:00。');
+ assert.doesNotThrow(()=>validateBrief(JSON.stringify({keyDates:[{label:'报名截止',kind:'deadline',rawText:'2026-11-05',end:{value:'2026-11-05',precision:'date'},evidence:proof('p0001','2026-11-05')}],requirements:[]}),p));
+});
+test('spaces within source clock digits cannot silently become zero minutes',()=>{
+ const p=prepareBrief('报名截止2026年11月5日17:0 5。');
+ const output=(minute:string)=>JSON.stringify({keyDates:[{label:'报名截止',kind:'deadline',rawText:'2026年11月5日17:05',end:{value:'2026-11-05T17:'+minute+':00+08:00',precision:'minute'},evidence:proof('p0001',p.body)}],requirements:[]});
+ assert.doesNotThrow(()=>validateBrief(output('05'),p));assert.throws(()=>validateBrief(output('00'),p),{code:'BRIEF_EVIDENCE'});
+});

@@ -33,7 +33,8 @@ export function noticeBriefJobs(pool:SqlPool,options:Options){
  }
  // Fingerprints and task IDs use the same canonical article; appended archive
  // attachment text stays outside that fingerprint and never enters the model.
- const matches=(value:Awaited<ReturnType<typeof current>>,job:Row)=>{if(!value||value.signature!==job.signature)return false;const body=canonicalBriefBody(value.item.contentText!),tail=body.slice(job.raw_length);return body.length>=job.raw_length&&hash(body.slice(0,job.raw_length))===job.raw_hash&&(!tail||tail.startsWith('\n## 附件：'));};
+ const sameBody=(item:ItemRow,job:Row)=>{if(!item.contentText)return false;const body=canonicalBriefBody(item.contentText),tail=body.slice(job.raw_length);return body.length>=job.raw_length&&hash(body.slice(0,job.raw_length))===job.raw_hash&&(!tail||tail.startsWith('\n## 附件：'));};
+ const matches=(value:Awaited<ReturnType<typeof current>>,job:Row)=>Boolean(value&&value.signature===job.signature&&sameBody(value.item,job));
  // A small model verification budget must not stop at the first failed pages.
  const readLimit=Math.min(100,Math.max(0,options.dailyArticleReads??100));
  const backfill=options.article?noticeBriefBackfill(pool,{scope,now,readLimit,article:options.article,enabled:()=>options.enabled()&&Boolean(options.model()),
@@ -43,7 +44,7 @@ export function noticeBriefJobs(pool:SqlPool,options:Options){
    if(budget&&(budget.attempts>=callLimit||Number(budget.held_tokens)+Number(budget.used_tokens)>=tokenLimit))return false;
    return Number((await pool.query("SELECT count(*) AS count FROM campus_notice_briefs WHERE store_scope=$1 AND state IN ('pending','running') AND expires_at>$2",[scope,iso(now())])).rows[0].count)<Math.min(200,callLimit-Number(budget?.attempts||0));
   },eligible:async(id,school)=>(await current(pool,id,school,false,false))?.item||null,
-  known:async(row,school)=>{const value=await current(pool,row._id,school);if(!value)return false;return(await pool.query('SELECT * FROM campus_notice_briefs WHERE store_scope=$1 AND item_id=$2 ORDER BY created_at DESC LIMIT 8',[scope,row._id])).rows.some(job=>matches(value,job)&&Date.parse(job.expires_at)>now());},enqueue}):null;
+  known:async(row,school)=>{const value=await current(pool,row._id,school);if(!value)return false;return(await pool.query('SELECT * FROM campus_notice_briefs WHERE store_scope=$1 AND item_id=$2 ORDER BY created_at DESC LIMIT 8',[scope,row._id])).rows.some(job=>(matches(value,job)||job.state==='uncertain'&&sameBody(value.item,job))&&Date.parse(job.expires_at)>now());},enqueue}):null;
  async function enqueue(row:ItemRow,school:string,body:string){
   if(!options.enabled()||!options.model()||isPrivate(row))return false;
   const latest=await current(pool,row._id,school);if(!latest||!latest.item.contentText!.startsWith(body))return false;
@@ -55,6 +56,7 @@ export function noticeBriefJobs(pool:SqlPool,options:Options){
    await sql.query('SELECT store_scope FROM campus_notice_brief_workers WHERE store_scope=$1 FOR UPDATE',[scope]);
    const count=Number((await sql.query("SELECT count(*) AS count FROM campus_notice_briefs WHERE store_scope=$1 AND state IN ('pending','running') AND expires_at>$2",[scope,iso(now())])).rows[0].count);if(count>=200)return false;
    if(!matches(await current(sql,row._id,school,true),{signature:latest.signature,raw_length:length,raw_hash:fingerprint}))return false;
+   if((await sql.query("SELECT id FROM campus_notice_briefs WHERE store_scope=$1 AND item_id=$2 AND state='uncertain' AND raw_hash=$3 AND raw_length=$4 AND expires_at>$5 LIMIT 1",[scope,row._id,fingerprint,length,iso(now())])).rows.length)return false;
    const budget=(await sql.query('SELECT * FROM campus_notice_brief_budget WHERE store_scope=$1 AND day=$2',[scope,day(now())])).rows[0],defer=budget&&(budget.attempts>=callLimit||Number(budget.held_tokens)+Number(budget.used_tokens)>=tokenLimit);
    const result=await sql.query("INSERT INTO campus_notice_briefs(id,store_scope,item_id,school_id,source_id,signature,content_hash,raw_hash,raw_length,input,state,available_at,created_at,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,'pending',$11,$12,$13) ON CONFLICT DO NOTHING RETURNING id",[id,scope,row._id,school,latest.sourceId,latest.signature,prepared.contentHash,fingerprint,length,JSON.stringify(prepared),defer?iso(Date.parse(day(now())+'T00:00:00+08:00')+86400000):iso(now()),iso(now()),latest.item.materialExpiresAt||iso(now()+year)]);return result.rows.length>0;
   });
@@ -62,10 +64,22 @@ export function noticeBriefJobs(pool:SqlPool,options:Options){
  }
  async function wake(){
   if(!options.enabled()||!options.dispatch)return;
+  await resumeBudgetDeferrals();
   const historyDue=backfill?await backfill.due():false;
   await pool.query('INSERT INTO campus_notice_brief_workers(store_scope) VALUES($1) ON CONFLICT DO NOTHING',[scope]);
   const due=(await pool.query("UPDATE campus_notice_brief_workers SET dispatch_after=$2 WHERE store_scope=$1 AND dispatch_after<=$3 AND (EXISTS(SELECT 1 FROM campus_notice_briefs WHERE store_scope=$1 AND state='pending' AND available_at<=$3 AND expires_at>$3) OR $4::boolean) RETURNING store_scope",[scope,iso(now()+60000),iso(now()),historyDue])).rows.length;
   if(due)await options.dispatch().catch(()=>{}); // durable queue survives dispatcher failure
+ }
+ async function resumeBudgetDeferrals(){
+  if(!options.enabled()||!options.model()||!callLimit||!tokenLimit)return;
+  // Both explicit quota deferrals and old never-attempted queue entries may
+  // resume after a limit increase. No ledger, attempt or unknown state resets.
+  await pool.query(`UPDATE campus_notice_briefs SET available_at=$2,message=NULL
+   WHERE store_scope=$1 AND state='pending' AND quota_settled=true AND available_at>$2 AND expires_at>$2
+   AND (message='今日自动摘要独立额度已用完，等待下一日；不影响正文或个人AI阅读额度。'
+    OR (message IS NULL AND attempts=0 AND quota_day IS NULL AND available_at>created_at))
+   AND NOT EXISTS(SELECT 1 FROM campus_notice_brief_budget WHERE store_scope=$1 AND day=$3
+    AND (attempts>=$4 OR held_tokens+used_tokens>=$5))`,[scope,iso(now()),day(now()),callLimit,tokenLimit]);
  }
  async function get(row:ItemRow,school:string):Promise<NoticeBrief>{
   const base={checkedAt:iso(now()),attachmentsRead:false as const},latest=await current(pool,row._id,school);
@@ -90,6 +104,7 @@ export function noticeBriefJobs(pool:SqlPool,options:Options){
   const acquired=(await pool.query('UPDATE campus_notice_brief_workers SET lease_id=$2,lease_until=$3 WHERE store_scope=$1 AND lease_until<=$4 RETURNING store_scope',[scope,worker,iso(now()+14*60000),iso(now())])).rows.length;if(!acquired)return{processed:0,more:false};
   let processed=0,more=false;
   try{
+   await resumeBudgetDeferrals();
    // A crashed call has an unknown billing result; never reclaim it for sending.
    await tx(async sql=>{const expired=(await sql.query("SELECT * FROM campus_notice_briefs WHERE store_scope=$1 AND state='running' AND lease_until<=$2 FOR UPDATE",[scope,iso(now())])).rows;for(const job of expired){await settle(sql,job,job.reserved_tokens);await sql.query("UPDATE campus_notice_briefs SET state='uncertain',input='{}',error_code='MODEL_UNCERTAIN',message='上次请求结果不明，已停止自动重试，请先核查服务商用量。' WHERE id=$1",[job.id]);}});
    if(backfill)await backfill.run(Math.min(deadline-40000,now()+2*60000));

@@ -39,6 +39,7 @@ function dateExpressions(quote:string,publishedYear?:string){
  return{text,dates};
 }
 const datesIn=(quote:string,publishedYear?:string)=>dateExpressions(quote,publishedYear).dates.map(row=>row.value);
+const endsInDate=(text:string)=>{const parsed=dateExpressions(text,'2000');return parsed.dates.some(date=>date.end===parsed.text.length);};
 function numericText(value:string){
  // Retain source digit grouping, but a valid calendar date followed by another
  // number (often a clock) is a boundary, never part of that grouped number.
@@ -54,9 +55,10 @@ function verifyTime(value:BriefTime,quotes:{text:string;year?:string}[]){
  if(value.precision==='date'){if(value.value!==date)fail();return;}
  if(!/^\d{4}-\d\d-\d\dT\d\d:\d\d:00\+08:00$/.test(value.value)||!Number.isFinite(Date.parse(value.value)))fail();
  const hour=Number(value.value.slice(11,13)),minute=Number(value.value.slice(14,16));if(hour>23||minute>59)fail();
- if(!quotes.some(quote=>{const{text,dates}=dateExpressions(quote.text,quote.year);return[...text.matchAll(/(\d{1,2})\s*[:时点]\s*(\d{2})?(?:\s*分)?/g)].some(match=>{
+ if(!quotes.some(quote=>{const{text,dates}=dateExpressions(quote.text,quote.year);return[...text.matchAll(/(?<!\d)(\d(?:\s*\d)?)\s*([:时点])(?:\s*(\d(?:\s*\d)?)(?!\s*\d)(?:\s*分)?)?(?!\s*\d)/g)].some(match=>{
   const at=match.index!,dated=dates.filter(row=>row.end<=at).at(-1);if(!dated||dated.value!==date||/[。！？；;]/.test(text.slice(dated.end,at)))return false;
-  let h=Number(match[1]);if(h<12&&/下午|晚上/.test(text.slice(Math.max(dated.end,at-4),at)))h+=12;return h===hour&&Number(match[2]||0)===minute;
+  if(match[2]===':'&&!match[3])return false;
+  let h=Number(match[1]!.replace(/\s/g,''));if(h<12&&/下午|晚上/.test(text.slice(Math.max(dated.end,at-4),at)))h+=12;return h===hour&&Number((match[3]||'0').replace(/\s/g,''))===minute;
  });}))fail();
 }
 function significant(text:string){return text.normalize('NFKC').match(/https?:\/\/[^\s，。；、)）]+|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}|(?:Word|PDF|Excel|EMS)/gi)||[];}
@@ -70,7 +72,10 @@ export function validateBrief(output:string,prepared:PreparedBrief,publishedAt?:
   const target=norm(row.quote);if(!target)fail('QUOTE');
   for(let at=compact.indexOf(target);at>=0;at=compact.indexOf(target,at+1)){
    const start=positions[at]!,end=positions[at+target.length-1]!+1;
-   if(/\d/.test(target[0]!)&&/\d/.test(compact[at-1]||'')||/\d/.test(target.at(-1)!)&&/\d/.test(compact[at+target.length]||''))continue;
+   const before=paragraph.slice(0,start),after=paragraph.slice(end);
+   const joinedBefore=/\d/.test(target[0]!)&&(/\d$/.test(before)||/\d\s+$/.test(before)&&!endsInDate(before.trimEnd()));
+   const joinedAfter=/\d/.test(target.at(-1)!)&&(/^\d/.test(after)||/^\s+\d/.test(after)&&!endsInDate(paragraph.slice(0,end)));
+   if(joinedBefore||joinedAfter)continue;
    return{text:paragraph.slice(start,end),prefix:paragraph.slice(0,start)};
   }
   return fail('QUOTE');

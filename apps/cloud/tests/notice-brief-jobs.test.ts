@@ -52,6 +52,16 @@ test('independent brief SQL queue, permissions, reservations and uncertain calls
    let calls=0;const jobs=noticeBriefJobs(pool,{scope:'budget',now:()=>clock,enabled:()=>true,model,dailyCalls:1,dailyTokens:100000,complete:async()=>{calls++;return{text:output()};}});
    for(const id of ['brief_budget_a','brief_budget_b'])await jobs.enqueue(await put(id),'bjtu',text);await jobs.run();assert.equal(calls,1);const budget=(await pool.query("SELECT * FROM campus_notice_brief_budget WHERE store_scope='budget'")).rows[0];assert.ok(Number(budget.used_tokens)>1500);assert.equal(Number(budget.held_tokens),0);await jobs.run();assert.equal(calls,1);clock+=86400000;await jobs.run();assert.equal(calls,2);
   });
+  await t.test('raising a daily budget resumes quota-deferred and legacy pending jobs without resetting usage or uncertain work',async()=>{
+   let calls=0;const options={scope:'raised-budget',now:()=>clock,enabled:()=>true,model,complete:async()=>{calls++;return{text:output(),usage:{inputTokens:10,outputTokens:10,totalTokens:20}};}};
+   const first=noticeBriefJobs(pool,{...options,dailyCalls:1});await first.enqueue(await put('raised_a'),'bjtu',text);await first.enqueue(await put('raised_b'),'bjtu',text);await first.run();assert.equal(calls,1);
+   await first.enqueue(await put('raised_c'),'bjtu',text);
+   await pool.query("UPDATE campus_notice_briefs SET message=NULL WHERE store_scope='raised-budget' AND item_id='raised_c'");
+   const uncertain=await put('raised_unknown');const unknown=noticeBriefJobs(pool,{...options,scope:'raised-unknown',dailyCalls:1,complete:async()=>{throw Object.assign(Error('Synthetic unknown'),{code:'MODEL_UNCERTAIN'});}});await unknown.enqueue(uncertain,'bjtu',text);await unknown.run();
+   await noticeBriefJobs(pool,{...options,dailyCalls:3}).run();assert.equal(calls,3);
+   const budget=(await pool.query("SELECT attempts,used_tokens,held_tokens FROM campus_notice_brief_budget WHERE store_scope='raised-budget'")).rows[0];assert.equal(budget.attempts,3);assert.equal(Number(budget.used_tokens),60);assert.equal(Number(budget.held_tokens),0);
+   assert.equal((await pool.query("SELECT state FROM campus_notice_briefs WHERE store_scope='raised-unknown'")).rows[0].state,'uncertain');
+  });
   await t.test('private/import-only/disabled sources and short/contaminated bodies are not sent',async()=>{
    let calls=0;const jobs=noticeBriefJobs(pool,{scope:'policy',now:()=>clock,enabled:()=>true,model,complete:async()=>{calls++;return{text:output()};}}),row=await put('brief_private');await db.collection('items').doc(row._id).update({ownerOpenid:'another-account',scope:'private'});assert.equal(await jobs.enqueue(row,'bjtu',text),false);assert.equal((await jobs.get(row,'bjtu')).state,'unavailable');
    const blocked=await put('brief_blocked');await db.collection('sources').doc('brief_source').update({allowAi:false});assert.equal(await jobs.enqueue(blocked,'bjtu',text),false);await db.collection('sources').doc('brief_source').update({allowAi:true});
@@ -73,6 +83,7 @@ test('independent brief SQL queue, permissions, reservations and uncertain calls
   await t.test('unknown calls retain conservative charge and never auto-resend; stale leases are reconciled',async()=>{
    const row=await put('brief_unknown');let calls=0;const jobs=noticeBriefJobs(pool,{scope:'unknown',now:()=>clock,enabled:()=>true,model,complete:async()=>{calls++;throw Object.assign(Error('Synthetic provider interruption'),{code:'MODEL_UNCERTAIN'});}});await jobs.enqueue(row,'bjtu',text);await jobs.run();await jobs.run();assert.equal(calls,1);assert.equal((await jobs.get(row,'bjtu')).state,'failed');const q=(await pool.query("SELECT * FROM campus_notice_brief_budget WHERE store_scope='unknown'")).rows[0];assert.ok(Number(q.used_tokens)>0);assert.equal(Number(q.held_tokens),0);
    await pool.query("UPDATE campus_notice_briefs SET state='running',quota_settled=false,lease_until=$1 WHERE store_scope='unknown'",[new Date(clock-1000).toISOString()]);await pool.query("UPDATE campus_notice_brief_budget SET used_tokens=0,held_tokens=$1 WHERE store_scope='unknown'",[Number(q.used_tokens)]);await cleanupNoticeBriefs(pool,clock);await jobs.run();assert.equal(calls,1);assert.equal((await pool.query("SELECT state FROM campus_notice_briefs WHERE store_scope='unknown'")).rows[0].state,'uncertain');
+   await pool.query("UPDATE campus_notice_briefs SET id=id||'-previous',signature='previous-parser-version' WHERE store_scope='unknown'");assert.equal(await jobs.enqueue(row,'bjtu',text),false,'A parser release must not resend the same unknown article');
   });
  }finally{await native.end();await server.stop();}
 });
