@@ -50,3 +50,16 @@ test('calendar parsing preserves spaces separating numeric dates and clocks with
  const p=prepareBrief('报名编号2026-11-0517:00，未公布截止时间。');
  assert.throws(()=>validateBrief(JSON.stringify({keyDates:[{label:'报名',kind:'deadline',rawText:p.body,end:{value:'2026-11-05T17:00:00+08:00',precision:'minute'},evidence:proof('p0001',p.body)}],requirements:[]}),p),{code:'BRIEF_EVIDENCE'});
 });
+
+test('later explicit years do not rewrite earlier range endpoints',()=>{
+ const p=prepareBrief('报名时间为12月25日至2027年1月5日。');
+ const range={keyDates:[{label:'报名时间',kind:'period',rawText:p.body,start:{value:'2026-12-25',precision:'date'},end:{value:'2027-01-05',precision:'date'},evidence:proof('p0001',p.body)}],requirements:[]};
+ assert.doesNotThrow(()=>validateBrief(JSON.stringify(range),p,'2026-12-01'));
+});
+test('quote whitespace cannot split a source number into different numeric claims',()=>{
+ const room=prepareBrief('请将纸质版材料送至九教北103室。');
+ const altered={submission:{text:'请送至九教北10室。',evidence:proof('p0001','请将纸质版材料送至九教北10 3室。')},keyDates:[],requirements:[]};
+ assert.throws(()=>validateBrief(JSON.stringify(altered),room),{code:'BRIEF_EVIDENCE'});
+ altered.submission.text='请送至九教北103室。';assert.doesNotThrow(()=>validateBrief(JSON.stringify(altered),room));
+ altered.submission.evidence=proof('p0001','  ');assert.throws(()=>validateBrief(JSON.stringify(altered),room),{code:'BRIEF_EVIDENCE'});
+});

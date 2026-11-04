@@ -53,13 +53,24 @@ function significant(text:string){return text.normalize('NFKC').match(/https?:\/
 export function validateBrief(output:string,prepared:PreparedBrief,publishedAt?:string):BriefContent{
  let parsed:unknown;try{parsed=JSON.parse(output);}catch{return fail('JSON');}const result=schema.safeParse(parsed);if(!result.success)return fail('SCHEMA');const data=result.data;if(!data.publishedDate&&!data.audience&&!data.keyDates.length&&!data.requirements.length&&!data.submission)fail('EMPTY');
  const byId=new Map(prepared.paragraphs.map(row=>[row.id,row.text]));
- function quotes(rows:BriefEvidence[]){return rows.map(row=>{const paragraph=byId.get(row.paragraphId);if(!paragraph||!norm(paragraph).includes(norm(row.quote)))fail('QUOTE');return row.quote;});}
+ function matchedEvidence(row:BriefEvidence){
+  const original=byId.get(row.paragraphId);if(!original)fail('QUOTE');
+  const paragraph=original.normalize('NFKC'),positions:number[]=[];let compact='';
+  for(let i=0;i<paragraph.length;i++)if(!/\s/.test(paragraph[i]!)){positions.push(i);compact+=paragraph[i];}
+  const target=norm(row.quote),at=compact.indexOf(target);if(!target||at<0)fail('QUOTE');
+  const start=positions[at]!,end=positions[at+target.length-1]!+1;
+  if(/\d/.test(paragraph[start]!)&&/\d/.test(paragraph[start-1]||'')||/\d/.test(paragraph[end-1]!)&&/\d/.test(paragraph[end]||''))fail('QUOTE');
+  return{text:paragraph.slice(start,end),prefix:paragraph.slice(0,start)};
+ }
+ // Numeric tokens come from the matched source span. Whitespace inserted by
+ // the model in a quote cannot turn room 103 into rooms 10 and 3.
+ function quotes(rows:BriefEvidence[]){return rows.map(row=>matchedEvidence(row).text);}
  const publication=briefPublicationDay(publishedAt),publishedYear=publication?.slice(0,4);
  function calendarProof(rows:BriefEvidence[]){return rows.map(row=>{
-  // A short exact quote may omit a year explicitly stated elsewhere in this
-  // same paragraph. Examination/title years and ambiguous years are excluded.
-  const years=[...new Set([...calendarText(byId.get(row.paragraphId)!).matchAll(/(?<!\d)(\d{4})\s*[年/.-]\s*(\d{1,2})\s*[月/.-]\s*(\d{1,2})(?:\s*日)?(?!\d)/g)].filter(match=>validDate(`${match[1]}-${match[2]!.padStart(2,'0')}-${match[3]!.padStart(2,'0')}`)).map(match=>match[1]!))];
-  return{text:row.quote,year:years.length===1?years[0]:years.length?undefined:publishedYear};
+  // Only earlier dates in this paragraph can supply the omitted year. A later
+  // endpoint's year must not rewrite the beginning of a cross-year range.
+  const match=matchedEvidence(row),years=[...new Set([...calendarText(match.prefix).matchAll(/(?<!\d)(\d{4})\s*[年/.-]\s*(\d{1,2})\s*[月/.-]\s*(\d{1,2})(?:\s*日)?(?!\d)/g)].filter(date=>validDate(`${date[1]}-${date[2]!.padStart(2,'0')}-${date[3]!.padStart(2,'0')}`)).map(date=>date[1]!))];
+  return{text:match.text,year:years.length===1?years[0]:years.length?undefined:publishedYear};
  });}
  function checkText(text:string,proof:string[]){if(forbidden.test(text))fail('VALUE');const supported=norm(proof.join(' ')).toLowerCase();for(const token of significant(text))if(!supported.includes(token.toLowerCase()))fail('VALUE');const numbers=new Set((proof.join(' ').normalize('NFKC').match(/\d+/g)||[]).map(value=>BigInt(value).toString()));for(const token of text.normalize('NFKC').match(/\d+/g)||[])if(!numbers.has(BigInt(token).toString()))fail('VALUE');}
  if(data.publishedDate){quotes(data.publishedDate.evidence);if(!validDate(data.publishedDate.value)||!calendarProof(data.publishedDate.evidence).some(row=>datesIn(row.text,row.year).includes(data.publishedDate!.value)))fail();if(publication&&publication!==data.publishedDate.value)throw new AppError('BRIEF_DATE_CONFLICT','正文日期与已有发布日期不一致，待人工核对；请阅读原文。');}
