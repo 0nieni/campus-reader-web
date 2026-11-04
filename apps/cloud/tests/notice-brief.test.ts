@@ -31,3 +31,13 @@ test('minute evidence associates each clock with its own date rather than anothe
  const range=prepareBrief('2026年11月1日09:00至17:00可以报名。');
  assert.doesNotThrow(()=>validateBrief(JSON.stringify({keyDates:[{label:'报名',kind:'period',rawText:range.body,start:{value:'2026-11-01T09:00:00+08:00',precision:'minute'},end:{value:'2026-11-01T17:00:00+08:00',precision:'minute'},evidence:proof('p0001',range.body)}],requirements:[]}),range,'2026-10-30'));
 });
+
+test('official dotted dates and an unambiguous calendar year in the same evidence paragraph are supported',()=>{
+ const dotted=prepareBrief('更新时间：2026.9.24, 15:09');
+ assert.doesNotThrow(()=>validateBrief(JSON.stringify({publishedDate:{value:'2026-09-24',precision:'date',evidence:proof('p0001',dotted.body)},keyDates:[],requirements:[]}),dotted));
+ const p=prepareBrief('2027年硕士考试通知。\n学院在2026年9月22日上午9:00发送复试通知，9月24日上午8:00发送待录取通知。');
+ const value=(year:string)=>JSON.stringify({keyDates:[{label:'发送待录取通知',kind:'event',rawText:'9月24日上午8:00发送待录取通知',start:{value:year+'-09-24T08:00:00+08:00',precision:'minute'},evidence:proof('p0002','9月24日上午8:00发送待录取通知')}],requirements:[]});
+ assert.doesNotThrow(()=>validateBrief(value('2026'),p));assert.throws(()=>validateBrief(value('2027'),p),{code:'BRIEF_EVIDENCE'});
+ const ambiguous=prepareBrief('2025年9月22日发送第一轮通知，2026年9月22日发送第二轮通知，9月24日上午8:00发送待录取通知。');
+ const altered=JSON.parse(value('2026'));altered.keyDates[0].evidence[0].paragraphId='p0001';assert.throws(()=>validateBrief(JSON.stringify(altered),ambiguous),{code:'BRIEF_EVIDENCE'});
+});

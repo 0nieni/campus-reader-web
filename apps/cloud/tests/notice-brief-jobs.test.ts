@@ -57,6 +57,12 @@ test('independent brief SQL queue, permissions, reservations and uncertain calls
    const blocked=await put('brief_blocked');await db.collection('sources').doc('brief_source').update({allowAi:false});assert.equal(await jobs.enqueue(blocked,'bjtu',text),false);await db.collection('sources').doc('brief_source').update({allowAi:true});
    const contaminated=await put('brief_navigation','首页 硕士招生 博士招生 首页 内容 版权所有');assert.equal(await jobs.enqueue(contaminated,'bjtu',contaminated.contentText),false);assert.equal((await jobs.get(contaminated,'bjtu')).state,'unavailable');await jobs.run();assert.equal(calls,0);
   });
+  await t.test('invalid output stores only a fixed diagnostic and never publishes or automatically resends it',async()=>{
+   const row=await put('brief_invalid_diagnostic');let calls=0;const jobs=noticeBriefJobs(pool,{scope:'diagnostic',now:()=>clock,enabled:()=>true,model,complete:async()=>{calls++;return{text:'invalid provider output that must not be retained',usage:{inputTokens:10,outputTokens:10,totalTokens:20}};}});
+   await jobs.enqueue(row,'bjtu',text);await jobs.run();await jobs.run();assert.equal(calls,1);
+   const saved=(await pool.query("SELECT state,error_code,input,result FROM campus_notice_briefs WHERE store_scope='diagnostic'")).rows[0];assert.deepEqual(saved,{state:'failed',error_code:'BRIEF_EVIDENCE_JSON',input:{},result:null});
+   const visible=await jobs.get(row,'bjtu');assert.equal(visible.state,'failed');assert.equal('content' in visible,false);assert.equal(JSON.stringify(visible).includes('provider output'),false);
+  });
   await t.test('changes during generation discard old results, while new content gets a new task',async()=>{
    const row=await put('brief_changing');let calls=0;const jobs=noticeBriefJobs(pool,{scope:'changes',now:()=>clock,enabled:()=>true,model,complete:async()=>{calls++;await db.collection('items').doc(row._id).update({contentText:text+'\n正文已经修改。'});return{text:output(),usage:{inputTokens:20,outputTokens:20,totalTokens:40}};}});await jobs.enqueue(row,'bjtu',text);await jobs.run();assert.equal((await jobs.get(row,'bjtu')).state,'stale');assert.equal(calls,1);
    const changed=(await pool.query("SELECT body FROM campus_documents WHERE collection='items' AND id=$1",[row._id])).rows[0].body;assert.equal(await jobs.enqueue({...changed,_id:row._id},'bjtu',changed.contentText),true);

@@ -119,9 +119,11 @@ export function noticeBriefJobs(pool:SqlPool,options:Options){
      });
     }catch(error){
      const candidate=error&&typeof error==='object'&&'code' in error?String(error.code):'',code=/^[A-Z][A-Z0-9_]{1,60}$/.test(candidate)?candidate:'MODEL_UNCERTAIN',uncertain=sent&&!completion&& !['KEY_REJECTED','MODEL_INVALID','PROVIDER_RATE_LIMITED','INPUT_TOO_LONG','CONTEXT_TOO_LONG','UNSUPPORTED_PROVIDER','KEY_INVALID'].includes(code);
+     // Persist only a fixed diagnostic category, never the provider response.
+     const detail=code==='BRIEF_EVIDENCE'&&error instanceof AppError&&'briefDiagnostic' in error?String(error.briefDiagnostic):'',diagnostic=/^BRIEF_EVIDENCE_(JSON|SCHEMA|EMPTY|QUOTE|VALUE|DATE)$/.test(detail)?detail:code;
      await tx(async sql=>{const actual=(await sql.query('SELECT * FROM campus_notice_briefs WHERE id=$1 FOR UPDATE',[job.id])).rows[0];if(actual.state!=='running'||actual.lease_id!==token)return;
       await settle(sql,actual,completion?.usage?.totalTokens??(sent?actual.reserved_tokens:0),completion?.usage);
-      await sql.query("UPDATE campus_notice_briefs SET state=$2,input='{}',message=$3,error_code=$4,lease_id=NULL WHERE id=$1",[job.id,uncertain?'uncertain':code==='BRIEF_STALE'?'stale':'failed',uncertain?'模型请求结果不明，已停止自动重试；可继续阅读原文。':code==='BRIEF_EVIDENCE'||code==='BRIEF_DATE_CONFLICT'?'摘要依据或日期未通过核验，请以原文为准。':'摘要暂未生成成功，请先阅读原文；未占用个人AI阅读次数。',code]);
+      await sql.query("UPDATE campus_notice_briefs SET state=$2,input='{}',message=$3,error_code=$4,lease_id=NULL WHERE id=$1",[job.id,uncertain?'uncertain':code==='BRIEF_STALE'?'stale':'failed',uncertain?'模型请求结果不明，已停止自动重试；可继续阅读原文。':code==='BRIEF_EVIDENCE'||code==='BRIEF_DATE_CONFLICT'?'摘要依据或日期未通过核验，请以原文为准。':'摘要暂未生成成功，请先阅读原文；未占用个人AI阅读次数。',diagnostic]);
      });
     }processed++;
    }
