@@ -7,11 +7,20 @@ import { automaticSearchQuery } from '../src/chat-web-tools';
 
 test('direct search keeps ordinary joined words, dates and Unicode subjects without a topic whitelist', () => {
   for (const question of ['最近有什么比赛吗', '2026年11月 学科竞赛 报名通知', 'TypeScript プライベート 教程', '你好']) {
-    assert.equal(automaticSearchQuery(question, '北京交通大学'), `北京交通大学 ${question}`);
+    assert.equal(automaticSearchQuery(question, '北京交通大学'), question);
   }
   assert.equal(Array.from(automaticSearchQuery('长问题'.repeat(200), '北京交通大学')!).length, 128);
-  assert.equal(automaticSearchQuery('TypeScript\n教程', '北京交通大学'), '北京交通大学 TypeScript 教程');
+  assert.equal(automaticSearchQuery('TypeScript\n教程', '北京交通大学'), 'TypeScript 教程');
   assert.equal(automaticSearchQuery('  ', '北京交通大学'), null);
+});
+
+test('only explicit campus questions receive the current school, while external and named schools stay global', () => {
+  for (const question of ['最近本校有什么比赛', '最近学校有什么比赛', '我校报名通知', '校内有哪些讲座']) {
+    assert.equal(automaticSearchQuery(question, '北京交通大学'), `北京交通大学 ${question}`);
+  }
+  for (const question of ['清华大学最近有什么比赛', '其他学校的比赛', '全国学校的比赛', '外校有哪些公开讲座', '北京交通大学有什么比赛']) {
+    assert.equal(automaticSearchQuery(question, '北京交通大学'), question);
+  }
 });
 
 test('explicit offline requests are the exception to default search', () => {

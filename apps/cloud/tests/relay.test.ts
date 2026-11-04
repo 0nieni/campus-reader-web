@@ -114,7 +114,7 @@ test('readiness checks verify caller and shared secret without creating tasks or
   const s = setup()
   const request = new Request('https://reader.netlify.app/.netlify/functions/ai', { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ action: 'ai.status', input: {} }) })
   const response = await s.handler(request), status = await response.json() as any
-  assert.equal(status.data.officialConfigured, true); assert.equal(status.data.quota.remaining, 3)
+  assert.equal(status.data.officialConfigured, true); assert.equal(status.data.quota.remaining, null)
   assert.equal(s.calls(), 0); assert.equal(s.f.rows('web_ai_tasks').size, 0)
   const signed = signedRelay({ phase: 'check', taskId: 'relay_status_probe', step: 0, leaseId: 'lease_status_probe', timestamp: Date.now() }, 'wrong-secret-not-real'.repeat(2))
   await assert.rejects(s.ai.handle('ai.relay', signed, identity), { code: 'RELAY_FORBIDDEN' })

@@ -83,7 +83,7 @@ export function createRelayHandler(options: Options) {
         const data = envelope.data
         if (!data || typeof data !== 'object') reject('RELAY_RESPONSE_INVALID', '云端未返回当前阅读任务的状态。')
         if (phase === 'check') {
-          if (!('quota' in data) || typeof data.officialConfigured !== 'boolean' || !data.quota || typeof data.quota.remaining !== 'number') reject('RELAY_RESPONSE_INVALID', '云端未返回有效的额度状态。')
+          if (!('quota' in data) || typeof data.officialConfigured !== 'boolean' || !data.quota || !(typeof data.quota.remaining === 'number' || data.quota.remaining === null && data.quota.limit === null)) reject('RELAY_RESPONSE_INVALID', '云端未返回有效的额度状态。')
         } else if (!('kind' in data)) {
           if (!('id' in data) || data.id !== taskId || !Number.isInteger(data.step) || !['ready', 'running', 'complete', 'failed', 'uncertain', 'cancelled'].includes(data.state)) reject('RELAY_RESPONSE_INVALID', '云端未返回当前阅读任务的状态。')
         }

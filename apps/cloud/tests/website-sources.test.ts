@@ -63,11 +63,11 @@ test('personal website lifecycle, isolation, concurrency, free-summary shutdown 
    const listed=await websites.handle('sources.list',{schoolId:'bjtu'},owner) as any;
    assert.equal(listed.sources[0].nextRefreshAt,new Date(time+60*60000).toISOString());assert.equal(listed.sources[0].lastErrorCode,null);assert.deepEqual(listed.sources[0].lastCollection,result.stats);
   });
-  await t.test('imported material requires the normal private AI policy and charges one of three only after completing a reading',async()=>{
+  await t.test('imported material requires the normal private AI policy and records one successful use only after completing a reading',async()=>{
    const row=(await sql.query("SELECT id FROM campus_documents WHERE collection='items' AND body->>'sourceId'=$1",[a.id])).rows[0]!;
    const db=postgresStorage(sql);const pack=await readingPackage(db,repo,'owner','bjtu',[row.id]);assert.equal(pack.docs.length,1);
    let modelCalls=0;const ai=aiService(db,repo,async()=>{modelCalls++;return '报名截止10月25日。[R1](https://notice.example.edu.cn/info/1/12345.htm)';},()=>time);
-   const q=(await ai.handle('ai.status',{},owner) as any).quota;assert.equal(q.limit,3);assert.equal(q.used,0);
+   const q=(await ai.handle('ai.status',{},owner) as any).quota;assert.equal(q.limit,null);assert.equal(q.used,0);
    let task=await ai.handle('ai.start',{schoolId:'bjtu',itemIds:[row.id],requestId:'website_import_reading_task',service:'official',task:'summary'},owner) as any;
    while(task.state==='ready')task=await ai.handle('ai.step',{taskId:task.id,step:task.step},owner);
    assert.equal(task.state,'complete');assert.ok(modelCalls>0);assert.equal((await ai.handle('ai.status',{},owner) as any).quota.used,1);assert.equal((await ai.handle('ai.status',{},member) as any).quota.used,0);

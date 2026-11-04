@@ -71,7 +71,8 @@ export interface WebsiteSource extends WebsiteSourceInput {id:string;enabled:boo
 export interface AiConnection { provider: "deepseek" | "openai"; model: string; apiKey: string }
 export type { AiProviderProtocol, AiProviderRef, AiSavedProvider, AiProviderSelection, AiProviderState, AiProviderSave } from './ai-providers';
 import type { AiProviderActions, AiProviderRef } from './ai-providers';
-export interface AiQuota { day: string; timezone: "Asia/Shanghai"; limit: number; used: number; held: number; remaining: number; resetsAt: string }
+// null limit/remaining means there is no per-account daily question cap.
+export interface AiQuota { day: string; timezone: "Asia/Shanghai"; limit: number | null; used: number; held: number; remaining: number | null; resetsAt: string }
 export interface ReadingDocument { reference: string; itemId: string; schoolId: string | null; title: string; originalUrl: string | null; version: string; markdown: string }
 export interface ReadingPackage { docs: ReadingDocument[]; guide: string; manifest: Record<string, unknown>; batches: number; maxCalls: number; fingerprint: string }
 export interface ReadingTask {

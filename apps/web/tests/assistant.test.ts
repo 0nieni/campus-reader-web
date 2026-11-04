@@ -34,6 +34,13 @@ function fakeTransport(override?: (action: string, input: any) => unknown): Tran
 }
 const mounted: ReturnType<typeof mount>[] = [];
 function open(fake: Transport, selection: Notice[] = []) { const w = mount(AssistantPanel, { props: { transport: fake, schoolId: 'bjtu', selection } }); mounted.push(w); return w; }
+it('unlimited official daily usage allows another question and does not show an exhausted daily allowance', async () => {
+  const fake = fakeTransport(a => a === 'ai.status' ? { quota: { limit: null, remaining: null, used: 7, held: 2 }, officialConfigured: true, officialModel: 'chat', providers: [] } : undefined);
+  const w = open(fake); await flushPromises(); await w.get('#assistant-question').setValue('继续提问');
+  expect(w.get('[data-test="send"]').attributes('disabled')).toBeUndefined();
+  expect(w.text()).toContain('不限每日提问次数');
+  expect(w.text()).not.toContain('每天最多 3 次'); expect(w.text()).not.toContain('今日官方额度已用完');
+});
 function openWithSettings(fake:Transport) {
  const Harness=defineComponent({props:['transport','schoolId','selection'],setup(props){
   const change=ref<ReadingSettingsChange|null>(null),snapshot=ref<AiMemoryState|null>(null);
