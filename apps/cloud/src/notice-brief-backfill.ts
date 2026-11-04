@@ -29,8 +29,14 @@ export function noticeBriefBackfill(pool:SqlPool,options:Options){
  async function defer(){await pool.query('UPDATE campus_notice_brief_backfill SET available_at=$2,updated_at=$3 WHERE store_scope=$1',[scope,tomorrow(now()),iso(now())]);}
  async function due(){
   if(!options.enabled()||!await options.capacity())return false;
-  const row=await state();if(Date.parse(row.available_at)>now())return false;
+  const row=await state();
   if(row.scanned>=scanLimit||row.article_reads>=options.readLimit){await defer();return false;}
+  // A previous, smaller read allowance may have deferred unfinished history.
+  // Preserve the cursor and daily counters when the new allowance permits work.
+  if(Date.parse(row.available_at)>now()){
+   if(!row.cursor_id)return false;
+   await pool.query('UPDATE campus_notice_brief_backfill SET available_at=$2 WHERE store_scope=$1 AND cursor_id<>\'\' AND scanned<$3 AND article_reads<$4',[scope,iso(now()),scanLimit,options.readLimit]);
+  }
   return true;
  }
  async function run(deadline:number){

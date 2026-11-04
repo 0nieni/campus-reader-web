@@ -13,7 +13,7 @@ const year=365*86400000;
 interface Options {
  scope:string;enabled():boolean;model():{connection:Connection;endpoint:string}|null;
  complete(connection:Connection,guide:string,content:string,maxTokens:number,endpoint:string):Promise<CompletionResult>;
- now?:()=>number;dailyCalls?:number;dailyTokens?:number;dispatch?:()=>Promise<void>;article?:BriefArticleReader;
+ now?:()=>number;dailyCalls?:number;dailyTokens?:number;dailyArticleReads?:number;dispatch?:()=>Promise<void>;article?:BriefArticleReader;
 }
 export function noticeBriefJobs(pool:SqlPool,options:Options){
  const now=options.now||Date.now,scope=options.scope,callLimit=Math.min(100,Math.max(0,options.dailyCalls??100)),tokenLimit=Math.min(10000000,Math.max(0,options.dailyTokens??1000000));
@@ -34,12 +34,14 @@ export function noticeBriefJobs(pool:SqlPool,options:Options){
  // Fingerprints and task IDs use the same canonical article; appended archive
  // attachment text stays outside that fingerprint and never enters the model.
  const matches=(value:Awaited<ReturnType<typeof current>>,job:Row)=>{if(!value||value.signature!==job.signature)return false;const body=canonicalBriefBody(value.item.contentText!),tail=body.slice(job.raw_length);return body.length>=job.raw_length&&hash(body.slice(0,job.raw_length))===job.raw_hash&&(!tail||tail.startsWith('\n## 附件：'));};
- const backfill=options.article?noticeBriefBackfill(pool,{scope,now,readLimit:callLimit,article:options.article,enabled:()=>options.enabled()&&Boolean(options.model()),
+ // A small model verification budget must not stop at the first failed pages.
+ const readLimit=Math.min(100,Math.max(0,options.dailyArticleReads??100));
+ const backfill=options.article?noticeBriefBackfill(pool,{scope,now,readLimit,article:options.article,enabled:()=>options.enabled()&&Boolean(options.model()),
   capacity:async()=>{
    if(!callLimit||!tokenLimit)return false;
    const budget=(await pool.query('SELECT * FROM campus_notice_brief_budget WHERE store_scope=$1 AND day=$2',[scope,day(now())])).rows[0];
    if(budget&&(budget.attempts>=callLimit||Number(budget.held_tokens)+Number(budget.used_tokens)>=tokenLimit))return false;
-   return Number((await pool.query("SELECT count(*) AS count FROM campus_notice_briefs WHERE store_scope=$1 AND state IN ('pending','running') AND expires_at>$2",[scope,iso(now())])).rows[0].count)<200;
+   return Number((await pool.query("SELECT count(*) AS count FROM campus_notice_briefs WHERE store_scope=$1 AND state IN ('pending','running') AND expires_at>$2",[scope,iso(now())])).rows[0].count)<Math.min(200,callLimit-Number(budget?.attempts||0));
   },eligible:async(id,school)=>(await current(pool,id,school,false,false))?.item||null,
   known:async(row,school)=>{const value=await current(pool,row._id,school);if(!value)return false;return(await pool.query('SELECT * FROM campus_notice_briefs WHERE store_scope=$1 AND item_id=$2 ORDER BY created_at DESC LIMIT 8',[scope,row._id])).rows.some(job=>matches(value,job)&&Date.parse(job.expires_at)>now());},enqueue}):null;
  async function enqueue(row:ItemRow,school:string,body:string){
