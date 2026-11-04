@@ -41,3 +41,12 @@ test('official dotted dates and an unambiguous calendar year in the same evidenc
  const ambiguous=prepareBrief('2025年9月22日发送第一轮通知，2026年9月22日发送第二轮通知，9月24日上午8:00发送待录取通知。');
  const altered=JSON.parse(value('2026'));altered.keyDates[0].evidence[0].paragraphId='p0001';assert.throws(()=>validateBrief(JSON.stringify(altered),ambiguous),{code:'BRIEF_EVIDENCE'});
 });
+
+test('calendar parsing preserves spaces separating numeric dates and clocks without accepting numeric prefixes',()=>{
+ for(const line of ['报名截止2026-11-05 17:00','报名截止2026.11.05 17:00','报名截止2026 年 11 月 05 日 17:00']){
+  const p=prepareBrief(line),result={keyDates:[{label:'报名截止',kind:'deadline',rawText:line,end:{value:'2026-11-05T17:00:00+08:00',precision:'minute'},evidence:proof('p0001',line)}],requirements:[]};
+  assert.doesNotThrow(()=>validateBrief(JSON.stringify(result),p));
+ }
+ const p=prepareBrief('报名编号2026-11-0517:00，未公布截止时间。');
+ assert.throws(()=>validateBrief(JSON.stringify({keyDates:[{label:'报名',kind:'deadline',rawText:p.body,end:{value:'2026-11-05T17:00:00+08:00',precision:'minute'},evidence:proof('p0001',p.body)}],requirements:[]}),p),{code:'BRIEF_EVIDENCE'});
+});
