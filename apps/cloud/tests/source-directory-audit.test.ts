@@ -4,13 +4,21 @@ import {fileURLToPath} from 'node:url';
 import {NetlifyDB} from '@netlify/database-dev';
 import {getDatabase} from '@netlify/database';
 import type {SqlPool} from '../src/postgres-storage';
-import {sourceDirectoryAudit,auditHttp,SOURCE_AUDIT_RUN} from '../src/source-directory-audit';
+import {sourceDirectoryAudit,auditHttp,sourceAuditKey,SOURCE_AUDIT_RUN} from '../src/source-directory-audit';
 import {publicSources} from '../src/public-sources';
 import {postgresRepository} from '../src/postgres-repository';
 import {schoolDirectory} from '../src/school-directory';
 import {AppError} from '../src/errors';
 
 const at=Date.parse('2026-11-04T12:00:00Z'),key='x'.repeat(43);
+test('Node Functions process environment authenticates when the optional Netlify global is absent',async()=>{
+ const name='SOURCE_DIRECTORY_AUDIT_KEY_20261104',old=process.env[name],global=globalThis as typeof globalThis&{Netlify?:unknown},oldGlobal=global.Netlify;
+ try{Reflect.deleteProperty(global,'Netlify');process.env[name]=key;
+  const handler=auditHttp({key:sourceAuditKey,production:()=>true,now:()=>at,run:async()=>({state:'ready'})});
+  const response=await handler(new Request('https://example.netlify.app/audit',{method:'POST',headers:{'content-type':'application/json','x-source-audit-key':key},body:JSON.stringify({target:'competition_001'})}));
+  assert.equal(response.status,200);
+ }finally{if(old===undefined)delete process.env[name];else process.env[name]=old;if(oldGlobal===undefined)Reflect.deleteProperty(global,'Netlify');else global.Netlify=oldGlobal;}
+});
 test('maintenance authentication, production, expiry and exact request scope are checked before collection',async()=>{
  let calls=0;
  const handler=auditHttp({key:()=>key,production:()=>true,now:()=>at,run:async()=>{calls++;return{state:'ready'};}});

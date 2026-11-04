@@ -6,12 +6,12 @@ import {readLexmountPage} from '../../apps/cloud/src/lexmount-pages';
 import {schoolDirectory} from '../../apps/cloud/src/school-directory';
 import {websiteSources} from '../../apps/cloud/src/website-sources';
 import {publicSources} from '../../apps/cloud/src/public-sources';
-import {sourceDirectoryAudit,auditHttp} from '../../apps/cloud/src/source-directory-audit';
+import {sourceDirectoryAudit,auditHttp,sourceAuditKey} from '../../apps/cloud/src/source-directory-audit';
 
 // No configuration value is bundled. The temporary Functions-only key is
 // provisioned for the authorized run and removed after it; the endpoint expires.
 export default auditHttp({
- key:()=>typeof Netlify==='undefined'?undefined:Netlify.env.get('SOURCE_DIRECTORY_AUDIT_KEY_20261104'),
+ key:sourceAuditKey,
  production:()=>getContext().deploy.context==='production',
  async run(target){
   const pool=getDatabase().pool as unknown as SqlPool,repo=postgresRepository(pool);
