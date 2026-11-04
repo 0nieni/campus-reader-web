@@ -35,6 +35,26 @@ test('history backfill uses durable local SQL and the existing independent model
    await reset();for(const id of ['a','b','c'])await put(id);for(let day=0;day<3;day++){const jobs=noticeBriefJobs(pool,options({dailyCalls:1}));await jobs.run();assert.equal(calls,day+1);assert.equal(reads,day+1);assert.equal((await jobs.run()).more,false);assert.equal(calls,day+1);clock+=86400000;}
    await noticeBriefJobs(pool,options({dailyCalls:1})).run();assert.equal(calls,3);assert.equal(reads,3);assert.equal((await pool.query("SELECT sum(attempts) AS attempts FROM campus_notice_brief_budget")).rows[0].attempts,'3');
   });
+  await t.test('a two-call verification budget can skip unavailable articles before finding two usable ones',async()=>{
+   await reset();for(const id of ['a-fails','b-fails','c-ready','d-ready','e-next'])await put(id);
+   const jobs=noticeBriefJobs(pool,options({dailyCalls:2,article:async(row:ItemRow)=>{if(row._id.endsWith('fails')){reads++;throw Error('Synthetic unavailable page');}return article(row);}}));
+   await jobs.run();assert.equal(reads,4);assert.equal(calls,2);assert.equal((await jobs.run()).more,false);
+   assert.equal((await pool.query('SELECT attempts FROM campus_notice_brief_budget')).rows[0].attempts,2);
+  });
+  await t.test('an unfinished checkpoint deferred by a smaller read cap resumes without resetting its counters',async()=>{
+   await reset();for(const id of ['a','b','c','d'])await put(id);
+   await pool.query("INSERT INTO campus_notice_brief_backfill(store_scope,budget_day,cursor_id,scanned,article_reads,available_at) VALUES('history','2026-10-30','b',2,2,'2026-10-30T16:00:00Z')");
+   await noticeBriefJobs(pool,options({dailyCalls:2})).run();assert.equal(reads,2);assert.equal(calls,2);
+   const checkpoint=(await pool.query('SELECT scanned,article_reads FROM campus_notice_brief_backfill')).rows[0];assert.equal(checkpoint.scanned,4);assert.equal(checkpoint.article_reads,4);
+  });
+  await t.test('raising the model budget continues the same day without resetting billed attempts',async()=>{
+   await reset();for(const id of ['a','b','c'])await put(id);
+   await noticeBriefJobs(pool,options({dailyCalls:2})).run();assert.equal(calls,2);
+   await noticeBriefJobs(pool,options({dailyCalls:100})).run();assert.equal(calls,3);assert.equal(reads,3);
+   assert.equal((await pool.query('SELECT attempts FROM campus_notice_brief_budget')).rows[0].attempts,3);
+   const checkpoint=(await pool.query('SELECT cursor_id FROM campus_notice_brief_backfill')).rows[0];assert.equal(checkpoint.cursor_id,'');
+   await noticeBriefJobs(pool,options({dailyCalls:100})).run();assert.equal(reads,3,'A completed cycle must stay deferred until tomorrow');
+  });
   await t.test('permission is rechecked after article retrieval and uncertain results never auto-resend on later cycles',async()=>{
    await reset();await put('a-revoked');const revoked=noticeBriefJobs(pool,options({article:async(row:ItemRow)=>{await article(row);await db.collection('sources').doc('source-school-a').update({allowAi:false});return text;}}));await revoked.run();assert.equal(reads,1);assert.equal(calls,0);assert.equal((await pool.query('SELECT * FROM campus_notice_briefs')).rows.length,0);
    await reset();await put('a-uncertain');const opts=options({complete:async()=>{calls++;throw Object.assign(Error('Synthetic interruption'),{code:'MODEL_UNCERTAIN'});}});await noticeBriefJobs(pool,opts).run();clock+=86400000;await noticeBriefJobs(pool,opts).run();assert.equal(reads,1);assert.equal(calls,1);assert.equal((await pool.query('SELECT state FROM campus_notice_briefs')).rows[0].state,'uncertain');
@@ -50,7 +70,7 @@ test('history backfill uses durable local SQL and the existing independent model
    const jobs=noticeBriefJobs(pool,options());assert.equal((await jobs.run()).more,true);assert.equal((await pool.query('SELECT scanned FROM campus_notice_brief_backfill')).rows[0].scanned,500);assert.equal((await noticeBriefJobs(pool,options()).run()).more,false);assert.equal((await pool.query('SELECT scanned FROM campus_notice_brief_backfill')).rows[0].scanned,600);assert.equal(reads,0);assert.equal(calls,0);
   });
   await t.test('article failures have a daily read cap and do not create an empty dispatch loop',async()=>{
-   await reset();await put('a-fails');await put('b-fails');const jobs=noticeBriefJobs(pool,options({dailyCalls:1,article:async()=>{reads++;throw Error('Synthetic unavailable page');}}));await jobs.run();assert.equal(reads,1);assert.equal(calls,0);const before=dispatches;assert.equal((await jobs.run()).more,false);await jobs.wake();assert.equal(dispatches,before);assert.equal(reads,1);clock+=86400000;await jobs.run();assert.equal(reads,2);
+   await reset();await put('a-fails');await put('b-fails');const jobs=noticeBriefJobs(pool,options({dailyCalls:1,dailyArticleReads:1,article:async()=>{reads++;throw Error('Synthetic unavailable page');}}));await jobs.run();assert.equal(reads,1);assert.equal(calls,0);const before=dispatches;assert.equal((await jobs.run()).more,false);await jobs.wake();assert.equal(dispatches,before);assert.equal(reads,1);clock+=86400000;await jobs.run();assert.equal(reads,2);
   });
   await t.test('concurrent workers share the history lease and do not duplicate model work',async()=>{
    await reset();await put('a-concurrent');let release!:()=>void;const blocked=new Promise<void>(resolve=>{release=resolve;}),jobs=noticeBriefJobs(pool,options({article:async(row:ItemRow)=>{await blocked;return article(row);}}));const first=jobs.run();for(let i=0;i<100;i++){if((await pool.query('SELECT lease_id FROM campus_notice_brief_workers')).rows[0]?.lease_id)break;await new Promise(resolve=>setTimeout(resolve,5));}assert.equal((await jobs.run()).processed,0);release();await first;assert.equal(reads,1);assert.equal(calls,1);
