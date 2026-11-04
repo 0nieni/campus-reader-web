@@ -15,5 +15,9 @@ export function webSearchAllowed(question: string): boolean {
 export function automaticSearchQuery(question: string, schoolName: string): string | null {
   if (!webSearchAllowed(question)) return null;
   const topic = question.replace(/[\x00-\x1f\x7f]/g, ' ').replace(/\s+/g, ' ').trim();
-  return topic ? Array.from(`${schoolName.trim()} ${topic}`).slice(0, 128).join('') : null;
+  const otherSchools = /(?:其他|别的|各个|所有|全国|全球|全世界)(?:的)?学校|外校|校外/.test(topic);
+  const campus = /本校|我校|学校|校内/.test(topic) && !otherSchools;
+  const school = schoolName.trim();
+  const query = campus && school && !topic.includes(school) ? `${school} ${topic}` : topic;
+  return topic ? Array.from(query).slice(0, 128).join('') : null;
 }

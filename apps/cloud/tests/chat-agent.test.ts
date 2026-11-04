@@ -46,7 +46,7 @@ test('every online question searches the current question before any model reque
   const f = setup(async () => ({ text: '你好。', calls: [] }));
   const c = await f.create(); const start = await f.send(c.id, '你好，最近有什么比赛吗，报名通知和学科竞赛都看看');
   const turn = await f.step(c.id, start);
-  assert.deepEqual(f.searches, ['bjtu 你好，最近有什么比赛吗，报名通知和学科竞赛都看看']);
+  assert.deepEqual(f.searches, ['你好，最近有什么比赛吗，报名通知和学科竞赛都看看']);
   assert.equal(f.requests.length, 0); assert.equal(turn.search?.state, 'complete');
   await f.step(c.id, start); assert.equal(f.searches.length, 1, 'the initial search cannot be replayed');
 });
@@ -64,7 +64,7 @@ test('initial search leads reach the first model as data, without a fabricated p
 test('capability questions also take the default search path instead of bypassing the task', async () => {
   const f = setup(), c = await f.create(); let turn = await f.send(c.id, '你能联网吗');
   assert.equal(turn.state, 'ready'); turn = await f.step(c.id, turn);
-  assert.deepEqual(f.searches, ['bjtu 你能联网吗']); assert.equal(f.requests.length, 0);
+  assert.deepEqual(f.searches, ['你能联网吗']); assert.equal(f.requests.length, 0);
 });
 
 test('no selected notice can run automatic search → chosen read → cited answer, with one external action per step and one quota charge', async () => {
@@ -105,7 +105,7 @@ test('the production recent-competition question is searched directly, then read
   f.repo.school = async id => { const row = await school(id); return row ? { ...row, name: '北京交通大学' } : null; };
   const c = await f.create(); let turn = await f.send(c.id, '最近有什么比赛吗');
   for (let i = 0; i < 6 && turn.state === 'ready'; i++) turn = await f.step(c.id, turn);
-  assert.deepEqual(f.searches, ['北京交通大学 最近有什么比赛吗']); assert.deepEqual(f.reads, [url]);
+  assert.deepEqual(f.searches, ['最近有什么比赛吗']); assert.deepEqual(f.reads, [url]);
   assert.equal(turn.state, 'complete'); assert.equal(turn.search?.state, 'complete');
   assert.equal(turn.search?.readableCount, 1); assert.equal(turn.references[0].originalUrl, url);
   assert.match(turn.result!, /R1/); assert.doesNotMatch(turn.result!, /尚未请求/);
@@ -118,7 +118,7 @@ test('model-authored private words cannot alter the direct current-question sear
     : { text: '无正文。', calls: [] });
   const c = await f.create(); let turn = await f.send(c.id, '最近有什么比赛吗');
   for (let i = 0; i < 4 && turn.state === 'ready'; i++) turn = await f.step(c.id, turn);
-  assert.deepEqual(f.searches, ['bjtu 最近有什么比赛吗']); assert.equal(f.reads.length, 0);
+  assert.deepEqual(f.searches, ['最近有什么比赛吗']); assert.equal(f.reads.length, 0);
   assert.equal(turn.search?.state, 'complete');
   assert.match(f.requests.at(-1).exchanges[0].results[0], /复用/); assert.doesNotMatch(turn.result!, /尚未请求|校验/);
 });
@@ -137,7 +137,7 @@ test('a model-invented URL and private query never reach the network', async () 
   const f = setup(async index => index === 0 ? { text: '', calls: [{ ...readCall, arguments: { url: 'https://127.0.0.1/admin' } }, { ...searchCall, arguments: { query: '我的秘密公司' } }] } : { text: '没有取得可核实资料。', calls: [] });
   const c = await f.create(); let turn = await f.send(c.id);
   for (let i = 0; i < 6 && turn.state === 'ready'; i++) turn = await f.step(c.id, turn);
-  assert.deepEqual(f.searches, ['bjtu 介绍最新 TypeScript 教程']); assert.equal(f.reads.length, 0);
+  assert.deepEqual(f.searches, ['介绍最新 TypeScript 教程']); assert.equal(f.reads.length, 0);
   assert.equal(turn.state, 'complete'); assert.match(f.requests.at(-1).exchanges[0].results.join(' '), /公开|候选/);
 });
 
