@@ -4,6 +4,20 @@ import { fixtureDb, identity } from './feature-fixture';
 import { aiService } from '../src/ai-service';
 import { assistantService } from '../src/assistant-service';
 import * as helpers from '../src/chat-intent';
+import { publicToolQuery } from '../src/chat-web-tools';
+
+test('current Beijing calendar dates stay intact in public queries, including the production rejected year', () => {
+  const now = Date.parse('2026-11-03T23:30:00Z');
+  for (const date of ['2026年', '2026年11月', '2026年11月4日', '2026-11-04']) {
+    const query = `北京交通大学 ${date} 竞赛 通知`;
+    assert.equal(publicToolQuery('最近有什么比赛吗', query, '北京交通大学', now), query);
+  }
+  assert.equal(publicToolQuery('最近有什么比赛吗', '北京交通大学 2027年 竞赛', '北京交通大学', now), null);
+  assert.equal(publicToolQuery('最近有什么比赛吗', '北京交通大学 2026年11月5日 竞赛', '北京交通大学', now), null);
+  assert.equal(publicToolQuery('最近有什么比赛吗', '北京交通大学 2026年 私人单位 竞赛', '北京交通大学', now), null);
+  const newYear = Date.parse('2026-12-31T16:30:00Z');
+  assert.equal(publicToolQuery('最近有什么比赛吗', '北京交通大学 2027年 竞赛', '北京交通大学', newYear), '北京交通大学 2027年 竞赛');
+});
 
 test('agent search discovers leads without reading; only a chosen candidate is fetched through existing policy', async () => {
   const f = fixtureDb(), reads: string[] = [];

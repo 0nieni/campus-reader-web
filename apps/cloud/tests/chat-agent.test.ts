@@ -65,6 +65,43 @@ test('ordinary reply may finish without searching and no-network questions do no
   assert.deepEqual(turn.references, []);
 });
 
+test('the production recent-competition question searches with a Chinese year, reads and cites', async () => {
+  const year = new Date(Date.now() + 8 * 3600000).getUTCFullYear();
+  const query = `北京交通大学 ${year}年 竞赛 通知`;
+  const f = setup(async index => index === 0 ? { text: '', calls: [{ ...searchCall, arguments: { query } }] }
+    : index === 1 ? { text: '', calls: [readCall] } : { text: `比赛报名说明。[R1](${url})`, calls: [] });
+  const school = f.repo.school;
+  f.repo.school = async id => { const row = await school(id); return row ? { ...row, name: '北京交通大学' } : null; };
+  const c = await f.create(); let turn = await f.send(c.id, '最近有什么比赛吗');
+  for (let i = 0; i < 6 && turn.state === 'ready'; i++) turn = await f.step(c.id, turn);
+  assert.deepEqual(f.searches, [query]); assert.deepEqual(f.reads, [url]);
+  assert.equal(turn.state, 'complete'); assert.equal(turn.search?.state, 'complete');
+  assert.equal(turn.search?.readableCount, 1); assert.equal(turn.references[0].originalUrl, url);
+  assert.match(turn.result!, /R1/); assert.doesNotMatch(turn.result!, /尚未请求/);
+  const quota = (await f.ai.handle('ai.status', {}, identity)).quota;
+  assert.equal(quota.used, 1); assert.equal(quota.held, 0);
+});
+
+test('a rejected query reports the validation refusal instead of claiming no tool was requested', async () => {
+  const f = setup(async index => index === 0 ? { text: '', calls: [{ ...searchCall, arguments: { query: '历史中的秘密公司' } }] }
+    : { text: '无正文。', calls: [] });
+  const c = await f.create(); let turn = await f.send(c.id, '最近有什么比赛吗');
+  for (let i = 0; i < 4 && turn.state === 'ready'; i++) turn = await f.step(c.id, turn);
+  assert.equal(f.searches.length, 0); assert.equal(f.reads.length, 0);
+  assert.equal(turn.search?.state, 'failed'); assert.equal(turn.search?.code, 'invalid_scope');
+  assert.match(turn.result!, /搜索词.*校验.*未发送/); assert.doesNotMatch(turn.result!, /尚未请求/);
+});
+
+test('a refused second query preserves the actual first search and its readable candidates', async () => {
+  const f = setup(async index => index === 0 ? { text: '', calls: [searchCall, { ...searchCall, id: 'search_bad', arguments: { query: '我的秘密公司' } }] }
+    : index === 1 ? { text: '', calls: [readCall] } : { text: `教程正文。[R1](${url})`, calls: [] });
+  const c = await f.create(); let turn = await f.send(c.id);
+  for (let i = 0; i < 7 && turn.state === 'ready'; i++) turn = await f.step(c.id, turn);
+  assert.equal(f.searches.length, 1); assert.deepEqual(f.reads, [url]);
+  assert.equal(turn.search?.state, 'complete'); assert.equal(turn.search?.readableCount, 1);
+  assert.match(f.requests.at(-1).exchanges[0].results[1], /校验.*未发送/);
+});
+
 test('a model-invented URL and private query never reach the network', async () => {
   const f = setup(async index => index === 0 ? { text: '', calls: [{ ...readCall, arguments: { url: 'https://127.0.0.1/admin' } }, { ...searchCall, arguments: { query: '我的秘密公司' } }] } : { text: '没有取得可核实资料。', calls: [] });
   const c = await f.create(); let turn = await f.send(c.id);
