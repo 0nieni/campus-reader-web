@@ -5,7 +5,7 @@ import {AppError} from './errors';
 export const BRIEF_SCHEMA='notice-brief-v1',BRIEF_PROMPT='evidence-v2',BRIEF_PARSER='paragraphs-v3';
 export const briefHash=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const norm=(text:string)=>text.normalize('NFKC').replace(/\s+/g,'');
-const calendarText=(text:string)=>text.normalize('NFKC').replace(/\s+/g,' ');
+const calendarText=(text:string)=>text.normalize('NFKC').replace(/\s+/g,' ').replace(/\d(?:\s+\d)+(?=\s*[年月日/.-])/g,value=>value.replace(/\s/g,''));
 export interface BriefParagraph {id:string;text:string}
 export interface PreparedBrief {body:string;paragraphs:BriefParagraph[];contentHash:string}
 export const canonicalBriefBody=(text:string)=>text.replace(/\r/g,'').replace(/[\u200b\ufeff]/g,'').split(/\n+/).map(line=>line.trim()).filter(Boolean).join('\n');
@@ -34,7 +34,7 @@ export function briefPublicationDay(value:string|undefined){if(!value)return und
  * used for a month/day that has no year. Examination-title years are not used. */
 function dateExpressions(quote:string,publishedYear?:string){
  const text=calendarText(quote),dates:{value:string;end:number}[]=[];let year=publishedYear;
- const expression=/(?<!\d)(?:(\d{4})\s*[年/.-]\s*)?(\d{1,2})\s*[月/.-]\s*(\d{1,2})(?:\s*日)?(?!\d)/g;
+ const expression=/(?<!\d)(?<!\d\s)(?:(\d{4})\s*[年/.-]\s*)?(\d{1,2})\s*[月/.-]\s*(\d{1,2})(?:\s*日|(?=\s+\d(?:\s*\d)?\s*[:时点])|(?!\s*\d))/g;
  for(const match of text.matchAll(expression)){if(match[1])year=match[1];if(year){const value=`${year}-${match[2]!.padStart(2,'0')}-${match[3]!.padStart(2,'0')}`;if(validDate(value))dates.push({value,end:match.index!+match[0].length});}}
  return{text,dates};
 }
@@ -73,8 +73,9 @@ export function validateBrief(output:string,prepared:PreparedBrief,publishedAt?:
   for(let at=compact.indexOf(target);at>=0;at=compact.indexOf(target,at+1)){
    const start=positions[at]!,end=positions[at+target.length-1]!+1;
    const before=paragraph.slice(0,start),after=paragraph.slice(end);
-   const joinedBefore=/\d/.test(target[0]!)&&(/\d$/.test(before)||/\d\s+$/.test(before)&&!endsInDate(before.trimEnd()));
-   const joinedAfter=/\d/.test(target.at(-1)!)&&(/^\d/.test(after)||/^\s+\d/.test(after)&&!endsInDate(paragraph.slice(0,end)));
+   const clockStarts=(value:string)=>/^\d(?:\s*\d)?\s*[:时点]/.test(value);
+   const joinedBefore=/\d/.test(target[0]!)&&(/\d$/.test(before)||/\d\s+$/.test(before)&&!(endsInDate(before.trimEnd())&&clockStarts(paragraph.slice(start))));
+   const joinedAfter=/\d/.test(target.at(-1)!)&&(/^\d/.test(after)||/^\s+\d/.test(after)&&!(endsInDate(paragraph.slice(0,end))&&clockStarts(after.trimStart())));
    if(joinedBefore||joinedAfter)continue;
    return{text:paragraph.slice(start,end),prefix:paragraph.slice(0,start)};
   }

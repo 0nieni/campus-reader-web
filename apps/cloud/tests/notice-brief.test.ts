@@ -88,7 +88,17 @@ test('a date-only quote may end before the following source clock',()=>{
  assert.doesNotThrow(()=>validateBrief(JSON.stringify({keyDates:[{label:'报名截止',kind:'deadline',rawText:'2026-11-05',end:{value:'2026-11-05',precision:'date'},evidence:proof('p0001','2026-11-05')}],requirements:[]}),p));
 });
 test('spaces within source clock digits cannot silently become zero minutes',()=>{
- const p=prepareBrief('报名截止2026年11月5日17:0 5。');
+ for(const line of ['报名截止2026年11月5日17:0 5。','报名截止2026-11-05 1 7:0 5。']){
+ const p=prepareBrief(line);
  const output=(minute:string)=>JSON.stringify({keyDates:[{label:'报名截止',kind:'deadline',rawText:'2026年11月5日17:05',end:{value:'2026-11-05T17:'+minute+':00+08:00',precision:'minute'},evidence:proof('p0001',p.body)}],requirements:[]});
  assert.doesNotThrow(()=>validateBrief(output('05'),p));assert.throws(()=>validateBrief(output('00'),p),{code:'BRIEF_EVIDENCE'});
+ }
+});
+test('fragmented calendar digits never become a partial day',()=>{
+ const p=prepareBrief('报名截止2026年11月1 5日。');
+ const output=(day:string)=>JSON.stringify({keyDates:[{label:'报名截止',kind:'deadline',rawText:p.body,end:{value:'2026-11-'+day,precision:'date'},evidence:proof('p0001',p.body)}],requirements:[]});
+ assert.doesNotThrow(()=>validateBrief(output('15'),p));assert.throws(()=>validateBrief(output('01'),p),{code:'BRIEF_EVIDENCE'});
+ const partial=JSON.parse(output('01'));partial.keyDates[0].rawText='2026年11月1';partial.keyDates[0].evidence=proof('p0001','2026年11月1');assert.throws(()=>validateBrief(JSON.stringify(partial),p),{code:'BRIEF_EVIDENCE'});
+ const ambiguous=prepareBrief('报名截止2026-11-1 5。'),shortened=JSON.parse(output('01'));shortened.keyDates[0].rawText=ambiguous.body;shortened.keyDates[0].evidence=proof('p0001',ambiguous.body);
+ assert.throws(()=>validateBrief(JSON.stringify(shortened),ambiguous),{code:'BRIEF_EVIDENCE'});
 });
