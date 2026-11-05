@@ -4,6 +4,7 @@ import type {School,SchoolSourceCatalogue} from '@campus/contracts';
 import type {Transport} from '../lib/transport';
 import {safeError,ClientError} from '../lib/errors';
 import {displaySourceTime,safeOriginal,sourceDiagnosis} from '../lib/presentation';
+import {schoolsForDisplay} from '../lib/schools';
 const props=defineProps<{transport:Transport;schoolId:string|null;schoolName:string;revision?:number;openSchool?:(schoolId:string,source?:{id:string;name:string})=>Promise<void>}>();
 const emit=defineEmits<{changed:[kind?:'visibility'];busy:[value:boolean]}>();
 const schools=ref<School[]>([]),query=ref(''),browsing=ref(props.schoolId||'');
@@ -44,7 +45,7 @@ async function loadSchools(){
       rows.push(...page.schools);cursor=page.nextCursor;
       if(cursor&&seen.has(cursor))throw new Error('学校目录分页异常，请重试。');
       if(cursor)seen.add(cursor);
-      schools.value=rows.filter((row,index)=>rows.findIndex(s=>s.id===row.id)===index);
+      schools.value=schoolsForDisplay(rows.filter((row,index)=>rows.findIndex(s=>s.id===row.id)===index));
     }while(cursor);
     if(!browsing.value&&rows[0])void browse(rows[0].id);
   }catch(caught){if(active)listError.value=safeError(caught);}

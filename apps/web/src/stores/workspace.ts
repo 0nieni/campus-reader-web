@@ -12,6 +12,7 @@ import type {
 import type { Transport } from "../lib/transport";
 import { noticeCategories } from '@campus/contracts';
 import { ClientError, safeError } from "../lib/errors";
+import { schoolsForDisplay } from '../lib/schools';
 
 /** Dependency injection is for regression tests; the application only installs the real transport. */
 export function workspaceStore(transport: Transport) {
@@ -132,7 +133,7 @@ export function workspaceStore(transport: Transport) {
         more && schoolCursor.value ? { cursor: schoolCursor.value } : {},
       );
       if (ticket !== sessionEpoch) return;
-      schools.value = more ? [...schools.value, ...page.schools] : page.schools;
+      schools.value = schoolsForDisplay(more ? [...schools.value, ...page.schools] : page.schools);
       schoolCursor.value = page.nextCursor;
       catalogueReady.value=!page.nextCursor;
     }
